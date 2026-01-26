@@ -668,6 +668,7 @@ export default function Inventory() {
 
   // Filter items based on search and filters
   const filteredItems = items.filter((item) => {
+    // Search filter
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
       if (
@@ -679,10 +680,30 @@ export default function Inventory() {
       }
     }
 
-    if (selectedCategory && item.categoryId !== selectedCategory) {
-      return false;
+    // Category filter - only apply if a category is selected (not "All Categories")
+    if (selectedCategory !== undefined && selectedCategory !== null) {
+      // Find the selected category name from categories array
+      const selectedCategoryData = categories.find(cat => cat.id === selectedCategory);
+      const selectedCategoryName = selectedCategoryData?.name;
+      
+      if (selectedCategoryName) {
+        // Match by categoryName (case-insensitive)
+        const itemCategoryName = (item.categoryName || '').toLowerCase().trim();
+        const matchCategoryName = selectedCategoryName.toLowerCase().trim();
+        
+        if (itemCategoryName !== matchCategoryName) {
+          return false;
+        }
+      } else {
+        // Fallback: try to match by categoryId if category name not found
+        const itemCategoryId = item.categoryId !== undefined ? Number(item.categoryId) : null;
+        if (itemCategoryId === null || itemCategoryId !== Number(selectedCategory)) {
+          return false;
+        }
+      }
     }
 
+    // Low stock filter
     if (showLowStock && !item.isLowStock) {
       return false;
     }
@@ -933,12 +954,17 @@ export default function Inventory() {
                     />
                   </div>
                   <Select
-                    value={selectedCategory?.toString() || "all"}
-                    onValueChange={(value) =>
-                      setSelectedCategory(
-                        value === "all" ? undefined : parseInt(value),
-                      )
-                    }
+                    value={selectedCategory !== undefined ? selectedCategory.toString() : "all"}
+                    onValueChange={(value) => {
+                      if (value === "all") {
+                        setSelectedCategory(undefined);
+                      } else {
+                        const categoryId = parseInt(value, 10);
+                        if (!isNaN(categoryId)) {
+                          setSelectedCategory(categoryId);
+                        }
+                      }
+                    }}
                   >
                     <SelectTrigger className="w-48">
                       <SelectValue placeholder="Filter by category" />
