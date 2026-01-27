@@ -234,19 +234,22 @@ export function Sidebar() {
   const isDoctorUser = user && isDoctorLike(user.role);
 
   const filteredAdminNavigation = ADMIN_NAVIGATION.filter((item) => {
-    if (item.module === "user_management") {
-      const normalizedRole = currentRole?.toLowerCase() ?? "";
-      if (normalizedRole !== "admin" && normalizedRole !== "administrator") {
-        return false;
-      }
-    }
-    
     // STRICT: Only show modules after auth and permissions are fully loaded from DB
     if (!isRoleDataReady || !user) {
       return false;
     }
 
-    // Even for admin role, check permissions from database to respect role edits
+    // Special handling for user_management: Always show for admin/administrator role
+    // This ensures trial admin users can always see User Management regardless of stored permissions
+    if (item.module === "user_management") {
+      const normalizedRole = currentRole?.toLowerCase() ?? "";
+      if (normalizedRole === "admin" || normalizedRole === "administrator") {
+        return true; // Always show for admin users
+      }
+      return false; // Hide for non-admin users
+    }
+
+    // For other admin modules, check permissions from database to respect role edits
     // This allows Admin to see the sidebar update when they edit Admin role permissions
     // Backend will still allow admin to access everything, but sidebar visibility respects permissions
     return canAccess(item.module);
