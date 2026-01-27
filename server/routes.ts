@@ -87,6 +87,63 @@ function enforceCreatedBy<T extends Record<string, any>>(
 }
 
 /**
+ * Helper function to ensure directory exists, creates it if it doesn't
+ * @param dirPath - The directory path to check/create
+ * @returns Promise<boolean> - true if directory exists or was created, false on error
+ */
+async function ensureDirectoryExists(dirPath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(dirPath);
+    return true; // Directory already exists
+  } catch {
+    try {
+      await fs.promises.mkdir(dirPath, { recursive: true });
+      console.log(`📁 Created directory: ${dirPath}`);
+      return true; // Directory created successfully
+    } catch (error) {
+      console.error(`❌ Failed to create directory ${dirPath}:`, error);
+      return false; // Failed to create directory
+    }
+  }
+}
+
+/**
+ * Helper function to get and ensure anatomical analysis files directory exists
+ * @param organizationId - Organization ID
+ * @param patientId - Patient ID
+ * @returns Promise<string> - The directory path
+ */
+async function ensureAnatomicalAnalysisFilesDirectory(organizationId: number, patientId: number): Promise<string> {
+  const baseDir = path.join(
+    "./uploads",
+    "anatomical_analysis_files",
+    organizationId.toString(),
+    "patients",
+    patientId.toString(),
+    "forms",
+  );
+  await ensureDirectoryExists(baseDir);
+  return baseDir;
+}
+
+/**
+ * Helper function to get and ensure anatomical analysis images directory exists
+ * @param organizationId - Organization ID
+ * @param patientId - Patient ID
+ * @returns Promise<string> - The directory path
+ */
+async function ensureAnatomicalAnalysisImagesDirectory(organizationId: number, patientId: number): Promise<string> {
+  const baseDir = path.join(
+    "./uploads",
+    "anatomical_analysis_img",
+    organizationId.toString(),
+    patientId.toString(),
+  );
+  await ensureDirectoryExists(baseDir);
+  return baseDir;
+}
+
+/**
  * Helper function to convert unsupported image formats (WebP, GIF, BMP, TIFF, etc.) to JPEG
  * PDF libraries typically only support JPEG and PNG
  * @param imageBuffer - The original image buffer
@@ -15928,14 +15985,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const organizationId = req.tenant!.id;
       const patientId = imageUploadData.patientId;
 
-      // Create directory structure: uploads/anatomical_analysis_img/{organization_id}/{patient_id}/
-      const baseDir = path.join('./uploads', 'anatomical_analysis_img', organizationId.toString(), patientId.toString());
-      
-      // Check if directory exists, if not create it recursively
-      if (!await fs.promises.access(baseDir).then(() => true).catch(() => false)) {
-        await fs.promises.mkdir(baseDir, { recursive: true });
-        console.log(`📁 Created directory: ${baseDir}`);
-      }
+      // Ensure directory structure exists: uploads/anatomical_analysis_img/{organization_id}/{patient_id}/
+      const baseDir = await ensureAnatomicalAnalysisImagesDirectory(organizationId, patientId);
 
       // Define image file path with timestamp: {patient_id}_{timestamp}.png
       const timestamp = Date.now();
@@ -15974,18 +16025,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const organizationId = req.tenant!.id;
-      const baseDir = path.join("./uploads", "anatomical_analysis_img", organizationId.toString(), patientId.toString());
-      const dirExists = await fs.promises.access(baseDir).then(() => true).catch(() => false);
-
-      if (!dirExists) {
-        return res.json({ files: [] });
-      }
+      const baseDir = await ensureAnatomicalAnalysisImagesDirectory(organizationId, patientId);
 
       const filenames = await fs.promises.readdir(baseDir);
       const fileDetails = await Promise.all(
         filenames.map(async (filename) => {
           const filePath = path.join(baseDir, filename);
           const stat = await fs.promises.stat(filePath);
+          // Filter out directories - only include files
+          if (stat.isDirectory()) {
+            return null;
+          }
           return {
             filename,
             uploadedAt: stat.mtime.toISOString(),
@@ -15995,9 +16045,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }),
       );
 
-      fileDetails.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      // Filter out null values (directories)
+      const validFiles = fileDetails.filter((file): file is NonNullable<typeof file> => file !== null);
 
-      res.json({ files: fileDetails });
+      validFiles.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+      res.json({ files: validFiles });
     } catch (error) {
       console.error("Error listing anatomical analysis images:", error);
       handleRouteError(error, "list anatomical analysis images", res);
@@ -16018,18 +16071,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const organizationId = req.tenant!.id;
       const patientId = payload.patientId;
-      const baseDir = path.join(
-        "./uploads",
-        "anatomical_analysis_files",
-        organizationId.toString(),
-        "patients",
-        patientId.toString(),
-        "forms",
-      );
-
-      if (!await fs.promises.access(baseDir).then(() => true).catch(() => false)) {
-        await fs.promises.mkdir(baseDir, { recursive: true });
-      }
+      const baseDir = await ensureAnatomicalAnalysisFilesDirectory(organizationId, patientId);
 
       const timestamp = Date.now();
       const defaultFilename = `${patientId}_anatomical_analysis_${timestamp}.pdf`;
@@ -16072,25 +16114,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const organizationId = req.tenant!.id;
-      const baseDir = path.join(
-        "./uploads",
-        "anatomical_analysis_files",
-        organizationId.toString(),
-        "patients",
-        patientId.toString(),
-        "forms",
-      );
-      const dirExists = await fs.promises.access(baseDir).then(() => true).catch(() => false);
-
-      if (!dirExists) {
-        return res.json({ files: [] });
-      }
+      const baseDir = await ensureAnatomicalAnalysisFilesDirectory(organizationId, patientId);
+      
+      console.log(`[ANATOMICAL FILES] Checking directory: ${baseDir}`);
 
       const filenames = await fs.promises.readdir(baseDir);
       const fileDetails = await Promise.all(
         filenames.map(async (filename) => {
           const filePath = path.join(baseDir, filename);
           const stat = await fs.promises.stat(filePath);
+          // Filter out directories - only include files
+          if (stat.isDirectory()) {
+            return null;
+          }
           return {
             filename,
             uploadedAt: stat.mtime.toISOString(),
@@ -16101,10 +16137,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           };
         }),
       );
+      
+      // Filter out null values (directories)
+      const validFiles = fileDetails.filter((file): file is NonNullable<typeof file> => file !== null);
 
-      fileDetails.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      validFiles.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
 
-      res.json({ files: fileDetails });
+      console.log(`[ANATOMICAL FILES] Found ${validFiles.length} files for patient ${patientId}, org ${organizationId}`);
+      res.json({ files: validFiles });
     } catch (error) {
       console.error("Error listing anatomical analysis files:", error);
       handleRouteError(error, "list anatomical analysis files", res);
