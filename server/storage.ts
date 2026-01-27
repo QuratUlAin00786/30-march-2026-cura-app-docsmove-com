@@ -6571,6 +6571,7 @@ export class DatabaseStorage implements IStorage {
         details: saasSubscriptions.details,
         currentPeriodStart: saasSubscriptions.currentPeriodStart,
         currentPeriodEnd: saasSubscriptions.currentPeriodEnd,
+        expiresAt: saasSubscriptions.expiresAt,
         maxUsers: saasSubscriptions.maxUsers,
         maxPatients: saasSubscriptions.maxPatients,
       })

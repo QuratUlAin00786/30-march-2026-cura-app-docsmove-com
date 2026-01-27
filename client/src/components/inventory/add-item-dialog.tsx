@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, CheckCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -86,12 +86,16 @@ export default function AddItemDialog({ open, onOpenChange }: AddItemDialogProps
       await apiRequest("POST", "/api/inventory/items", itemData);
     },
     onSuccess: () => {
-      setSuccessMessage("Inventory item has been added successfully.");
-      setShowSuccessModal(true);
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/reports/value"] });
-      onOpenChange(false);
       resetForm();
+      // Close the main dialog first
+      onOpenChange(false);
+      // Then show success modal after a short delay to ensure main dialog is closed
+      setTimeout(() => {
+        setSuccessMessage("Item successfully added to inventory");
+        setShowSuccessModal(true);
+      }, 300);
     },
     onError: (error: any) => {
       toast({
@@ -149,14 +153,15 @@ export default function AddItemDialog({ open, onOpenChange }: AddItemDialogProps
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add New Inventory Item</DialogTitle>
-          <DialogDescription>
-            Add a new item to your healthcare inventory. All fields marked with * are required.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add New Inventory Item</DialogTitle>
+            <DialogDescription>
+              Add a new item to your healthcare inventory. All fields marked with * are required.
+            </DialogDescription>
+          </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -447,37 +452,44 @@ export default function AddItemDialog({ open, onOpenChange }: AddItemDialogProps
             {addItemMutation.isPending ? "Adding..." : "Add Item"}
           </Button>
         </DialogFooter>
+        
+        {/* Add Category Dialog */}
+        <AddCategoryDialog 
+          open={showCategoryDialog} 
+          onOpenChange={setShowCategoryDialog} 
+        />
       </DialogContent>
-      
-      {/* Add Category Dialog */}
-      <AddCategoryDialog 
-        open={showCategoryDialog} 
-        onOpenChange={setShowCategoryDialog} 
-      />
-
-      {/* Success Modal */}
-      <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-green-600">Success</DialogTitle>
-          </DialogHeader>
-          
-          <div className="py-4">
-            <p className="text-gray-700">{successMessage}</p>
-          </div>
-
-          <div className="flex justify-end">
-            <Button
-              onClick={() => {
-                setShowSuccessModal(false);
-                setSuccessMessage("");
-              }}
-            >
-              OK
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </Dialog>
+
+    {/* Success Modal - Outside main dialog to ensure it displays */}
+    <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="sr-only">Item Added Successfully</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col items-center justify-center py-6">
+          <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 mb-4">
+            <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+            Item Successfully Added to Inventory
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+            {successMessage}
+          </p>
+          <Button
+            onClick={() => {
+              setShowSuccessModal(false);
+              setSuccessMessage("");
+            }}
+            className="mt-6 w-full"
+            data-testid="button-close-item-success"
+          >
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

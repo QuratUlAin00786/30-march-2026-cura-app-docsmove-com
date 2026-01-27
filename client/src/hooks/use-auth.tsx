@@ -135,8 +135,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       queryClient.clear();
       
       console.log('🔐 LOGIN: Successfully logged in as', data.user.email, 'with role', data.user.role);
-    } catch (error) {
-      throw new Error('Login failed. Please check your credentials.');
+    } catch (error: any) {
+      // Try to extract the original error message from the API response
+      let errorMessage = 'Login failed. Please check your credentials.';
+      
+      if (error?.message) {
+        // The error message format from throwIfResNotOk is: "403: {...}"
+        // Try to parse JSON from the error message
+        const match = error.message.match(/^\d+:\s*(.+)$/);
+        if (match) {
+          try {
+            const errorData = JSON.parse(match[1]);
+            if (errorData.error) {
+              errorMessage = errorData.error;
+            }
+          } catch {
+            // If parsing fails, check if the message contains subscription-related text
+            if (error.message.includes('subscription') || error.message.includes('expired')) {
+              errorMessage = error.message.replace(/^\d+:\s*/, '');
+            }
+          }
+        } else if (error.message.includes('subscription') || error.message.includes('expired')) {
+          // Direct subscription error message
+          errorMessage = error.message;
+        }
+      }
+      
+      throw new Error(errorMessage);
     }
   };
 

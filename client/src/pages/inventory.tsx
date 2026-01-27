@@ -273,6 +273,8 @@ export default function Inventory() {
   const [activeTab, setActiveTab] = useState("item-master");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -403,23 +405,24 @@ export default function Inventory() {
     },
   });
 
-  // Delete item function with confirmation
+  // Delete item function with confirmation modal
   const deleteItem = (item: InventoryItem) => {
     console.log("Delete item clicked for:", item.name, "ID:", item.id);
-
     // Add a small delay to ensure the dropdown closes properly
     setTimeout(() => {
-      const confirmDelete = window.confirm(
-        `Are you sure you want to delete "${item.name}" (SKU: ${item.sku})?\n\nThis action cannot be undone and will permanently remove the item from your inventory database.`,
-      );
-
-      console.log("User confirmed deletion:", confirmDelete);
-
-      if (confirmDelete) {
-        console.log("Calling deleteItemMutation.mutate with ID:", item.id);
-        deleteItemMutation.mutate(item.id);
-      }
+      setItemToDelete(item);
+      setShowDeleteConfirmModal(true);
     }, 100);
+  };
+
+  // Confirm delete action
+  const confirmDeleteItem = () => {
+    if (itemToDelete) {
+      console.log("Calling deleteItemMutation.mutate with ID:", itemToDelete.id);
+      deleteItemMutation.mutate(itemToDelete.id);
+      setShowDeleteConfirmModal(false);
+      setItemToDelete(null);
+    }
   };
 
   // Generate Item Report function
@@ -2341,25 +2344,74 @@ export default function Inventory() {
           </Dialog>
         )}
 
-        {/* Success Modal */}
-        <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
-          <DialogContent className="max-w-md">
+        {/* Delete Confirmation Modal */}
+        <Dialog open={showDeleteConfirmModal} onOpenChange={setShowDeleteConfirmModal}>
+          <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-xl font-bold text-green-600">Success</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-orange-500" />
+                Confirm Deletion
+              </DialogTitle>
+              <DialogDescription>
+                This action cannot be undone.
+              </DialogDescription>
             </DialogHeader>
             
             <div className="py-4">
-              <p className="text-gray-700">{successMessage}</p>
+              <p className="text-gray-700 dark:text-gray-300 mb-2">
+                Are you sure you want to delete <strong>"{itemToDelete?.name}"</strong> (SKU: {itemToDelete?.sku})?
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                This action cannot be undone and will permanently remove the item from your inventory database.
+              </p>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDeleteConfirmModal(false);
+                  setItemToDelete(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDeleteItem}
+                disabled={deleteItemMutation.isPending}
+              >
+                {deleteItemMutation.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Success Modal */}
+        <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="sr-only">Item Deleted Successfully</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col items-center justify-center py-6">
+              <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 mb-4">
+                <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                Success
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                {successMessage}
+              </p>
               <Button
                 onClick={() => {
                   setShowSuccessModal(false);
                   setSuccessMessage("");
                 }}
+                className="mt-6 w-full"
+                data-testid="button-close-delete-success"
               >
-                OK
+                Close
               </Button>
             </div>
           </DialogContent>

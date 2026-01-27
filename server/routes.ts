@@ -1416,8 +1416,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      const token = authService.generateToken(user);
-      
       // Get organization subdomain to include in response
       const organization = await storage.getOrganization(user.organizationId);
 
@@ -1425,6 +1423,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error(`[UNIVERSAL LOGIN] Organization not found for user ${email}, org ID: ${user.organizationId}`);
         return res.status(500).json({ error: "Organization not found" });
       }
+
+      // Check subscription expiration before allowing login
+      // Get organization ID from users table and match with saas_subscriptions table
+      console.log(`[UNIVERSAL LOGIN] Checking subscription for user ${email}, organization ID: ${user.organizationId}`);
+      const subscription = await storage.getOrganizationSubscription(user.organizationId);
+      
+      if (subscription) {
+        console.log(`[UNIVERSAL LOGIN] Subscription found for org ${user.organizationId}:`, {
+          subscriptionId: subscription.subscriptionId,
+          expiresAt: subscription.expiresAt,
+          status: subscription.status,
+          paymentStatus: subscription.paymentStatus
+        });
+        
+        if (subscription.expiresAt) {
+          const expiresAt = new Date(subscription.expiresAt);
+          const now = new Date();
+          
+          console.log(`[UNIVERSAL LOGIN] Comparing dates - Now: ${now.toISOString()}, ExpiresAt: ${expiresAt.toISOString()}`);
+          
+          // Compare current datetime with expires_at - if it's past, block login
+          if (expiresAt < now) {
+            // Format expiration date/time for display
+            const expirationDate = expiresAt.toLocaleString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              timeZoneName: 'short'
+            });
+            
+            console.log(`[UNIVERSAL LOGIN] ❌ Subscription expired for user ${email}, org ID: ${user.organizationId}, expiresAt: ${expiresAt.toISOString()}`);
+            return res.status(403).json({ 
+              error: `Your subscription has expired. Please renew. Subscription expired on: ${expirationDate}` 
+            });
+          } else {
+            console.log(`[UNIVERSAL LOGIN] ✅ Subscription is valid for user ${email}, expiresAt: ${expiresAt.toISOString()}`);
+          }
+        } else {
+          console.log(`[UNIVERSAL LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - allowing login`);
+        }
+      } else {
+        console.log(`[UNIVERSAL LOGIN] ⚠️ No subscription found for org ${user.organizationId} - allowing login`);
+      }
+
+      const token = authService.generateToken(user);
 
       console.log(`[UNIVERSAL LOGIN] Success! User: ${user.email}, Subdomain: ${organization.subdomain}`);
 
@@ -1557,13 +1603,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      // Get organization subdomain to include in response
+      const organization = await storage.getOrganization(user.organizationId);
+
+      // Check subscription expiration before allowing login
+      // Get organization ID from users table and match with saas_subscriptions table
+      console.log(`[LOGIN] Checking subscription for user ${email}, organization ID: ${user.organizationId}`);
+      const subscription = await storage.getOrganizationSubscription(user.organizationId);
+      
+      if (subscription) {
+        console.log(`[LOGIN] Subscription found for org ${user.organizationId}:`, {
+          subscriptionId: subscription.subscriptionId,
+          expiresAt: subscription.expiresAt,
+          status: subscription.status,
+          paymentStatus: subscription.paymentStatus
+        });
+        
+        if (subscription.expiresAt) {
+          const expiresAt = new Date(subscription.expiresAt);
+          const now = new Date();
+          
+          console.log(`[LOGIN] Comparing dates - Now: ${now.toISOString()}, ExpiresAt: ${expiresAt.toISOString()}`);
+          
+          // Compare current datetime with expires_at - if it's past, block login
+          if (expiresAt < now) {
+            // Format expiration date/time for display
+            const expirationDate = expiresAt.toLocaleString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              timeZoneName: 'short'
+            });
+            
+            console.log(`[LOGIN] ❌ Subscription expired for user ${email}, org ID: ${user.organizationId}, expiresAt: ${expiresAt.toISOString()}`);
+            return res.status(403).json({ 
+              error: `Your subscription has expired. Please renew. Subscription expired on: ${expirationDate}` 
+            });
+          } else {
+            console.log(`[LOGIN] ✅ Subscription is valid for user ${email}, expiresAt: ${expiresAt.toISOString()}`);
+          }
+        } else {
+          console.log(`[LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - allowing login`);
+        }
+      } else {
+        console.log(`[LOGIN] ⚠️ No subscription found for org ${user.organizationId} - allowing login`);
+      }
+
       const token = authService.generateToken(user);
       
       // Update last login - remove this for now due to schema issues
       // await storage.updateUser(user.id, user.organizationId, { lastLoginAt: new Date() });
-
-      // Get organization subdomain to include in response
-      const organization = await storage.getOrganization(user.organizationId);
 
       res.json({
         token,
@@ -1841,11 +1933,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Create trial subscription (14 days)
+      // Trial Start Date = today, Trial End Date = today + 14 days
       const now = new Date();
       const trialEndDate = new Date(now);
       trialEndDate.setDate(trialEndDate.getDate() + 14);
 
-      await storage.createSaaSSubscription({
+      console.log(`[CREATE TRIAL] Creating subscription for organization ${organization.id}:`, {
+        organizationId: organization.id,
+        packageId: 0,
+        status: "trial",
+        paymentStatus: "trial",
+        trialStart: now,
+        trialEnd: trialEndDate,
+        expiresAt: trialEndDate,
+        maxUsers: 10,
+        maxPatients: 100,
+        details: "Self-service 14-day trial"
+      });
+
+      const subscription = await storage.createSaaSSubscription({
         organizationId: organization.id,
         packageId: 0, // No package for trial
         status: "trial",
@@ -1853,12 +1959,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentPeriodStart: now,
         currentPeriodEnd: trialEndDate,
         cancelAtPeriodEnd: false,
-        trialEnd: trialEndDate,
-        expiresAt: trialEndDate,
+        trialEnd: trialEndDate, // Trial End Date = today + 14 days
+        expiresAt: trialEndDate, // expires_at in database
         maxUsers: 10,
         maxPatients: 100,
         details: "Self-service 14-day trial",
       });
+
+      console.log(`[CREATE TRIAL] Subscription created successfully with ID: ${subscription.id}`);
 
       // Generate verification token
       const verificationToken = crypto.randomBytes(32).toString("hex");
