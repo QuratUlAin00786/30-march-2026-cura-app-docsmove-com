@@ -6577,7 +6577,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(saasSubscriptions)
       .innerJoin(organizations, eq(saasSubscriptions.organizationId, organizations.id))
-      .innerJoin(saasPackages, eq(saasSubscriptions.packageId, saasPackages.id))
+      .leftJoin(saasPackages, eq(saasSubscriptions.packageId, saasPackages.id))
       .where(eq(saasSubscriptions.organizationId, organizationId));
 
       if (!result) {

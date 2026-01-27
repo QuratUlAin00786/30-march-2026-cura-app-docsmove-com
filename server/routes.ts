@@ -1434,9 +1434,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[UNIVERSAL LOGIN] Checking subscription for user ${email}, organization ID: ${user.organizationId}`);
       const subscription = await storage.getOrganizationSubscription(user.organizationId);
       
+      console.log(`[UNIVERSAL LOGIN] Subscription lookup result:`, subscription ? `Found subscription (ID: ${subscription.subscriptionId}, Status: ${subscription.status})` : `No subscription found`);
+      
       if (subscription) {
         console.log(`[UNIVERSAL LOGIN] Subscription found for org ${user.organizationId}:`, {
           subscriptionId: subscription.subscriptionId,
+          packageId: subscription.packageId,
           expiresAt: subscription.expiresAt,
           status: subscription.status,
           paymentStatus: subscription.paymentStatus
@@ -1504,7 +1507,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`[UNIVERSAL LOGIN] ✅ Subscription expiration check passed for user ${email}, expiresAt: ${expiresAt.toISOString()}`);
           }
         } else {
-          console.log(`[UNIVERSAL LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - status check already passed`);
+          console.log(`[UNIVERSAL LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - checking status only`);
+        }
+        
+        // THIRD: Block login if packageId is 0 AND subscription is expired/inactive
+        // Only block packageId: 0 if the subscription is also expired or inactive
+        // If packageId: 0 but subscription is valid (not expired, status is trial/active), allow login
+        if ((subscription.packageId === 0 || subscription.packageId === null || subscription.packageId === undefined) && (isExpired || !["trial", "active"].includes(subscription.status))) {
+          console.log(`[UNIVERSAL LOGIN] ❌ Blocking login - packageId is 0 and subscription is expired/inactive for user ${email}, org ID: ${user.organizationId}`);
+          return res.status(403).json({ 
+            error: `Your trial subscription is not valid. Please contact support to activate a proper subscription plan.` 
+          });
         }
       } else {
         console.log(`[UNIVERSAL LOGIN] ⚠️ No subscription found for org ${user.organizationId} - allowing login`);
@@ -1654,9 +1667,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[LOGIN] Checking subscription for user ${email}, organization ID: ${user.organizationId}`);
       const subscription = await storage.getOrganizationSubscription(user.organizationId);
       
+      console.log(`[LOGIN] Subscription lookup result:`, subscription ? `Found subscription (ID: ${subscription.subscriptionId}, Status: ${subscription.status})` : `No subscription found`);
+      
       if (subscription) {
         console.log(`[LOGIN] Subscription found for org ${user.organizationId}:`, {
           subscriptionId: subscription.subscriptionId,
+          packageId: subscription.packageId,
           expiresAt: subscription.expiresAt,
           status: subscription.status,
           paymentStatus: subscription.paymentStatus
@@ -1724,7 +1740,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`[LOGIN] ✅ Subscription expiration check passed for user ${email}, expiresAt: ${expiresAt.toISOString()}`);
           }
         } else {
-          console.log(`[LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - status check already passed`);
+          console.log(`[LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - checking status only`);
+        }
+        
+        // THIRD: Block login if packageId is 0 AND subscription is expired/inactive
+        // Only block packageId: 0 if the subscription is also expired or inactive
+        // If packageId: 0 but subscription is valid (not expired, status is trial/active), allow login
+        if ((subscription.packageId === 0 || subscription.packageId === null || subscription.packageId === undefined) && (isExpired || !["trial", "active"].includes(subscription.status))) {
+          console.log(`[LOGIN] ❌ Blocking login - packageId is 0 and subscription is expired/inactive for user ${email}, org ID: ${user.organizationId}`);
+          return res.status(403).json({ 
+            error: `Your trial subscription is not valid. Please contact support to activate a proper subscription plan.` 
+          });
         }
       } else {
         console.log(`[LOGIN] ⚠️ No subscription found for org ${user.organizationId} - allowing login`);
