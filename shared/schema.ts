@@ -845,8 +845,29 @@ export const prescriptions = pgTable("prescriptions", {
     signedAt?: string; // ISO timestamp
     signerId?: number; // user ID who signed
   }>().default({}),
+  savedPdfPath: text("saved_pdf_path"), // Path to saved PDF file
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Prescription Share Logs
+export const prescriptionShareLogs = pgTable("prescription_share_logs", {
+  id: serial("id").primaryKey(),
+  prescriptionId: integer("prescription_id").notNull().references(() => prescriptions.id),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  patientId: integer("patient_id").notNull().references(() => patients.id),
+  sentBy: integer("sent_by").references(() => users.id),
+  recipientEmail: text("recipient_email"), // Email address of recipient (pharmacy or patient)
+  pharmacyEmail: text("pharmacy_email"), // Pharmacy email (if shared with pharmacy)
+  pharmacyName: text("pharmacy_name"), // Pharmacy name
+  status: varchar("status", { length: 20 }).notNull().default("sent"), // sent, success, failed
+  emailSent: boolean("email_sent").notNull().default(false),
+  emailSubject: text("email_subject"),
+  emailHtml: text("email_html"),
+  emailText: text("email_text"),
+  emailError: text("email_error"),
+  sharedAt: timestamp("shared_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // Medical Images
@@ -891,6 +912,26 @@ export const medicalImages = pgTable("medical_images", {
   // E-signature fields
   signatureData: text("signature_data"),
   signatureDate: timestamp("signature_date"),
+  // Selected role and user fields
+  selectedRole: varchar("selected_role", { length: 20 }),
+  selectedUserId: integer("selected_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Radiology Images - Multiple images per radiology report
+export const radiologyImages = pgTable("radiology_images", {
+  id: serial("id").primaryKey(),
+  medicalImageId: integer("medical_image_id").notNull().references(() => medicalImages.id, { onDelete: "cascade" }),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  patientId: integer("patient_id").notNull().references(() => patients.id),
+  fileName: text("file_name").notNull(), // Image file name
+  filePath: text("file_path").notNull(), // Full file path in filesystem
+  fileSize: integer("file_size").notNull(), // File size in bytes
+  mimeType: varchar("mime_type", { length: 100 }).notNull(), // Image MIME type
+  imageData: text("image_data"), // Optional: base64 encoded image data
+  uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
+  displayOrder: integer("display_order").default(0), // Order for displaying images in report
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1133,7 +1174,12 @@ export const labResults = pgTable("lab_results", {
   sampleCollected: boolean("Sample_Collected").notNull().default(false),
   labReportGenerated: boolean("Lab_Report_Generated").notNull().default(false),
   reviewed: boolean("Reviewed").notNull().default(false),
-  signatureData: text("signature_data"),
+  signature: jsonb("signature").$type<{
+    doctorSignature?: string; // base64 encoded signature image
+    signedBy?: string; // doctor name
+    signedAt?: string; // ISO timestamp
+    signerId?: number; // user ID who signed
+  }>().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

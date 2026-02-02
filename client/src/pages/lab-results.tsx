@@ -183,6 +183,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -236,6 +242,7 @@ import {
   Receipt,
   PenTool,
   PoundSterling,
+  BarChart,
 } from "lucide-react";
 
 interface DatabaseLabResult {
@@ -264,6 +271,12 @@ interface DatabaseLabResult {
   criticalValues: boolean;
   notes?: string;
   createdAt: string;
+  signature?: {
+    doctorSignature?: string; // base64 encoded signature image
+    signedBy?: string; // doctor name
+    signedAt?: string; // ISO timestamp
+    signerId?: number; // user ID who signed
+  };
 }
 
 interface User {
@@ -310,6 +323,16 @@ const TEST_FIELD_DEFINITIONS: Record<string, Array<{
     { name: "Eosinophils", unit: "%", referenceRange: "1 - 6" },
     { name: "Basophils", unit: "%", referenceRange: "<2" },
   ],
+  "Basic Metabolic Panel": [
+    { name: "Glucose", unit: "mg/dL", referenceRange: "70 - 100" },
+    { name: "Calcium", unit: "mg/dL", referenceRange: "8.5 - 10.5" },
+    { name: "Sodium", unit: "mmol/L", referenceRange: "136 - 145" },
+    { name: "Potassium", unit: "mmol/L", referenceRange: "3.5 - 5.0" },
+    { name: "Chloride", unit: "mmol/L", referenceRange: "98 - 107" },
+    { name: "CO2", unit: "mmol/L", referenceRange: "23 - 29" },
+    { name: "BUN", unit: "mg/dL", referenceRange: "7 - 20" },
+    { name: "Creatinine", unit: "mg/dL", referenceRange: "0.6 - 1.2" },
+  ],
   "Basic Metabolic Panel (BMP) / Chem-7": [
     { name: "Glucose", unit: "mg/dL", referenceRange: "70 - 100" },
     { name: "Calcium", unit: "mg/dL", referenceRange: "8.5 - 10.5" },
@@ -329,6 +352,13 @@ const TEST_FIELD_DEFINITIONS: Record<string, Array<{
     { name: "Total Protein", unit: "g/dL", referenceRange: "6.0 - 8.3" },
     { name: "Albumin", unit: "g/dL", referenceRange: "3.5 - 5.5" },
     { name: "Globulin", unit: "g/dL", referenceRange: "2.0 - 3.5" },
+  ],
+  "Lipid Panel": [
+    { name: "Total Cholesterol", unit: "mg/dL", referenceRange: "<200" },
+    { name: "LDL Cholesterol", unit: "mg/dL", referenceRange: "<100" },
+    { name: "HDL Cholesterol", unit: "mg/dL", referenceRange: ">40" },
+    { name: "Triglycerides", unit: "mg/dL", referenceRange: "<150" },
+    { name: "VLDL Cholesterol", unit: "mg/dL", referenceRange: "5 - 40" },
   ],
   "Lipid Profile (Cholesterol, LDL, HDL, Triglycerides)": [
     { name: "Total Cholesterol", unit: "mg/dL", referenceRange: "<200" },
@@ -657,6 +687,7 @@ export default function LabResultsPage() {
   const [fillResultFormData, setFillResultFormData] = useState<any>({});
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
+  const [customFields, setCustomFields] = useState<Record<string, Array<{name: string, unit: string, referenceRange: string}>>>({});
   
   // Invoice workflow states
   const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
@@ -684,6 +715,10 @@ export default function LabResultsPage() {
   const [signatureSaved, setSignatureSaved] = useState(false);
   const [lastPosition, setLastPosition] = useState<{ x: number; y: number } | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  
+  // Signature details dialog states
+  const [showSignatureDetailsDialog, setShowSignatureDetailsDialog] = useState(false);
+  const [selectedSignatureData, setSelectedSignatureData] = useState<any>(null);
 
   // Fetch roles from the roles table filtered by organization_id
   const { data: rolesData = [] } = useQuery({
@@ -862,6 +897,29 @@ export default function LabResultsPage() {
   }, [labResults]);
 
   // Check file existence for all lab results
+  // Reset custom fields when dialog opens with a new lab order
+  useEffect(() => {
+    if (selectedLabOrder && showFillResultDialog) {
+      // Initialize custom fields for test types without definitions
+      const allTestTypes = selectedLabOrder.testType
+        .split(' | ')
+        .map((t: string) => t.trim());
+      const testTypesWithoutDefs = allTestTypes.filter(t => !TEST_FIELD_DEFINITIONS[t]);
+      
+      setCustomFields(prev => {
+        const newFields: Record<string, Array<{name: string, unit: string, referenceRange: string}>> = {};
+        testTypesWithoutDefs.forEach(testType => {
+          // Keep existing custom fields if they exist, otherwise initialize empty
+          newFields[testType] = prev[testType] || [];
+        });
+        return newFields;
+      });
+    } else if (!showFillResultDialog) {
+      // Clear custom fields when dialog closes
+      setCustomFields({});
+    }
+  }, [selectedLabOrder, showFillResultDialog]);
+
   useEffect(() => {
     const checkFileExistence = async () => {
       if (!labResults || labResults.length === 0) return;
@@ -1224,6 +1282,22 @@ export default function LabResultsPage() {
   const handleViewResult = (result: DatabaseLabResult) => {
     console.log("handleViewResult called with:", result);
     setSelectedResult(result);
+    
+    // Initialize edit mode and form data automatically
+    const testTypes = result.testType ? result.testType.split(' | ').filter(t => t.trim()) : [];
+    setEditFormData({
+      testType: result.testType,
+      priority: result.priority,
+      notes: result.notes || "",
+      status: result.status,
+      doctorName: result.doctorName || "",
+      mainSpecialty: result.mainSpecialty || "Surgical Specialties",
+      subSpecialty: result.subSpecialty || "Orthopedic Surgeon",
+    });
+    setSelectedEditRole("");
+    setSelectedTestTypes(testTypes);
+    setIsEditMode(true);
+    
     setShowViewDialog(true);
     console.log("showViewDialog set to true");
   };
@@ -1799,10 +1873,6 @@ Report generated from Cura EMR System`;
                     <span style="margin-left: 0.5rem;">${getPatientName(selectedResult.patientId)}</span>
                   </div>
                   <div style="margin-bottom: 0.25rem;">
-                    <strong>Patient ID:</strong>
-                    <span style="margin-left: 0.5rem;">${selectedResult.patientId}</span>
-                  </div>
-                  <div style="margin-bottom: 0.25rem;">
                     <strong>Date:</strong>
                     <span style="margin-left: 0.5rem;">${format(new Date(), "MMM dd, yyyy")}</span>
                   </div>
@@ -1863,9 +1933,9 @@ Report generated from Cura EMR System`;
 
               <div style="margin-top: 50px; text-align: center; border-top: 1px solid #ddd; padding-top: 20px;">
                 <div style="margin-bottom: 30px;">
-                  ${selectedResult.signatureData ? `
+                  ${(selectedResult.signature?.doctorSignature && String(selectedResult.signature.doctorSignature).trim() !== "") ? `
                     <div style="margin-bottom: 15px;">
-                      <img src="${selectedResult.signatureData}" alt="E-Signature" style="height: 80px; max-width: 250px; margin: 0 auto; display: block;" />
+                      <img src="${selectedResult.signature.doctorSignature}" alt="E-Signature" style="height: 80px; max-width: 250px; margin: 0 auto; display: block;" />
                     </div>
                   ` : ""}
                   <div style="border-top: 2px solid #333; width: 300px; margin: 0 auto 10px;"></div>
@@ -2236,11 +2306,6 @@ Report generated from Cura EMR System`;
                 </div>
 
                 <div style="margin-bottom: 0.25rem;">
-                  <strong>Patient ID:</strong>
-                  <span style="margin-left: 0.5rem;">${selectedResult.patientId}</span>
-                </div>
-
-                <div style="margin-bottom: 0.25rem;">
                   <strong>Date:</strong>
                   <span style="margin-left: 0.5rem;">${format(new Date(), "MMM dd, yyyy")}</span>
                 </div>
@@ -2321,9 +2386,9 @@ Report generated from Cura EMR System`;
             <!-- Footer -->
             <div style="margin-top: 50px; text-align: center; border-top: 1px solid #ddd; padding-top: 20px;">
               <div style="margin-bottom: 30px;">
-                ${selectedResult.signatureData ? `
+                ${(selectedResult.signature?.doctorSignature && String(selectedResult.signature.doctorSignature).trim() !== "") ? `
                   <div style="margin-bottom: 15px;">
-                    <img src="${selectedResult.signatureData}" alt="E-Signature" style="height: 80px; max-width: 250px; margin: 0 auto; display: block;" />
+                    <img src="${selectedResult.signature.doctorSignature}" alt="E-Signature" style="height: 80px; max-width: 250px; margin: 0 auto; display: block;" />
                   </div>
                 ` : ""}
                 <div style="border-top: 2px solid #333; width: 300px; margin: 0 auto 10px;"></div>
@@ -2553,14 +2618,19 @@ Report generated from Cura EMR System`;
       );
 
       if (response.ok) {
-        await response.json();
+        const result = await response.json();
 
         queryClient.invalidateQueries({ queryKey: ["/api/lab-results"] });
 
-        // Update selectedResult to include the signature immediately
+        // Update selectedResult to include the signature immediately (using new signature structure)
         setSelectedResult((prev: any) => ({
           ...prev,
-          signatureData: signatureData,
+          signature: result.signature || {
+            doctorSignature: signatureData,
+            signedBy: result.labResult?.signature?.signedBy || `${user?.firstName || ''} ${user?.lastName || ''}`.trim(),
+            signedAt: result.labResult?.signature?.signedAt || new Date().toISOString(),
+            signerId: result.labResult?.signature?.signerId || user?.id,
+          },
         }));
 
         setSignatureSaved(true);
@@ -2714,6 +2784,9 @@ Report generated from Cura EMR System`;
     );
   }
 
+  // Check if any report is generated
+  const hasGeneratedReport = filteredResults.some((result: any) => result.labReportGenerated === true);
+
   return (
     <>
       <Header
@@ -2721,8 +2794,30 @@ Report generated from Cura EMR System`;
         subtitle="View and manage laboratory test results"
       />
 
-      <div className="flex-1 overflow-auto p-6">
-        <div className="space-y-6">
+      {/* Report Generated Indicator */}
+      <div className="px-6 pt-2">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="inline-flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Report Generated:</span>
+                <i 
+                  className="fa fa-bar-chart" 
+                  style={{ 
+                    color: hasGeneratedReport ? 'green' : 'red'
+                  }}
+                ></i>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{hasGeneratedReport ? "report generated" : "report not generated"}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      <div className="flex-1 overflow-auto p-6 w-full max-w-full box-border">
+        <div className="space-y-6 w-full max-w-full">
           {/* Quick Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
@@ -2949,43 +3044,49 @@ Report generated from Cura EMR System`;
               </Card>
             ) : viewMode === "list" ? (
               /* List View - Table Format */
-              <Card>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
+              <Card className="w-full max-w-full overflow-hidden">
+                <CardContent className="p-0 w-full max-w-full">
+                  <div className="w-full max-w-full overflow-hidden">
+                    <table className="w-full" style={{ tableLayout: 'fixed', width: '100%' }}>
                       <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
                             Test ID
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '10%' }}>
                             Patient Name
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '12%' }}>
                             Test Type
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
                             Ordered
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                             Priority
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Sample Collected
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
+                            Sample
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Report Generated
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
+                            Report
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                             Test Status
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
                             Status
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Payment Method
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
+                            Payment
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
+                            signed?
+                          </th>
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
+                            Invoice/Sign
+                          </th>
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
                             Actions
                           </th>
                         </tr>
@@ -2997,96 +3098,99 @@ Report generated from Cura EMR System`;
                             className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                             data-testid={`row-lab-result-${result.id}`}
                           >
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
-                              <div className="space-y-1">
-                                <div>{result.testId}</div>
-                                {activeTab !== "request" && (
-                                  <Button
-                                    variant="link"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSelectedResult(result);
-                                      setShowPrescriptionDialog(true);
-                                    }}
-                                    className="h-auto p-0 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-                                    data-testid={`link-view-prescription-${result.id}`}
-                                  >
-                                    View Prescription
-                                  </Button>
-                                )}
+                            <td className="px-2 py-2 text-xs font-medium text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={result.testId}>
+                                {result.testId}
+                              </div>
+                              {activeTab !== "request" && (
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedResult(result);
+                                    setShowPrescriptionDialog(true);
+                                  }}
+                                  className="h-auto p-0 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                                  data-testid={`link-view-prescription-${result.id}`}
+                                >
+                                  View
+                                </Button>
+                              )}
+                            </td>
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={getPatientName(result.patientId)}>
+                                {getPatientName(result.patientId)}
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                              {getPatientName(result.patientId)}
-                            </td>
-                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
-                              {(() => {
-                                const tests = result.testType.split(' | ');
-                                if (tests.length <= 3) {
-                                  return result.testType;
-                                }
-                                const visibleTests = tests.slice(0, 3).join(' | ');
-                                const hiddenCount = tests.length - 3;
-                                return (
-                                  <div className="group relative inline-block">
-                                    <span>{visibleTests} <span className="text-blue-600 dark:text-blue-400 cursor-help">+{hiddenCount} more</span></span>
-                                    <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[300px]">
-                                      <div className="text-sm font-medium mb-2">All Tests:</div>
-                                      <div className="space-y-1">
-                                        {tests.map((test, idx) => (
-                                          <div key={idx} className="text-sm">{test}</div>
-                                        ))}
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={result.testType}>
+                                {(() => {
+                                  const tests = result.testType.split(' | ');
+                                  if (tests.length <= 2) {
+                                    return result.testType;
+                                  }
+                                  const visibleTests = tests.slice(0, 2).join(' | ');
+                                  const hiddenCount = tests.length - 2;
+                                  return (
+                                    <div className="group relative inline-block w-full">
+                                      <span className="truncate block">{visibleTests} <span className="text-blue-600 dark:text-blue-400 cursor-help">+{hiddenCount}</span></span>
+                                      <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[300px]">
+                                        <div className="text-sm font-medium mb-2">All Tests:</div>
+                                        <div className="space-y-1">
+                                          {tests.map((test, idx) => (
+                                            <div key={idx} className="text-sm">{test}</div>
+                                          ))}
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                );
-                              })()}
+                                  );
+                                })()}
+                              </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                              {format(new Date(result.orderedAt), "MMM dd, yyyy")}
+                            <td className="px-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                              <div className="truncate" title={format(new Date(result.orderedAt), "MMM dd, yyyy")}>
+                                {format(new Date(result.orderedAt), "MMM dd, yyyy")}
+                              </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <td className="px-2 py-2 text-xs">
                               <Badge
                                 variant={result.priority === "urgent" ? "destructive" : "secondary"}
-                                className="text-xs"
+                                className="text-xs px-1.5 py-0"
                               >
                                 {result.priority || "routine"}
                               </Badge>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <Badge
-                                variant={result.sampleCollected ? "default" : "secondary"}
-                                className="text-xs"
-                              >
-                                {result.sampleCollected ? "Collected" : "Not Collected"}
-                              </Badge>
+                            <td className="px-2 py-2 text-xs">
+                              {result.sampleCollected ? (
+                                <div className="flex items-center justify-center" title="Sample Collected">
+                                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center" title="not collected">
+                                  <X className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                </div>
+                              )}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <Badge
-                                variant={result.labReportGenerated ? "default" : "secondary"}
-                                className={`text-xs flex items-center gap-1 ${
-                                  result.labReportGenerated 
-                                    ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border-green-300 dark:border-green-800" 
-                                    : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600"
-                                }`}
-                              >
+                            <td className="px-2 py-2 text-xs">
                                 {result.labReportGenerated ? (
-                                  <CheckCircle className="h-3 w-3" />
+                                <div className="flex items-center justify-center" title="Report Generated">
+                                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                </div>
                                 ) : (
-                                  <Clock className="h-3 w-3" />
+                                <div className="flex items-center justify-center" title="Report Not Generated">
+                                  <Clock className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                                </div>
                                 )}
-                                {result.labReportGenerated ? "Report Generated" : "Report Not Generated"}
-                              </Badge>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <td className="px-2 py-2 text-xs">
                               <Badge
                                 variant={result.criticalValues ? "destructive" : "secondary"}
-                                className="text-xs"
+                                className="text-xs px-1.5 py-0"
                               >
                                 {result.criticalValues ? "Critical" : "Normal"}
                               </Badge>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <td className="px-2 py-2 text-xs">
                               {editingStatusId === result.id ? (
                                 <Select
                                   value={result.status}
@@ -3098,7 +3202,7 @@ Report generated from Cura EMR System`;
                                     setEditingStatusId(null);
                                   }}
                                 >
-                                  <SelectTrigger className="w-32">
+                                  <SelectTrigger className="w-24 h-7 text-xs">
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -3110,8 +3214,8 @@ Report generated from Cura EMR System`;
                                   </SelectContent>
                                 </Select>
                               ) : (
-                                <div className="flex items-center gap-2">
-                                  <Badge className={getStatusColor(result.status)}>
+                                <div className="flex items-center gap-1">
+                                  <Badge className={`${getStatusColor(result.status)} text-xs px-1.5 py-0`}>
                                     {result.status}
                                   </Badge>
                                   {user?.role !== 'patient' && (
@@ -3119,7 +3223,7 @@ Report generated from Cura EMR System`;
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => setEditingStatusId(result.id)}
-                                      className="h-6 w-6 p-0"
+                                      className="h-5 w-5 p-0"
                                       data-testid={`button-edit-status-${result.id}`}
                                     >
                                       <Edit className="h-3 w-3" />
@@ -3128,58 +3232,56 @@ Report generated from Cura EMR System`;
                                 </div>
                               )}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">
-                                {(result as any).paymentMethod || 'N/A'}
+                            <td className="px-2 py-2 text-xs">
+                              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 text-xs px-1.5 py-0 truncate max-w-full">
+                                <span className="truncate block">{(result as any).paymentMethod || 'N/A'}</span>
                               </Badge>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <div className="flex items-center gap-2">
-                                {activeTab === "request" ? (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleViewResult(result)}
-                                      className="h-8 w-8 p-0"
-                                      data-testid={`button-view-${result.id}`}
-                                    >
-                                      <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                                    </Button>
-                                    {user?.role !== 'patient' && (
+                            <td className="px-2 py-2 text-xs">
+                              <div className="flex items-center justify-center">
+                                {result.signature?.doctorSignature && 
+                                 String(result.signature.doctorSignature).trim() !== "" ? (
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => handleViewResult(result)}
-                                        className="h-8 w-8 p-0"
-                                        data-testid={`button-edit-${result.id}`}
+                                    className="h-6 px-1.5 flex items-center gap-0.5 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                    onClick={() => {
+                                      setSelectedSignatureData({
+                                        signedAt: result.signature?.signedAt,
+                                        signedBy: result.signature?.signedBy || "N/A",
+                                        signerId: result.signature?.signerId,
+                                        doctorSignature: result.signature?.doctorSignature,
+                                      });
+                                      setShowSignatureDetailsDialog(true);
+                                    }}
+                                    title="View signature details"
                                       >
-                                        <Edit className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                    <CheckCircle className="h-3 w-3" />
+                                    <span className="text-xs">✓</span>
                                       </Button>
-                                    )}
-                                    {user?.role !== 'patient' && (
+                                ) : (
+                                  <div className="flex items-center gap-0.5 text-red-600">
+                                    <X className="h-3 w-3" />
+                                    <span className="text-xs">✗</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 text-xs">
+                              <div className="flex items-center gap-1 justify-center">
+                                {(activeTab === "request" || activeTab === "generated") && user?.role !== 'patient' && (
+                                  <>
                                       <Button
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => handleManageInvoice(result)}
-                                        className="h-8 w-8 p-0"
+                                        className="h-6 w-6 p-0"
                                         data-testid={`button-manage-invoice-${result.id}`}
+                                        title="Manage Invoice"
                                       >
-                                        <PoundSterling className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                        <PoundSterling className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                       </Button>
-                                    )}
-                                    {user?.role === 'admin' && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleCreateInvoiceForTest(result)}
-                                        className="h-8 w-8 p-0"
-                                        data-testid={`button-create-invoice-${result.id}`}
-                                      >
-                                        <Receipt className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                                      </Button>
-                                    )}
-                                    {user?.role !== 'patient' && (
+                                    {(activeTab === "request" || activeTab === "generated") && (
                                       <Button
                                         variant="ghost"
                                         size="sm"
@@ -3187,30 +3289,55 @@ Report generated from Cura EMR System`;
                                           setSelectedResult(result);
                                           setShowESignDialog(true);
                                         }}
-                                        className="h-8 w-8 p-0"
+                                        className="h-6 w-6 p-0"
                                         data-testid={`button-esign-${result.id}`}
+                                        title="E-Sign"
                                       >
-                                        <PenTool className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                        <PenTool className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                       </Button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 text-xs">
+                              <div className="flex items-center gap-0.5 justify-center flex-wrap">
+                                {activeTab === "request" ? (
+                                  <>
+                                    {user?.role !== 'patient' && canEdit('lab_results') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                        onClick={() => handleViewResult(result)}
+                                      className="h-6 w-6 p-0"
+                                        data-testid={`button-edit-${result.id}`}
+                                        title="Edit"
+                                    >
+                                        <Edit className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+                                    </Button>
                                     )}
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleGeneratePrescription(result)}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-prescription-${result.id}`}
+                                      title={user?.role === 'patient' ? 'View Prescription' : 'Generate Prescription'}
                                     >
-                                      <FileText className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <FileText className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleDirectDownload(result)}
-                                      className="h-8 w-8 p-0"
-                                      data-testid={`button-download-${result.id}`}
-                                    >
-                                      <Download className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                                    </Button>
+                                    {user?.role !== 'patient' && canDelete('lab_results') && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleDeleteResult(result.id)}
+                                        className="h-6 w-6 p-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                                        data-testid={`button-delete-${result.id}`}
+                                        title="Delete"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    )}
                                   </>
                                 ) : activeTab === "generate" ? (
                                   <>
@@ -3222,10 +3349,10 @@ Report generated from Cura EMR System`;
                                           setSelectedLabOrder(result);
                                           setShowFillResultDialog(true);
                                         }}
-                                        className="h-8 w-8 p-0"
+                                        className="h-6 w-6 p-0"
                                         data-testid={`button-generate-${result.id}`}
                                       >
-                                        <FileText className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                        <FileText className="h-3 w-3 text-green-600 dark:text-green-400" />
                                       </Button>
                                     )}
                                   </>
@@ -3235,58 +3362,37 @@ Report generated from Cura EMR System`;
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleViewResult(result)}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-view-${result.id}`}
                                     >
-                                      <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <Eye className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleViewResult(result)}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-edit-${result.id}`}
                                     >
-                                      <Edit className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleManageInvoice(result)}
-                                      className="h-8 w-8 p-0"
-                                      data-testid={`button-manage-invoice-${result.id}`}
-                                    >
-                                      <PoundSterling className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <Edit className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleCreateInvoiceForTest(result)}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-create-invoice-${result.id}`}
                                     >
-                                      <Receipt className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        setSelectedResult(result);
-                                        setShowESignDialog(true);
-                                      }}
-                                      className="h-8 w-8 p-0"
-                                      data-testid={`button-esign-${result.id}`}
-                                    >
-                                      <PenTool className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <Receipt className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleGeneratePrescription(result)}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-prescription-${result.id}`}
                                     >
-                                      <FileText className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <FileText className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
                                     <Button
                                       variant="ghost"
@@ -3295,19 +3401,19 @@ Report generated from Cura EMR System`;
                                         setSelectedResult(result);
                                         setShowPrescriptionDialog(true);
                                       }}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-print-${result.id}`}
                                     >
-                                      <Printer className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <Printer className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleDirectDownload(result)}
-                                      className="h-8 w-8 p-0"
+                                      className="h-6 w-6 p-0"
                                       data-testid={`button-download-${result.id}`}
                                     >
-                                      <Download className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                      <Download className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                     </Button>
                                   </>
                                 )}
@@ -3430,36 +3536,24 @@ Report generated from Cura EMR System`;
                           Critical
                         </Badge>
                       )}
-                      <Badge
-                        variant={result.sampleCollected ? "default" : "secondary"}
-                        className={`text-xs flex items-center gap-1 ${
-                          result.sampleCollected 
-                            ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border-green-300 dark:border-green-800" 
-                            : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
                         {result.sampleCollected ? (
-                          <CheckCircle className="h-3 w-3" />
-                        ) : (
-                          <Clock className="h-3 w-3" />
-                        )}
-                        {result.sampleCollected ? "Sample Collected" : "Sample Not Collected"}
-                      </Badge>
-                      <Badge
-                        variant={result.labReportGenerated ? "default" : "secondary"}
-                        className={`text-xs flex items-center gap-1 ${
-                          result.labReportGenerated 
-                            ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border-green-300 dark:border-green-800" 
-                            : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600"
-                        }`}
-                      >
+                        <div className="flex items-center" title="Sample Collected">
+                          <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center" title="not collected">
+                          <X className="h-5 w-5 text-red-600 dark:text-red-400" />
+                        </div>
+                      )}
                         {result.labReportGenerated ? (
-                          <CheckCircle className="h-3 w-3" />
+                        <div className="flex items-center" title="Report Generated">
+                          <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        </div>
                         ) : (
-                          <Clock className="h-3 w-3" />
+                        <div className="flex items-center" title="Report Not Generated">
+                          <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                        </div>
                         )}
-                        {result.labReportGenerated ? "Report Generated" : "Report Not Generated"}
-                      </Badge>
                     </div>
 
                     {/* Main content area - with right margin for blue box */}
@@ -3654,23 +3748,6 @@ Report generated from Cura EMR System`;
                           >
                             <FileText className="h-4 w-4 mr-2" />
                             {user?.role === 'patient' ? 'View Prescription' : 'Generate Prescription'}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              setSelectedResult(result);
-                              setShowPrescriptionDialog(true);
-                              await new Promise((resolve) =>
-                                setTimeout(resolve, 100),
-                              );
-                              await handleGeneratePDF();
-                              setShowPrescriptionDialog(false);
-                            }}
-                            className="bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-              
                           </Button>
                           {user?.role !== 'patient' && canDelete('lab_results') && (
                             <Button
@@ -4945,83 +5022,27 @@ Report generated from Cura EMR System`;
           }
         }}
       >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <DialogTitle className="text-xl font-bold">
-                  Lab Result Details
-                </DialogTitle>
-                {selectedResult && (
-                  <div className="flex items-center gap-2">
-                    {editingStatusId === selectedResult.id ? (
-                      <Select
-                        value={selectedResult.status}
-                        onValueChange={(value) => {
-                          updateLabResultMutation.mutate({
-                            id: selectedResult.id,
-                            data: { status: value },
-                          });
-                          setEditingStatusId(null);
-                        }}
-                      >
-                        <SelectTrigger className="w-32 h-6">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">pending</SelectItem>
-                          <SelectItem value="collected">collected</SelectItem>
-                          <SelectItem value="processing">processing</SelectItem>
-                          <SelectItem value="completed">completed</SelectItem>
-                          <SelectItem value="cancelled">cancelled</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <>
-                        <Badge
-                          variant={
-                            selectedResult.status === "completed"
-                              ? "default"
-                              : selectedResult.status === "pending"
-                                ? "secondary"
-                                : selectedResult.status === "processing"
-                                  ? "outline"
-                                  : "destructive"
-                          }
-                        >
-                          {selectedResult.status}
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingStatusId(selectedResult.id)}
-                          className="h-6 w-6 p-0"
-                          data-testid="button-edit-status"
-                        >
-                          <Edit className="h-3 w-3" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+            <DialogTitle>Lab Result Details</DialogTitle>
           </DialogHeader>
           {selectedResult && (
-            <div className="grid grid-cols-2 gap-6 pt-4">
-              {/* Left Section - Test Details */}
+            <div className="space-y-6 pt-4">
+              {/* Test ID at the top as label */}
+              <div>
+                <Label className="text-sm font-semibold">Test ID: {selectedResult.testId}</Label>
+              </div>
+
+              {/* Single column layout - each field in its own row */}
               <div className="space-y-4">
-                <div className="p-4 rounded-lg border">
-                  <div className="space-y-3">
                     <div>
-                      <p className="text-sm text-black font-bold">Test:</p>
-                      {isEditMode ? (
+                  <label className="block mb-1">Test:</label>
                         <Popover open={testTypePopoverOpen} onOpenChange={setTestTypePopoverOpen}>
                           <PopoverTrigger asChild>
                             <Button
                               variant="outline"
                               role="combobox"
-                              className="w-full justify-between bg-white text-black"
+                        className="w-full justify-between"
                             >
                               {selectedTestTypes.length > 0
                                 ? `${selectedTestTypes.length} selected`
@@ -5059,149 +5080,68 @@ Report generated from Cura EMR System`;
                             </Command>
                           </PopoverContent>
                         </Popover>
-                      ) : (
-                        (() => {
-                          const tests = selectedResult.testType.split(' | ');
-                          if (tests.length <= 2) {
-                            return <p className="font-medium">{selectedResult.testType}</p>;
-                          }
-                          const visibleTests = tests.slice(0, 2).join(' | ');
-                          const hiddenCount = tests.length - 2;
-                          return (
-                            <div className="group relative">
-                              <p className="font-medium">
-                                {visibleTests} <span className="text-blue-600 dark:text-blue-400 cursor-help">+{hiddenCount} more</span>
-                              </p>
-                              <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[300px]">
-                                <div className="text-sm font-medium mb-2">All Tests:</div>
-                                <div className="space-y-1">
-                                  {tests.map((test, idx) => (
-                                    <div key={idx} className="text-sm">{test}</div>
-                                  ))}
                                 </div>
-                              </div>
-                            </div>
-                          );
-                        })()
-                      )}
-                    </div>
+
                     <div>
-                      <p className="text-sm text-black font-bold">Test ID:</p>
-                      <p className="font-medium">{selectedResult.testId}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-black font-bold">Ordered:</p>
-                      <p className="font-medium">
-                        {format(
+                  <label className="block mb-1">Ordered:</label>
+                  <Input
+                    value={format(
                           new Date(selectedResult.orderedAt),
                           "MMM dd, yyyy HH:mm",
                         )}
-                      </p>
-                    </div>
-                  </div>
+                    readOnly
+                  />
                 </div>
 
-                {/* Notes Section */}
-                <div className="bg-gray-100 p-4 rounded-lg">
-                  <h3 className="font-semibold text-blue-600 mb-2">Notes</h3>
-                  {isEditMode ? (
-                    <Textarea
-                      value={
-                        editFormData.notes !== undefined
-                          ? editFormData.notes
-                          : selectedResult.notes || ""
-                      }
-                      onChange={(e) =>
+                <div>
+                  <label className="block mb-1">Status:</label>
+                  <Select
+                    value={editFormData.status || selectedResult.status}
+                    onValueChange={(value) =>
                         setEditFormData((prev: any) => ({
                           ...prev,
-                          notes: e.target.value,
+                        status: value,
                         }))
                       }
-                      placeholder="Enter clinical notes or special instructions"
-                      rows={3}
-                      className="w-full"
-                    />
-                  ) : (
-                    <p className="text-sm">
-                      {selectedResult.notes || "No notes"}
-                    </p>
-                  )}
-                </div>
-
-                {/* Test Results Toggle */}
-                {selectedResult.results &&
-                  selectedResult.results.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Checkbox
-                          id="show-test-results"
-                          checked={showTestResults}
-                          onCheckedChange={(checked) => setShowTestResults(checked as boolean)}
-                        />
-                        <Label
-                          htmlFor="show-test-results"
-                          className="text-sm font-semibold cursor-pointer"
-                        >
-                          Show Test Results
-                        </Label>
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">pending</SelectItem>
+                      <SelectItem value="collected">collected</SelectItem>
+                      <SelectItem value="processing">processing</SelectItem>
+                      <SelectItem value="completed">completed</SelectItem>
+                      <SelectItem value="cancelled">cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
                       </div>
                       
-                      {showTestResults && (
-                        <div className="space-y-3">
-                          {selectedResult.results.map(
-                            (result: any, index: number) => (
-                              <div key={index} className="border rounded-lg p-4">
-                                <div className="flex justify-between items-center">
-                                  <div className="flex-1">
-                                    <p className="font-medium">{result.name}</p>
-                                    <p className="text-sm text-gray-600">
-                                      Reference Range: {result.referenceRange}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="text-lg font-semibold">
-                                      {result.value} {result.unit}
-                                    </p>
-                                    <Badge
-                                      variant={
-                                        result.status === "normal"
-                                          ? "default"
-                                          : result.status === "abnormal_high" ||
-                                              result.status === "abnormal_low"
-                                            ? "secondary"
-                                            : "destructive"
-                                      }
-                                      className="ml-2"
-                                    >
-                                      {result.status.replace("_", " ")}
-                                    </Badge>
-                                  </div>
-                                </div>
-                                {result.flag && (
-                                  <p className="text-sm text-yellow-600 mt-2">
-                                    ⚠️ {result.flag}
-                                  </p>
-                                )}
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <div>
+                  <label className="block mb-1">Priority:</label>
+                  <Select
+                    value={editFormData.priority || selectedResult.priority}
+                    onValueChange={(value) =>
+                      setEditFormData((prev: any) => ({
+                        ...prev,
+                        priority: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select priority" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="routine">Routine</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
+                      <SelectItem value="stat">STAT</SelectItem>
+                    </SelectContent>
+                  </Select>
               </div>
 
-              {/* Right Section - Doctor Information */}
-              <div className="bg-blue-50 p-6 rounded-lg h-fit">
-                <div className="space-y-4">
                   <div>
-                    <h3 className="text-lg font-bold text-blue-900">
-                      {isEditMode && editFormData.doctorName
-                        ? editFormData.doctorName
-                        : selectedResult.doctorName || "Dr. Usman Gardezi"}
-                    </h3>
-                    {isEditMode && (
-                      <div className="space-y-2 mt-2">
+                  <label className="block mb-1">Doctor Name:</label>
+                  <div className="space-y-2">
                         <Select
                           value={selectedEditRole}
                           onValueChange={(value) => {
@@ -5209,6 +5149,8 @@ Report generated from Cura EMR System`;
                             setEditFormData((prev: any) => ({
                               ...prev,
                               doctorName: "",
+                          mainSpecialty: "",
+                          subSpecialty: "",
                             }));
                           }}
                         >
@@ -5226,13 +5168,66 @@ Report generated from Cura EMR System`;
 
                         {selectedEditRole && (
                           <Select
-                            value={editFormData.doctorName || ""}
-                            onValueChange={(value) =>
+                        value={editFormData.doctorName || selectedResult.doctorName || ""}
+                        onValueChange={(value) => {
+                          // Find the selected user to get their role
+                          const selectedUser = users.find((u: User) => 
+                            u.role === selectedEditRole && 
+                            `${u.firstName} ${u.lastName}` === value
+                          );
+                          
+                          // Auto-populate specializations based on role
+                          let mainSpecialty = "";
+                          let subSpecialty = "";
+                          
+                          if (selectedUser) {
+                            // Search medicalSpecialties for matching role
+                            for (const [mainSpec, subSpecs] of Object.entries(medicalSpecialties)) {
+                              if (typeof subSpecs === 'object' && subSpecs !== null) {
+                                for (const [subSpec] of Object.entries(subSpecs)) {
+                                  // Check if role name matches sub-specialization
+                                  const roleName = selectedEditRole.toLowerCase();
+                                  const subSpecLower = subSpec.toLowerCase();
+                                  
+                                  if (subSpecLower.includes(roleName) || roleName.includes(subSpecLower.split(' ')[0])) {
+                                    mainSpecialty = mainSpec;
+                                    subSpecialty = subSpec;
+                                    break;
+                                  }
+                                }
+                                if (mainSpecialty) break;
+                              }
+                            }
+                            
+                            // Fallback: try to match by role name directly
+                            if (!mainSpecialty) {
+                              const roleName = selectedEditRole.toLowerCase();
+                              if (roleName.includes('surgeon') || roleName.includes('surgical')) {
+                                mainSpecialty = "Surgical Specialties";
+                                subSpecialty = "General Surgeon";
+                              } else if (roleName.includes('orthopedic')) {
+                                mainSpecialty = "Surgical Specialties";
+                                subSpecialty = "Orthopedic Surgeon";
+                              } else if (roleName.includes('cardiologist') || roleName.includes('cardiac')) {
+                                mainSpecialty = "Heart & Circulation";
+                                subSpecialty = "Cardiologist";
+                              } else if (roleName.includes('pediatric')) {
+                                mainSpecialty = "Children's Health";
+                                subSpecialty = "Pediatrician";
+                              } else {
+                                mainSpecialty = "General & Primary Care";
+                                subSpecialty = "General Practitioner (GP) / Family Physician";
+                              }
+                            }
+                          }
+                          
                               setEditFormData((prev: any) => ({
                                 ...prev,
                                 doctorName: value,
-                              }))
-                            }
+                            mainSpecialty: mainSpecialty || prev.mainSpecialty || selectedResult.mainSpecialty || "",
+                            subSpecialty: subSpecialty || prev.subSpecialty || selectedResult.subSpecialty || "",
+                          }));
+                        }}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Select Name" />
@@ -5252,110 +5247,73 @@ Report generated from Cura EMR System`;
                           </Select>
                         )}
                       </div>
-                    )}
                   </div>
 
-                  {!isEditMode && (
-                    <>
                       <div>
-                        <p className="text-sm font-medium text-gray-600">
-                          Main Specialization:
-                        </p>
-                        <p className="text-gray-600 font-medium">
-                          {selectedResult.mainSpecialty || "Surgical Specialties"}
-                        </p>
+                  <label className="block mb-1">Main Specialization:</label>
+                  <Input
+                    value={editFormData.mainSpecialty !== undefined ? editFormData.mainSpecialty : (selectedResult.mainSpecialty || "")}
+                    onChange={(e) =>
+                      setEditFormData((prev: any) => ({
+                        ...prev,
+                        mainSpecialty: e.target.value,
+                      }))
+                    }
+                    placeholder="Enter main specialization"
+                  />
                       </div>
 
                       <div>
-                        <p className="text-sm font-medium text-gray-600">
-                          Sub-Specialization:
-                        </p>
-                        <p className="text-gray-600 font-medium">
-                          {selectedResult.subSpecialty || "Orthopedic Surgeon"}
-                        </p>
+                  <label className="block mb-1">Sub-Specialization:</label>
+                  <Input
+                    value={editFormData.subSpecialty !== undefined ? editFormData.subSpecialty : (selectedResult.subSpecialty || "")}
+                    onChange={(e) =>
+                      setEditFormData((prev: any) => ({
+                        ...prev,
+                        subSpecialty: e.target.value,
+                      }))
+                    }
+                    placeholder="Enter sub-specialization"
+                  />
                       </div>
-                    </>
-                  )}
 
                   <div>
-                    <p className="text-sm font-medium text-blue-600">
-                      Priority:
-                    </p>
-                    {isEditMode ? (
-                      <Select
-                        value={editFormData.priority || selectedResult.priority}
-                        onValueChange={(value) =>
+                  <label className="block mb-1">Notes:</label>
+                  <Textarea
+                    value={
+                      editFormData.notes !== undefined
+                        ? editFormData.notes
+                        : selectedResult.notes || ""
+                    }
+                    onChange={(e) =>
                           setEditFormData((prev: any) => ({
                             ...prev,
-                            priority: value,
+                        notes: e.target.value,
                           }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select priority" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="routine">Routine</SelectItem>
-                          <SelectItem value="urgent">Urgent</SelectItem>
-                          <SelectItem value="stat">STAT</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <p className="text-green-600 font-medium capitalize">
-                        {selectedResult.priority}
-                      </p>
-                    )}
+                    placeholder="Enter clinical notes or special instructions"
+                    rows={4}
+                    className="w-full"
+                  />
                   </div>
-
-                  {selectedResult.criticalValues && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-4">
-                      <p className="text-red-800 font-medium text-sm">
-                        ⚠️ Critical Values Alert
-                      </p>
-                      <p className="text-red-600 text-xs">
-                        This result contains critical values that require
-                        immediate attention.
-                      </p>
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Action Buttons */}
-          <div className="flex justify-end gap-2 pt-6 border-t">
-            {isEditMode ? (
-              <>
-                <Button variant="outline" onClick={handleCancelEdit}>
-                  Cancel
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button variant="outline" onClick={() => setShowViewDialog(false)}>
+                  Close
                 </Button>
                 <Button
                   onClick={handleSaveEdit}
                   disabled={updateLabResultMutation.isPending}
-                  className="bg-medical-blue hover:bg-blue-700"
                 >
                   {updateLabResultMutation.isPending
                     ? "Saving..."
                     : "Save Changes"}
                 </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowViewDialog(false)}
-                >
-                  Close
-                </Button>
-                {user?.role !== 'patient' && canEdit('lab_results') && (
-                  <Button variant="outline" onClick={handleStartEdit}>
-                    Edit
-                  </Button>
-                )}
-              </>
-            )}
           </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -5854,9 +5812,6 @@ Report generated from Cura EMR System`;
                       {getPatientName(selectedResult.patientId)}
                     </p>
                     <p>
-                      <strong>Patient ID:</strong> {selectedResult.patientId}
-                    </p>
-                    <p>
                       <strong>Date:</strong>{" "}
                       {format(new Date(), "MMM dd, yyyy")}
                     </p>
@@ -6006,13 +5961,19 @@ Report generated from Cura EMR System`;
                   <p>Date: {format(new Date(), "MMM dd, yyyy HH:mm")}</p>
                 </div>
                 <div className="mt-4 text-center">
-                  {selectedResult.signatureData && (
-                    <div className="mb-2">
+                  {/* Display signature if it exists in the database */}
+                  {selectedResult.signature?.doctorSignature && 
+                   String(selectedResult.signature.doctorSignature).trim() !== "" && (
+                    <div className="mb-4">
                       <img
-                        src={selectedResult.signatureData}
+                        src={selectedResult.signature.doctorSignature}
                         alt="E-Signature"
                         className="h-20 mx-auto"
                         style={{ maxWidth: "250px" }}
+                        onError={(e) => {
+                          console.error("Error loading signature image");
+                          e.currentTarget.style.display = 'none';
+                        }}
                       />
                     </div>
                   )}
@@ -6642,23 +6603,75 @@ Report generated from Cura EMR System`;
                 console.log('✅ Test types with definitions:', testTypes);
                 console.log('❌ Test types WITHOUT definitions:', allTestTypes.filter(t => !TEST_FIELD_DEFINITIONS[t]));
 
-                if (testTypes.length === 0) {
-                  return (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <p className="text-sm text-yellow-800">
-                        <strong>No parameter fields available for these tests:</strong>
-                      </p>
-                      <ul className="list-disc list-inside mt-2 text-sm text-yellow-700">
-                        {allTestTypes.map((test, idx) => (
-                          <li key={idx}>{test}</li>
-                        ))}
-                      </ul>
-                      <p className="text-xs text-yellow-600 mt-2">
-                        Please contact support if these test types should have parameter fields.
-                      </p>
-                    </div>
-                  );
-                }
+                // Get test types without definitions
+                const testTypesWithoutDefs = allTestTypes.filter(t => !TEST_FIELD_DEFINITIONS[t]);
+
+                // Function to add a custom field
+                const addCustomField = (testType: string) => {
+                  setCustomFields(prev => ({
+                    ...prev,
+                    [testType]: [
+                      ...(prev[testType] || []),
+                      { name: '', unit: '', referenceRange: '' }
+                    ]
+                  }));
+                };
+
+                // Function to remove a custom field
+                const removeCustomField = (testType: string, index: number) => {
+                  // Get the field name before removing it
+                  const fieldToRemove = customFields[testType]?.[index];
+                  const fieldName = fieldToRemove?.name;
+                  
+                  // Remove from custom fields
+                  setCustomFields(prev => ({
+                    ...prev,
+                    [testType]: (prev[testType] || []).filter((_: any, i: number) => i !== index)
+                  }));
+                  
+                  // Also remove the field value from form data
+                  if (fieldName) {
+                    const fieldKey = `${testType}::${fieldName}`;
+                    setFillResultFormData((prevData: any) => {
+                      const newData = { ...prevData };
+                      delete newData[fieldKey];
+                      return newData;
+                    });
+                  }
+                };
+
+                // Function to update a custom field
+                const updateCustomField = (testType: string, index: number, field: 'name' | 'unit' | 'referenceRange', value: string) => {
+                  setCustomFields(prev => {
+                    const updated = (prev[testType] || []).map((f: any, i: number) => 
+                      i === index ? { ...f, [field]: value } : f
+                    );
+                    // If name changed, update form data key
+                    if (field === 'name' && prev[testType]?.[index]?.name) {
+                      const oldKey = `${testType}::${prev[testType][index].name}`;
+                      const newKey = `${testType}::${value}`;
+                      setFillResultFormData((prevData: any) => {
+                        const newData = { ...prevData };
+                        if (newData[oldKey] !== undefined) {
+                          newData[newKey] = newData[oldKey];
+                          delete newData[oldKey];
+                        }
+                        return newData;
+                      });
+                    }
+                    return {
+                      ...prev,
+                      [testType]: updated
+                    };
+                  });
+                };
+
+                // Combine predefined and custom fields for rendering
+                const getAllFieldsForTestType = (testType: string) => {
+                  const predefined = TEST_FIELD_DEFINITIONS[testType] || [];
+                  const custom = customFields[testType] || [];
+                  return [...predefined, ...custom];
+                };
 
                 // Validation function for field values
                 const validateField = (fieldKey: string, value: string): string => {
@@ -6695,50 +6708,227 @@ Report generated from Cura EMR System`;
 
                 return (
                   <div className="space-y-6">
-                    {testTypes.map((testType: string, testIndex: number) => (
-                      <div key={testType} className="space-y-4">
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-600 p-3 rounded">
-                          <h4 className="font-semibold text-blue-900 text-lg">
-                            {testIndex + 1}. {testType}
-                          </h4>
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                            {TEST_FIELD_DEFINITIONS[testType].length} parameters
-                          </p>
+                    {/* Test types with predefined fields */}
+                    {testTypes.map((testType: string, testIndex: number) => {
+                      const allFields = getAllFieldsForTestType(testType);
+                      const customFieldsForType = customFields[testType] || [];
+                      
+                      return (
+                        <div key={testType} className="space-y-4">
+                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-600 p-3 rounded flex justify-between items-center">
+                            <div>
+                              <h4 className="font-semibold text-blue-900 text-lg">
+                                {testIndex + 1}. {testType}
+                              </h4>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                {allFields.length} parameters
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addCustomField(testType)}
+                              className="flex items-center gap-2"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Add Field
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4 pl-2">
+                            {allFields.map((field, fieldIndex) => {
+                              const isCustom = fieldIndex >= (TEST_FIELD_DEFINITIONS[testType]?.length || 0);
+                              const fieldKey = `${testType}::${field.name}`;
+                              const hasError = validationErrors[fieldKey];
+                              
+                              return (
+                                <div key={`${testType}-${field.name}-${fieldIndex}`} className="space-y-1">
+                                  {isCustom ? (
+                                    <div className="border-2 border-dashed border-blue-300 rounded-lg p-3 bg-blue-50/50">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <Label className="text-xs font-semibold text-blue-700">Custom Field</Label>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => removeCustomField(testType, fieldIndex - (TEST_FIELD_DEFINITIONS[testType]?.length || 0))}
+                                          className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Input
+                                          type="text"
+                                          placeholder="Parameter Name"
+                                          value={field.name}
+                                          onChange={(e) => updateCustomField(testType, fieldIndex - (TEST_FIELD_DEFINITIONS[testType]?.length || 0), 'name', e.target.value)}
+                                          className="text-sm"
+                                        />
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <Input
+                                            type="text"
+                                            placeholder="Unit (e.g., mg/dL)"
+                                            value={field.unit}
+                                            onChange={(e) => updateCustomField(testType, fieldIndex - (TEST_FIELD_DEFINITIONS[testType]?.length || 0), 'unit', e.target.value)}
+                                            className="text-sm"
+                                          />
+                                          <Input
+                                            type="text"
+                                            placeholder="Reference Range"
+                                            value={field.referenceRange}
+                                            onChange={(e) => updateCustomField(testType, fieldIndex - (TEST_FIELD_DEFINITIONS[testType]?.length || 0), 'referenceRange', e.target.value)}
+                                            className="text-sm"
+                                          />
+                                        </div>
+                                        {field.name && (
+                                          <Input
+                                            type="text"
+                                            placeholder={`Enter ${field.name}`}
+                                            value={fillResultFormData[fieldKey] || ""}
+                                            onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
+                                            className={hasError ? "border-red-500 focus:ring-red-500" : ""}
+                                          />
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <Label htmlFor={`fill-${testType}-${field.name}`}>
+                                        {field.name}
+                                        <span className="text-xs text-gray-500 ml-2">
+                                          (Ref: {field.referenceRange} {field.unit})
+                                        </span>
+                                      </Label>
+                                      <Input
+                                        id={`fill-${testType}-${field.name}`}
+                                        type="text"
+                                        placeholder={`Enter ${field.name}`}
+                                        value={fillResultFormData[fieldKey] || ""}
+                                        onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
+                                        className={hasError ? "border-red-500 focus:ring-red-500" : ""}
+                                        data-testid={`input-fill-${testType}-${field.name}`}
+                                      />
+                                    </>
+                                  )}
+                                  {hasError && (
+                                    <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      {hasError}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4 pl-2">
-                          {TEST_FIELD_DEFINITIONS[testType].map((field) => {
-                            const fieldKey = `${testType}::${field.name}`;
-                            const hasError = validationErrors[fieldKey];
-                            
-                            return (
-                              <div key={`${testType}-${field.name}`} className="space-y-1">
-                                <Label htmlFor={`fill-${testType}-${field.name}`}>
-                                  {field.name}
-                                  <span className="text-xs text-gray-500 ml-2">
-                                    (Ref: {field.referenceRange} {field.unit})
-                                  </span>
-                                </Label>
-                                <Input
-                                  id={`fill-${testType}-${field.name}`}
-                                  type="text"
-                                  placeholder={`Enter ${field.name}`}
-                                  value={fillResultFormData[fieldKey] || ""}
-                                  onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
-                                  className={hasError ? "border-red-500 focus:ring-red-500" : ""}
-                                  data-testid={`input-fill-${testType}-${field.name}`}
-                                />
-                                {hasError && (
-                                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    {hasError}
+                      );
+                    })}
+                    
+                    {/* Test types without predefined fields - allow manual addition */}
+                    {testTypesWithoutDefs.length > 0 && (
+                      <div className="space-y-4">
+                        {testTypesWithoutDefs.map((testType: string, testIndex: number) => {
+                          const customFieldsForType = customFields[testType] || [];
+                          
+                          return (
+                            <div key={testType} className="space-y-4">
+                              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded flex justify-between items-center">
+                                <div>
+                                  <h4 className="font-semibold text-yellow-900 text-lg">
+                                    {testTypes.length + testIndex + 1}. {testType}
+                                  </h4>
+                                  <p className="text-sm text-yellow-700 mt-1">
+                                    No predefined parameters. Add custom fields below.
                                   </p>
-                                )}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => addCustomField(testType)}
+                                  className="flex items-center gap-2 border-yellow-300 hover:bg-yellow-100"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                  Add Parameter
+                                </Button>
                               </div>
-                            );
-                          })}
-                        </div>
+                              {customFieldsForType.length === 0 ? (
+                                <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg p-6 text-center">
+                                  <p className="text-sm text-gray-600 mb-2">
+                                    No parameters added yet. Click "Add Parameter" to create custom fields.
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-4 pl-2">
+                                  {customFieldsForType.map((field, fieldIndex) => {
+                                    const fieldKey = `${testType}::${field.name}`;
+                                    const hasError = validationErrors[fieldKey];
+                                    
+                                    return (
+                                      <div key={`${testType}-custom-${fieldIndex}`} className="space-y-1 border-2 border-dashed border-blue-300 rounded-lg p-3 bg-blue-50/50">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <Label className="text-xs font-semibold text-blue-700">Custom Parameter</Label>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => removeCustomField(testType, fieldIndex)}
+                                            className="h-6 w-6 p-0 text-red-600 hover:text-red-700"
+                                          >
+                                            <X className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Input
+                                            type="text"
+                                            placeholder="Parameter Name (e.g., Total Cholesterol)"
+                                            value={field.name}
+                                            onChange={(e) => updateCustomField(testType, fieldIndex, 'name', e.target.value)}
+                                            className="text-sm"
+                                          />
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <Input
+                                              type="text"
+                                              placeholder="Unit (e.g., mg/dL)"
+                                              value={field.unit}
+                                              onChange={(e) => updateCustomField(testType, fieldIndex, 'unit', e.target.value)}
+                                              className="text-sm"
+                                            />
+                                            <Input
+                                              type="text"
+                                              placeholder="Reference Range (e.g., <200)"
+                                              value={field.referenceRange}
+                                              onChange={(e) => updateCustomField(testType, fieldIndex, 'referenceRange', e.target.value)}
+                                              className="text-sm"
+                                            />
+                                          </div>
+                                          {field.name && (
+                                            <Input
+                                              type="text"
+                                              placeholder={`Enter ${field.name}`}
+                                              value={fillResultFormData[fieldKey] || ""}
+                                              onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
+                                              className={hasError ? "border-red-500 focus:ring-red-500" : ""}
+                                            />
+                                          )}
+                                        </div>
+                                        {hasError && (
+                                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                            <AlertTriangle className="h-3 w-3" />
+                                            {hasError}
+                                          </p>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    )}
                   </div>
                 );
               })()}
@@ -6869,6 +7059,7 @@ Report generated from Cura EMR System`;
                     setShowFillResultDialog(false);
                     setFillResultFormData({});
                     setValidationErrors({});
+                    setCustomFields({});
                   }}
                 >
                   Cancel
@@ -6887,33 +7078,51 @@ Report generated from Cura EMR System`;
                     }
 
                     // Build results grouped by test type
-                    const testTypes = selectedLabOrder.testType
+                    const allTestTypes = selectedLabOrder.testType
                       .split(' | ')
-                      .map((t: string) => t.trim())
-                      .filter((t: string) => TEST_FIELD_DEFINITIONS[t]);
+                      .map((t: string) => t.trim());
                     
-                    // Group results by test type
+                    // Group results by test type (including custom fields)
                     const resultsByTestType: Record<string, any[]> = {};
-                    testTypes.forEach((testType: string) => {
-                      const testFields = TEST_FIELD_DEFINITIONS[testType];
-                      if (testFields) {
-                        const testResults: any[] = [];
-                        testFields.forEach((field) => {
+                    allTestTypes.forEach((testType: string) => {
+                      const testResults: any[] = [];
+                      
+                      // Process predefined fields
+                      const predefinedFields = TEST_FIELD_DEFINITIONS[testType] || [];
+                      predefinedFields.forEach((field) => {
+                        const fieldKey = `${testType}::${field.name}`;
+                        const value = fillResultFormData[fieldKey];
+                        if (value && value.trim() !== "") {
+                          testResults.push({
+                            name: field.name,
+                            value: value,
+                            unit: field.unit,
+                            referenceRange: field.referenceRange,
+                            status: "normal",
+                          });
+                        }
+                      });
+                      
+                      // Process custom fields
+                      const customFieldsForType = customFields[testType] || [];
+                      customFieldsForType.forEach((field) => {
+                        if (field.name && field.name.trim() !== "") {
                           const fieldKey = `${testType}::${field.name}`;
                           const value = fillResultFormData[fieldKey];
                           if (value && value.trim() !== "") {
                             testResults.push({
                               name: field.name,
                               value: value,
-                              unit: field.unit,
-                              referenceRange: field.referenceRange,
+                              unit: field.unit || "",
+                              referenceRange: field.referenceRange || "",
                               status: "normal",
                             });
                           }
-                        });
-                        if (testResults.length > 0) {
-                          resultsByTestType[testType] = testResults;
                         }
+                      });
+                      
+                      if (testResults.length > 0) {
+                        resultsByTestType[testType] = testResults;
                       }
                     });
 
@@ -7484,6 +7693,7 @@ Report generated from Cura EMR System`;
                     setShowFillResultDialog(false);
                     setFillResultFormData({});
                     setValidationErrors({});
+                    setCustomFields({});
                     setShowSuccessDialog(true);
                   }}
                   className="bg-green-600 hover:bg-green-700"
@@ -8133,6 +8343,72 @@ Report generated from Cura EMR System`;
               Done
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Signature Details Dialog */}
+      <Dialog open={showSignatureDetailsDialog} onOpenChange={setShowSignatureDetailsDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Signature Details</DialogTitle>
+          </DialogHeader>
+          {selectedSignatureData && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-semibold">Signed At</Label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {selectedSignatureData.signedAt 
+                      ? format(new Date(selectedSignatureData.signedAt), "MMM dd, yyyy HH:mm:ss")
+                      : "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-sm font-semibold">Signed By</Label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {selectedSignatureData.signedBy || "N/A"}
+                  </p>
+                </div>
+                {selectedSignatureData.signerId && (
+                  <div>
+                    <Label className="text-sm font-semibold">Signer ID</Label>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {selectedSignatureData.signerId}
+                    </p>
+                  </div>
+                )}
+              </div>
+              {selectedSignatureData.doctorSignature ? (
+                <div>
+                  <Label className="text-sm font-semibold">Doctor Signature</Label>
+                  <div className="mt-2 p-4 border rounded-lg bg-gray-50 dark:bg-gray-800">
+                    <img 
+                      src={selectedSignatureData.doctorSignature} 
+                      alt="Doctor Signature" 
+                      className="max-w-full h-auto border border-gray-300 dark:border-gray-600 rounded"
+                      onError={(e) => {
+                        console.error("Error loading signature image:", selectedSignatureData.doctorSignature);
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Label className="text-sm font-semibold">Doctor Signature</Label>
+                  <div className="mt-2 flex items-center gap-2 text-red-600">
+                    <X className="h-4 w-4" />
+                    <span className="text-sm font-medium">not signed</span>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Button onClick={() => setShowSignatureDetailsDialog(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

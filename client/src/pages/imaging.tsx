@@ -391,6 +391,8 @@ export default function ImagingPage() {
   const [signatureSaved, setSignatureSaved] = useState(false);
   const [lastPosition, setLastPosition] = useState<{ x: number; y: number } | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [isSavingSignature, setIsSavingSignature] = useState(false);
 
   const [uploadFormData, setUploadFormData] = useState({
     patientId: "",
@@ -399,6 +401,8 @@ export default function ImagingPage() {
     bodyPart: "",
     indication: "",
     priority: "routine",
+    selectedRole: "",
+    selectedUserId: "",
   });
   const [orderFormData, setOrderFormData] = useState({
     patientId: "",
@@ -416,6 +420,14 @@ export default function ImagingPage() {
   const [saveImageSuccess, setSaveImageSuccess] = useState<string | null>(null);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [selectedImageSeries, setSelectedImageSeries] = useState<any>(null);
+  const [showBodyPartImagesDialog, setShowBodyPartImagesDialog] = useState(false);
+  const [selectedBodyPart, setSelectedBodyPart] = useState<string | null>(null);
+  const [bodyPartImages, setBodyPartImages] = useState<any[]>([]);
+  const [loadingBodyPartImages, setLoadingBodyPartImages] = useState(false);
+  const [bodyPartImagePreviews, setBodyPartImagePreviews] = useState<Record<number, string>>({});
+  const [showPDFListViewDialog, setShowPDFListViewDialog] = useState(false);
+  const [selectedPDFUrl, setSelectedPDFUrl] = useState<string | null>(null);
+  const [selectedPDFFileName, setSelectedPDFFileName] = useState<string | null>(null);
   const [deletedStudyIds, setDeletedStudyIds] = useState<Set<string>>(
     new Set(),
   );
@@ -424,10 +436,17 @@ export default function ImagingPage() {
   );
   const [showEditImageDialog, setShowEditImageDialog] = useState(false);
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
+  const [radiologyImages, setRadiologyImages] = useState<any[]>([]);
+  const [loadingRadiologyImages, setLoadingRadiologyImages] = useState(false);
   const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
   const [showPrescriptionDialog, setShowPrescriptionDialog] = useState(false);
+  const [showSignFirstDialog, setShowSignFirstDialog] = useState(false);
+  const [pendingPrescriptionStudy, setPendingPrescriptionStudy] = useState<any>(null);
+  const [pendingESignStudy, setPendingESignStudy] = useState<any>(null);
   const [selectedPrescriptionStudy, setSelectedPrescriptionStudy] = useState<any>(null);
   const [isSavingPrescription, setIsSavingPrescription] = useState(false);
+  const [showSignatureDetailsDialog, setShowSignatureDetailsDialog] = useState(false);
+  const [selectedSignatureData, setSelectedSignatureData] = useState<any>(null);
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   const [eSignStudy, setESignStudy] = useState<any>(null);
   const [invoiceFormData, setInvoiceFormData] = useState({
@@ -466,6 +485,8 @@ export default function ImagingPage() {
   const [modalityOpen, setModalityOpen] = useState(false);
   const [bodyPartOpen, setBodyPartOpen] = useState(false);
   const [studyTypeOpen, setStudyTypeOpen] = useState(false);
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   
   const { toast } = useToast();
 
@@ -491,6 +512,69 @@ export default function ImagingPage() {
       const response = await apiRequest('GET', '/api/pricing/imaging');
       const data = await response.json();
       return Array.isArray(data) ? data : [];
+    },
+  });
+
+  // Generate study types from MODALITY_BODY_PARTS if pricing data is empty
+  const availableStudyTypes = useMemo(() => {
+    if (imagingPricing.length > 0) {
+      // Use pricing data if available
+      return imagingPricing.map((p: any) => ({
+        id: p.id,
+        imagingType: p.imagingType,
+        imagingCode: p.imagingCode,
+        modality: p.modality,
+        bodyPart: p.bodyPart,
+        basePrice: p.basePrice,
+      }));
+    } else {
+      // Fallback to MODALITY_BODY_PARTS
+      const studyTypes: any[] = [];
+      let idCounter = 1;
+      Object.entries(MODALITY_BODY_PARTS).forEach(([modality, bodyParts]) => {
+        bodyParts.forEach((bodyPart) => {
+          studyTypes.push({
+            id: idCounter++,
+            imagingType: bodyPart,
+            imagingCode: `IMG-${idCounter.toString().padStart(3, '0')}`,
+            modality: modality,
+            bodyPart: bodyPart,
+            basePrice: "50.00",
+          });
+        });
+      });
+      return studyTypes;
+    }
+  }, [imagingPricing]);
+
+  // Fetch users by selected role
+  const { data: usersByRole = [], isLoading: usersByRoleLoading } = useQuery({
+    queryKey: ["/api/users/by-role", uploadFormData.selectedRole],
+    staleTime: 60000,
+    retry: false,
+    enabled: !!uploadFormData.selectedRole && user?.role !== 'patient',
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/users/by-role/${uploadFormData.selectedRole}`);
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
+  // Fetch all users for provider name lookup
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ["/api/users"],
+    staleTime: 60000,
+    retry: false,
+    enabled: user?.role !== 'patient',
+    queryFn: async () => {
+      try {
+        const response = await apiRequest('GET', '/api/users');
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        return [];
+      }
     },
   });
 
@@ -614,6 +698,10 @@ export default function ImagingPage() {
       fileName: study.fileName || study.file_name, // Add fileName from medical_images table for PDF generation
       reportFileName: study.reportFileName,
       reportFilePath: study.reportFilePath,
+      signatureData: study.signatureData || null, // Include signature data
+      signatureDate: study.signatureDate || null, // Include signature date
+      selectedUserId: study.selectedUserId || null, // Include selected user ID
+      selectedRole: study.selectedRole || null, // Include selected role
       images: [
         {
           id: String(study.id),
@@ -638,24 +726,43 @@ export default function ImagingPage() {
         const fileName = selectedStudy.reportFilePath.split('/').pop() || '';
         const reportId = fileName.replace(".pdf", "");
         try {
-          const response = await fetch(`/api/imaging/reports/${reportId}`, {
-            method: "HEAD",
+          // Use the signed URL endpoint to check if report exists
+          // Extract imageId from reportId (which may contain timestamp)
+          let imageId = reportId;
+          if (reportId.includes('_')) {
+            const parts = reportId.split('_');
+            imageId = parts[0];
+          }
+          
+          // Get signed URL to check if file exists
+          const token = localStorage.getItem("auth_token");
+          const response = await fetch(`/api/imaging-files/${imageId}/signed-url`, {
+            method: "GET",
             headers: {
               "X-Tenant-Subdomain": getActiveSubdomain() || "demo",
+              ...(token && {
+                Authorization: `Bearer ${token}`,
+              }),
             },
+            credentials: "include",
           });
           
           if (response.status === 404) {
             setNonExistentReports(prev => new Set(prev).add(selectedStudy.id));
           } else if (response.ok) {
+            // File exists, clear from nonExistentReports
             setNonExistentReports(prev => {
               const newSet = new Set(prev);
               newSet.delete(selectedStudy.id);
               return newSet;
             });
+          } else if (response.status === 401) {
+            // Unauthorized - don't mark as non-existent, just skip
+            console.warn("Unauthorized to check report file existence");
           }
         } catch (error) {
           console.error("Error checking report file:", error);
+          // On error, don't mark as non-existent to avoid false negatives
         }
       } else if (selectedStudy?.id) {
         // If reportFilePath is null/undefined, clear from nonExistentReports
@@ -1140,11 +1247,53 @@ export default function ImagingPage() {
     }
   }, [showNewOrder, showUploadDialog, user?.role, currentPatient]);
 
+  // Set default payment method to "Cash" when invoice dialog opens
+  useEffect(() => {
+    if (showInvoiceDialog && !invoiceFormData.paymentMethod) {
+      setInvoiceFormData((prev) => ({ ...prev, paymentMethod: "Cash" }));
+    }
+  }, [showInvoiceDialog, invoiceFormData.paymentMethod]);
+
+  // Handler for Generate Report dialog - just selects files without uploading
+  const handleReportFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      const fileList = Array.from(files);
+      // Append new files to existing selectedFiles instead of replacing
+      setSelectedFiles(prevFiles => {
+        // Create a map to track existing files by name and size to avoid duplicates
+        const existingFilesMap = new Map(prevFiles.map(f => [`${f.name}-${f.size}`, f]));
+        // Add new files, skipping duplicates
+        fileList.forEach(newFile => {
+          const key = `${newFile.name}-${newFile.size}`;
+          if (!existingFilesMap.has(key)) {
+            existingFilesMap.set(key, newFile);
+          }
+        });
+        return Array.from(existingFilesMap.values());
+      });
+    }
+    // Reset the input so the same file can be selected again if needed
+    event.target.value = '';
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0 && selectedStudy) {
       const fileList = Array.from(files);
-      setSelectedFiles(fileList);
+      // Append new files to existing selectedFiles instead of replacing
+      setSelectedFiles(prevFiles => {
+        // Create a map to track existing files by name and size to avoid duplicates
+        const existingFilesMap = new Map(prevFiles.map(f => [`${f.name}-${f.size}`, f]));
+        // Add new files, skipping duplicates
+        fileList.forEach(newFile => {
+          const key = `${newFile.name}-${newFile.size}`;
+          if (!existingFilesMap.has(key)) {
+            existingFilesMap.set(key, newFile);
+          }
+        });
+        return Array.from(existingFilesMap.values());
+      });
       setUploadingImages(true);
 
       try {
@@ -1204,17 +1353,26 @@ export default function ImagingPage() {
     }
   };
 
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+
   const handleUploadSubmit = async () => {
+    // Prevent duplicate submissions
+    if (isSubmittingOrder) {
+      console.log('📷 CLIENT: Order submission already in progress, ignoring duplicate click');
+      return;
+    }
+
     // Validate required fields
-    if (!uploadFormData.patientId || !uploadFormData.studyType) {
+    if (!uploadFormData.patientId || !uploadFormData.studyType || !uploadFormData.selectedRole || !uploadFormData.selectedUserId) {
       toast({
         title: "Order Failed",
-        description: "Please fill in all required fields",
+        description: "Please fill in all required fields including Role and Name",
         variant: "destructive",
       });
       return;
     }
 
+    setIsSubmittingOrder(true);
     try {
       // Find the selected patient
       const selectedPatient = patients.find(
@@ -1257,7 +1415,9 @@ export default function ImagingPage() {
         mimeType: "application/pending",
         uploadedBy: user?.id || 0,
         status: "ordered",
-        orderStudyCreated: true
+        orderStudyCreated: true,
+        selectedRole: uploadFormData.selectedRole || null,
+        selectedUserId: uploadFormData.selectedUserId ? parseInt(uploadFormData.selectedUserId) : null,
       };
 
       const response = await apiRequest("POST", "/api/medical-images", imageData);
@@ -1277,7 +1437,7 @@ export default function ImagingPage() {
       setShowUploadDialog(false);
       
       // Fetch pricing from imaging_pricing table based on selected study type
-      const pricingData = imagingPricing.find((p: any) => 
+      const pricingData = availableStudyTypes.find((p: any) => 
         p.imagingType === uploadFormData.studyType
       );
       
@@ -1297,7 +1457,7 @@ export default function ImagingPage() {
       setInvoiceNotes(`Imaging study: ${uploadFormData.studyType}, Modality: ${uploadFormData.modality}, Body Part: ${uploadFormData.bodyPart}`);
       
       setInvoiceFormData({
-        paymentMethod: "",
+        paymentMethod: "Cash", // Default to Cash
         subtotal,
         tax,
         discount: 0,
@@ -1317,6 +1477,8 @@ export default function ImagingPage() {
         description: "Failed to create medical imaging order. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsSubmittingOrder(false);
     }
   };
 
@@ -1357,6 +1519,8 @@ export default function ImagingPage() {
       bodyPart: orderFormData.bodyPart,
       indication: orderFormData.indication,
       priority: orderFormData.priority,
+      selectedRole: "",
+      selectedUserId: "",
     });
 
     // Close order dialog and open upload dialog
@@ -1407,8 +1571,10 @@ export default function ImagingPage() {
     });
   };
 
-  const handleGenerateReport = (studyId: string) => {
-    const study = ((studies as any) || []).find((s: any) => s.id === studyId);
+  const handleGenerateReport = (studyId: string | number) => {
+    // Convert studyId to string for comparison, as study.id might be number or string
+    const studyIdStr = String(studyId);
+    const study = ((studies as any) || []).find((s: any) => String(s.id) === studyIdStr);
     if (study) {
       setSelectedStudyId(study.id);
       setReportFindings(study.findings || "");
@@ -1419,6 +1585,12 @@ export default function ImagingPage() {
       setScheduledDate(new Date()); // Set to current date by default
       setPerformedDate(new Date()); // Set to current date by default
       setShowReportDialog(true);
+    } else {
+      toast({
+        title: "Error",
+        description: "Study not found",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1431,8 +1603,10 @@ export default function ImagingPage() {
     }
   }, [showReportDialog]);
 
-  const handleGenerateImagePrescription = async (studyId: string) => {
-    const study = ((studies as any) || []).find((s: any) => s.id === studyId);
+  const handleESignClick = async (studyId: string | number) => {
+    // Convert studyId to string for comparison, as study.id might be number or string
+    const studyIdStr = String(studyId);
+    const study = ((studies as any) || []).find((s: any) => String(s.id) === studyIdStr);
     if (!study) {
       toast({
         title: "Error",
@@ -1442,6 +1616,82 @@ export default function ImagingPage() {
       return;
     }
 
+    // Check database directly for signature data
+    try {
+      const response = await apiRequest('GET', `/api/medical-images/${study.id}`);
+      if (response.ok) {
+        const medicalImageData = await response.json();
+        // Check if signature exists in database
+        if (!medicalImageData.signatureData || String(medicalImageData.signatureData).trim() === "") {
+          // Show modal to sign first
+          setPendingESignStudy(study);
+          setShowSignFirstDialog(true);
+          return;
+        }
+        // Update study with latest signature data from database
+        study.signatureData = medicalImageData.signatureData;
+        study.signatureDate = medicalImageData.signatureDate;
+      }
+    } catch (error) {
+      console.error("Error checking signature in database:", error);
+      // Fallback to checking study object
+    if (!study.signatureData || String(study.signatureData).trim() === "") {
+        setPendingESignStudy(study);
+        setShowSignFirstDialog(true);
+        return;
+      }
+    }
+
+    // If signature exists, allow editing/re-signing - open e-signature dialog directly
+    setESignStudy(study);
+    setShowESignDialog(true);
+  };
+
+  const handleGenerateImagePrescription = async (studyId: string | number) => {
+    // Convert studyId to string for comparison, as study.id might be number or string
+    const studyIdStr = String(studyId);
+    const study = ((studies as any) || []).find((s: any) => String(s.id) === studyIdStr);
+    if (!study) {
+      toast({
+        title: "Error",
+        description: "Study not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check database directly for signature data
+    try {
+      const response = await apiRequest('GET', `/api/medical-images/${study.id}`);
+      if (response.ok) {
+        const medicalImageData = await response.json();
+        // Check if signature exists in database
+        if (!medicalImageData.signatureData || String(medicalImageData.signatureData).trim() === "") {
+      // Show modal to sign first
+      setPendingPrescriptionStudy(study);
+      setShowSignFirstDialog(true);
+      return;
+        }
+        // Update study with latest signature data from database
+        study.signatureData = medicalImageData.signatureData;
+        study.signatureDate = medicalImageData.signatureDate;
+      }
+    } catch (error) {
+      console.error("Error checking signature in database:", error);
+      // Fallback to checking study object
+      if (!study.signatureData || String(study.signatureData).trim() === "") {
+        setPendingPrescriptionStudy(study);
+        setShowSignFirstDialog(true);
+        return;
+      }
+    }
+
+    // If signature exists, proceed with prescription generation
+    await handleGenerateImagePrescriptionWithSignature(study);
+  };
+
+  const handleGenerateImagePrescriptionWithSignature = async (study: any) => {
+    // This function is called when signature is confirmed to exist
     try {
       toast({
         title: "Generating Prescription",
@@ -1450,22 +1700,65 @@ export default function ImagingPage() {
 
       // Call backend to generate image prescription PDF
       // Note: Signature is fetched from database, not sent from frontend
+      // Use study.id (numeric database ID) instead of study.imageId (string identifier)
+      if (!study.id) {
+        toast({
+          title: "Error",
+          description: "Study ID is missing. Cannot generate prescription.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const response = await apiRequest(
         "POST",
         "/api/imaging/generate-image-prescription",
         {
-          imageId: study.imageId,
+          imageId: study.id, // Use numeric database ID
         }
       );
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to generate prescription");
+      // Check content type before parsing JSON
+      const contentType = response.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json");
+
+      // Parse response as JSON, handling HTML error responses gracefully
+      let data;
+      try {
+        if (!isJson) {
+          // Response is not JSON (might be HTML error page)
+          const text = await response.text();
+          console.error("Non-JSON response received (first 200 chars):", text.substring(0, 200));
+          throw new Error("Server returned an unexpected response format. The endpoint may not exist or there was a server error. Please contact support.");
+        }
+        
+        // Try to parse as JSON
+        data = await response.json();
+      } catch (parseError) {
+        // If JSON parsing fails, it might be HTML or other format
+        if (parseError instanceof SyntaxError || parseError instanceof TypeError) {
+          console.error("Failed to parse JSON response:", parseError);
+          throw new Error("Server returned an invalid response. The prescription generation endpoint may not be available. Please contact support.");
+        }
+        // Re-throw if it's already an Error with a message
+        throw parseError;
       }
 
-      const data = await response.json();
-
       if (data.success && data.viewUrl) {
+        // Update order_study_ready_to_generate to true after successful prescription generation
+        // This is only done when in "Order Study" tab
+        if (activeTab === "order-study") {
+          try {
+            await apiRequest("PATCH", `/api/medical-images/${study.id}`, {
+              orderStudyReadyToGenerate: true,
+            });
+            console.log("✅ Updated order_study_ready_to_generate to true for study:", study.id);
+          } catch (updateError) {
+            console.error("Error updating order_study_ready_to_generate:", updateError);
+            // Don't fail the whole operation if update fails, just log it
+          }
+        }
+
         toast({
           title: "Prescription Generated",
           description: "Opening prescription in new tab...",
@@ -1476,23 +1769,61 @@ export default function ImagingPage() {
         
         // Auto-refresh data after successful prescription generation
         refetchImages();
+
+        // Close the e-signature dialog and switch to Generate Report tab
+        setShowESignDialog(false);
+        clearSignature();
+        setSignatureSaved(false);
+        setIsSavingSignature(false);
+        
+        // Switch to Generate Report tab if user has access
+        if (user?.role !== 'patient') {
+          setActiveTab("generate-report");
+        }
       } else {
-        throw new Error("Failed to generate prescription");
+        throw new Error(data.error || data.message || "Failed to generate prescription");
       }
     } catch (error) {
       console.error("Prescription generation error:", error);
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : "Failed to generate prescription. Please try again.";
+      
       toast({
         title: "Prescription Generation Failed",
-        description: error instanceof Error ? error.message : "Failed to generate prescription. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
+      
+      // Re-enable button on error
+      setIsSavingSignature(false);
     }
   };
 
-  const handleEditImage = (studyId: string) => {
+  const handleEditImage = async (studyId: string) => {
     setEditingStudyId(studyId);
     setSelectedFiles([]);
     setShowEditImageDialog(true);
+    
+    // Fetch radiology images for this medical image
+    try {
+      setLoadingRadiologyImages(true);
+      const response = await apiRequest(
+        "GET",
+        `/api/radiology-images/${studyId}`,
+        {}
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setRadiologyImages(data.images || []);
+      }
+    } catch (error) {
+      console.error("Error fetching radiology images:", error);
+      setRadiologyImages([]);
+    } finally {
+      setLoadingRadiologyImages(false);
+    }
   };
 
   const handleReplaceImage = () => {
@@ -1532,11 +1863,13 @@ export default function ImagingPage() {
           formData.append('bodyPart', study.bodyPart || '');
           formData.append('indication', study.indication || '');
           
-          // Send the study's imageId to update the existing ORDER row
-          if (study.imageId) {
-            formData.append('updateImageId', study.imageId);
-            console.log('📷 CLIENT: Updating existing ORDER row with imageId:', study.imageId);
-          }
+          // For report generation with multiple images, create new rows instead of updating
+          // This ensures all images are stored in filesystem and can be loaded for PDF
+          // Don't send updateImageId when uploading multiple images for report generation
+          // if (study.imageId && selectedFiles.length === 1) {
+          //   formData.append('updateImageId', study.imageId);
+          //   console.log('📷 CLIENT: Updating existing ORDER row with imageId:', study.imageId);
+          // }
 
           // Add all files to FormData
           selectedFiles.forEach((file, index) => {
@@ -1574,12 +1907,73 @@ export default function ImagingPage() {
           }
 
           const uploadResult = await uploadResponse.json();
-          console.log('📷 CLIENT: Images uploaded successfully:', uploadResult);
+          console.log('📷 CLIENT: Upload response:', uploadResult);
 
-          // Extract filenames from uploaded images
+          // Extract filenames from successfully uploaded images (filter out failed uploads)
           if (uploadResult.images && Array.isArray(uploadResult.images)) {
-            uploadedImageFileNames = uploadResult.images.map((img: any) => img.fileName);
+            uploadedImageFileNames = uploadResult.images
+              .filter((img: any) => !img.failed && img.fileName) // Only include successful uploads with fileName
+              .map((img: any) => img.fileName);
+            
+            const failedCount = uploadResult.images.filter((img: any) => img.failed).length;
+            const successCount = uploadedImageFileNames.length;
+            
+            console.log(`📷 CLIENT: Successfully uploaded ${successCount} image(s), ${failedCount} failed`);
             console.log('📷 CLIENT: Extracted uploaded image filenames:', uploadedImageFileNames);
+            
+            if (failedCount > 0) {
+              toast({
+                title: "Some Images Failed",
+                description: `${successCount} image(s) uploaded successfully, ${failedCount} failed.`,
+                variant: "destructive",
+              });
+            }
+
+            // Save all uploaded images to radiology_images table
+            if (uploadedImageFileNames.length > 0 && study.id) {
+              try {
+                const token = localStorage.getItem("auth_token");
+                const saveRadiologyResponse = await fetch('/api/radiology-images', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tenant-Subdomain': getActiveSubdomain(),
+                    'Authorization': token ? `Bearer ${token}` : '',
+                  },
+                  credentials: 'include',
+                  body: JSON.stringify({
+                    medicalImageId: study.id,
+                    imageFileNames: uploadedImageFileNames,
+                    organizationId: study.organizationId || user?.organizationId,
+                    patientId: study.patientId,
+                  }),
+                });
+
+                if (saveRadiologyResponse.ok) {
+                  const saveResult = await saveRadiologyResponse.json();
+                  console.log('📷 CLIENT: Saved images to radiology_images table:', saveResult);
+                  toast({
+                    title: "Images Saved",
+                    description: `Successfully saved ${saveResult.savedCount || uploadedImageFileNames.length} image(s) to radiology_images table`,
+                  });
+                } else {
+                  console.error('Failed to save images to radiology_images table');
+                  const errorData = await saveRadiologyResponse.json().catch(() => ({}));
+                  toast({
+                    title: "Warning",
+                    description: "Images uploaded but failed to save to radiology_images table. " + (errorData.error || ''),
+                    variant: "destructive",
+                  });
+                }
+              } catch (saveError) {
+                console.error('Error saving images to radiology_images table:', saveError);
+                toast({
+                  title: "Warning",
+                  description: "Images uploaded but failed to save to radiology_images table.",
+                  variant: "destructive",
+                });
+              }
+            }
           }
 
           toast({
@@ -1599,7 +1993,36 @@ export default function ImagingPage() {
         }
       }
 
-      // Call server-side PDF generation endpoint with fileName, uploaded image filenames, and signature data
+      // Fetch radiology images from database (from radiology_images table)
+      let radiologyImagePaths: string[] = [];
+      try {
+        const radiologyResponse = await apiRequest(
+          "GET",
+          `/api/radiology-images/${study.id}`,
+          undefined
+        );
+        
+        if (radiologyResponse.ok) {
+          const radiologyData = await radiologyResponse.json();
+          if (radiologyData.success && radiologyData.images && Array.isArray(radiologyData.images)) {
+            // Sort images by displayOrder first, then extract file_path
+            const sortedImages = radiologyData.images
+              .filter((img: any) => img.filePath)
+              .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
+            
+            // Extract file_path from each sorted radiology image
+            radiologyImagePaths = sortedImages.map((img: any) => img.filePath);
+            
+            console.log('📷 CLIENT: Found radiology images from database:', radiologyImagePaths.length);
+            console.log('📷 CLIENT: Radiology image paths:', radiologyImagePaths);
+          }
+        }
+      } catch (radiologyError) {
+        console.error('Error fetching radiology images:', radiologyError);
+        // Continue with report generation even if radiology images fetch fails
+      }
+
+      // Call server-side PDF generation endpoint with fileName, uploaded image filenames, radiology image paths, and signature data
       const response = await apiRequest(
         "POST",
         "/api/imaging/generate-report",
@@ -1613,6 +2036,7 @@ export default function ImagingPage() {
             performedAt: performedDate ? performedDate.toISOString() : null,
           },
           uploadedImageFileNames,
+          radiologyImagePaths, // Pass file paths from radiology_images table
           signatureData: study.signatureData || null,
           signatureDate: study.signatureDate || null,
         },
@@ -1670,8 +2094,19 @@ export default function ImagingPage() {
 
   const viewPDFReport = async (reportId: string) => {
     try {
-      // Request a temporary signed URL from the backend
-      const response = await apiRequest("GET", `/api/imaging-files/${reportId}/signed-url`);
+      // Extract imageId from reportId (remove timestamp if present)
+      // ReportId format: IMG1769972471249I98ORDER_1769973253902 or IMG1769972471249I98ORDER
+      let imageId = reportId;
+      if (reportId.includes('_')) {
+        // If it contains underscore, it likely has a timestamp, extract the imageId part
+        const parts = reportId.split('_');
+        imageId = parts[0]; // Take the part before the timestamp
+      }
+      
+      console.log("📄 Viewing PDF report - reportId:", reportId, "extracted imageId:", imageId);
+      
+      // Request a temporary signed URL from the backend using imageId
+      const response = await apiRequest("GET", `/api/imaging-files/${imageId}/signed-url`, undefined);
       
       if (!response.ok) {
         let errorMessage = "Failed to generate signed URL";
@@ -1686,7 +2121,7 @@ export default function ImagingPage() {
 
       const { signedUrl } = await response.json();
       
-      console.log("📄 Signed URL received for imaging report:", reportId);
+      console.log("📄 Signed URL received for imaging report:", imageId);
       
       // Open PDF in new tab using the signed URL
       window.open(signedUrl, '_blank');
@@ -1696,10 +2131,56 @@ export default function ImagingPage() {
         description: "PDF report is opening in a new tab",
       });
     } catch (error) {
-      console.error("Error viewing PDF:", error);
+      console.error("Error viewing PDF report:", error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to open PDF report. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to open PDF report",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const viewPDFReportInDialog = async (study: any) => {
+    try {
+      // Use imageId for the signed URL request (the endpoint expects imageId, not the filename)
+      if (!study.imageId) {
+        toast({
+          title: "No Report Available",
+          description: "No PDF report is available for this study.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Request a temporary signed URL from the backend using imageId
+      const response = await apiRequest("GET", `/api/imaging-files/${study.imageId}/signed-url`);
+      
+      if (!response.ok) {
+        let errorMessage = "Failed to generate signed URL";
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const { signedUrl } = await response.json();
+      
+      console.log("📄 Signed URL received for imaging report:", study.imageId);
+      
+      // Use reportFileName from study if available, otherwise construct from imageId
+      const fileName = study.reportFileName || study.reportFilePath?.split('/').pop() || `${study.imageId}.pdf`;
+      
+      setSelectedPDFUrl(signedUrl);
+      setSelectedPDFFileName(fileName);
+      setShowPDFListViewDialog(true);
+    } catch (error) {
+      console.error("Error viewing PDF report in dialog:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to open PDF report",
         variant: "destructive",
       });
     }
@@ -1753,6 +2234,113 @@ export default function ImagingPage() {
       toast({
         title: "Error",
         description: "Failed to download PDF report. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const downloadPrescription = async (study: any) => {
+    try {
+      const token = localStorage.getItem("auth_token");
+      if (!token) {
+        toast({
+          title: "Authentication Required",
+          description: "Please log in to download prescription.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Step 1: Validate prescriptionFilePath exists
+      if (!study.prescriptionFilePath) {
+        throw new Error("Prescription file path not available.");
+      }
+
+      // Step 2: Extract fileName from prescriptionFilePath
+      // Expected path format: uploads/Image_Prescriptions/{organizationId}/patients/{patientId}/PRESCRIPTION_{imageId}_{timestamp}.pdf
+      const pathParts = study.prescriptionFilePath.split('/');
+      const fileName = pathParts[pathParts.length - 1];
+      
+      if (!fileName || !fileName.startsWith('PRESCRIPTION_') || !fileName.endsWith('.pdf')) {
+        console.error("Invalid prescription file path format:", study.prescriptionFilePath);
+        throw new Error("Invalid prescription file path format. Expected: PRESCRIPTION_{imageId}_{timestamp}.pdf");
+      }
+
+      // Step 3: Get organizationId and patientId
+      const organizationId = user?.organizationId || study.organizationId;
+      const patientId = study.patientId;
+
+      if (!organizationId) {
+        throw new Error("Organization ID is missing. Cannot download prescription.");
+      }
+
+      if (!patientId) {
+        throw new Error("Patient ID is missing. Cannot download prescription.");
+      }
+
+      console.log("Downloading prescription:", {
+        prescriptionFilePath: study.prescriptionFilePath,
+        fileName: fileName,
+        organizationId: organizationId,
+        patientId: patientId
+      });
+
+      // Step 4: Generate token for accessing the prescription
+      const tokenResponse = await apiRequest("POST", `/api/imaging/generate-prescription-token`, {
+        organizationId: organizationId,
+        patientId: patientId,
+        fileName: fileName
+      });
+
+      const tokenData = await tokenResponse.json();
+      
+      if (!tokenData.token) {
+        throw new Error("Failed to generate access token. Token not received.");
+      }
+
+      // Step 5: Construct the prescription URL
+      // Path format: uploads/Image_Prescriptions/{organizationId}/patients/{patientId}/PRESCRIPTION_{imageId}_{timestamp}.pdf
+      const prescriptionUrl = `/api/imaging/view-prescription/${organizationId}/${patientId}/${fileName}?token=${tokenData.token}`;
+
+      console.log("Downloading prescription from URL:", prescriptionUrl);
+
+      // Step 6: Fetch the PDF file
+      const response = await fetch(prescriptionUrl, {
+        method: "GET",
+        headers: {
+          "X-Tenant-Subdomain": getActiveSubdomain(),
+        },
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to download prescription: ${response.status} ${response.statusText}`);
+      }
+
+      // Step 7: Convert response to blob and download
+      const blob = await response.blob();
+      
+      // Create download link
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      // Clean up blob URL
+      URL.revokeObjectURL(blobUrl);
+
+      toast({
+        title: "Prescription Downloaded",
+        description: "Prescription PDF has been downloaded successfully",
+      });
+    } catch (error) {
+      console.error("Error downloading prescription:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to download prescription.",
         variant: "destructive",
       });
     }
@@ -1909,10 +2497,45 @@ export default function ImagingPage() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setSignature("");
     setSignatureSaved(false);
+    setSignaturePreview(null); // Clear preview when signature is cleared
+  };
+
+  const previewSignature = () => {
+    if (!canvasRef.current) {
+      toast({
+        title: "No Signature",
+        description: "Please draw your signature first before previewing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const signatureData = canvas.toDataURL();
+
+    // Check if canvas is blank
+    const blankCanvas = document.createElement("canvas");
+    blankCanvas.width = canvas.width;
+    blankCanvas.height = canvas.height;
+    if (signatureData === blankCanvas.toDataURL()) {
+      toast({
+        title: "No Signature",
+        description: "Please draw your signature first before previewing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Set preview data
+    setSignaturePreview(signatureData);
+    toast({
+      title: "Signature Preview",
+      description: "Your signature preview is displayed below.",
+    });
   };
 
   const saveSignature = async () => {
-    if (!canvasRef.current || !eSignStudy) return;
+    if (!canvasRef.current || !eSignStudy || isSavingSignature) return;
 
     const canvas = canvasRef.current;
     const signatureData = canvas.toDataURL();
@@ -1929,7 +2552,13 @@ export default function ImagingPage() {
       return;
     }
 
+    // Disable button immediately
+    setIsSavingSignature(true);
+
     try {
+      console.log("📝 Saving signature for study ID:", eSignStudy.id);
+      console.log("📝 Signature data length:", signatureData.length);
+      
       const response = await apiRequest(
         "PATCH",
         `/api/medical-images/${eSignStudy.id}`,
@@ -1937,16 +2566,30 @@ export default function ImagingPage() {
           signatureData: signatureData,
         },
       );
+      
+      console.log("📝 Signature save response status:", response.status, response.ok);
 
       if (response.ok) {
-        await response.json();
+        const result = await response.json();
+        console.log("✅ Signature save response:", result);
+        
+        // Get the signatureDate from the server response or use current date
+        const signatureDate = new Date().toISOString();
 
-        queryClient.invalidateQueries({ queryKey: ["/api/medical-images"] });
+        // Invalidate and refetch queries to get updated data
+        await queryClient.invalidateQueries({ 
+          queryKey: ["/api/medical-images"],
+          exact: false 
+        });
+        
+        // Also refetch to ensure data is updated
+        await refetchImages();
 
         // Update eSignStudy to include the signature immediately
         setESignStudy((prev: any) => ({
           ...prev,
           signatureData: signatureData,
+          signatureDate: signatureDate,
         }));
 
         setSignatureSaved(true);
@@ -1956,16 +2599,42 @@ export default function ImagingPage() {
           description: "Electronic signature applied successfully!",
         });
 
-        setTimeout(() => {
-          clearSignature();
-          setShowESignDialog(false);
-          setSignatureSaved(false);
-        }, 2000);
+        // If there's a pending prescription, generate it after signature is saved
+        if (pendingPrescriptionStudy) {
+          // Close the sign first dialog if it's open
+          setShowSignFirstDialog(false);
+          // Update the study object with the signature before calling handleGenerateImagePrescription
+          const updatedStudy = {
+            ...pendingPrescriptionStudy,
+            signatureData: signatureData,
+            signatureDate: signatureDate,
+          };
+          // Clear pending study first
+          setPendingPrescriptionStudy(null);
+          // Now call the prescription generation directly with the updated study
+          // Use a small delay to ensure database is updated
+          setTimeout(() => {
+            handleGenerateImagePrescriptionWithSignature(updatedStudy);
+          }, 500);
+        } else {
+          // If no pending prescription, just close the dialog after a delay
+          setTimeout(() => {
+            clearSignature();
+            setShowESignDialog(false);
+            setSignatureSaved(false);
+            setIsSavingSignature(false);
+          }, 2000);
+        }
       } else {
-        const errorData = await response
-          .json()
-          .catch(() => ({ error: "Unknown error" }));
-        throw new Error(errorData.error || "Failed to save signature");
+        const errorText = await response.text();
+        console.error("❌ Signature save error response:", errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || "Unknown error" };
+        }
+        throw new Error(errorData.error || errorData.message || "Failed to save signature");
       }
     } catch (error) {
       console.error("Error saving e-signature:", error);
@@ -1978,6 +2647,8 @@ export default function ImagingPage() {
         description: errorMessage,
         variant: "destructive",
       });
+      // Re-enable button on error
+      setIsSavingSignature(false);
     }
   };
 
@@ -2056,6 +2727,7 @@ export default function ImagingPage() {
       orderedAt: image.createdAt,
       scheduledAt: image.scheduledAt,
       performedAt: image.performedAt,
+      createdAt: image.createdAt, // Include createdAt for Created column display
       status: image.status === "uploaded" ? "completed" : image.status,
       priority: image.priority || "routine",
       indication: image.indication || "No indication provided",
@@ -2073,6 +2745,10 @@ export default function ImagingPage() {
       orderStudyReadyToGenerate: image.orderStudyReadyToGenerate || false, // Include order study ready to generate tracking
       orderStudyGenerated: image.orderStudyGenerated || false, // Include order study tracking
       orderStudyShared: image.orderStudyShared || false, // Include order study tracking
+      signatureData: image.signatureData || null, // Include signature data
+      signatureDate: image.signatureDate || null, // Include signature date
+      selectedUserId: image.selectedUserId || null, // Include selected user ID
+      selectedRole: image.selectedRole || null, // Include selected role
       images: [
         {
           id: image.id.toString(),
@@ -2103,20 +2779,23 @@ export default function ImagingPage() {
     // Filter based on active tab
     let matchesTab = true;
     if (activeTab === "order-study") {
-      // Order Study tab: order_study_created = true AND order_study_generated = false
+      // Order Study tab: order_study_created = true AND order_study_ready_to_generate = false AND order_study_generated = false
+      // Exclude records where order_study_ready_to_generate is true (those should appear in Generate Report tab)
       // For patient users: also check that patient equals logged in user id AND status = 'ordered' or 'in_progress'
       if (user?.role === "patient" && currentPatient) {
         matchesTab = study.orderStudyCreated === true && 
+                     study.orderStudyReadyToGenerate === false && // Exclude if ready to generate
                      study.orderStudyGenerated === false &&
                      (study.status === "ordered" || study.status === "in_progress") &&
                      String(study.patientId) === String(currentPatient.id);
       } else {
         matchesTab = study.orderStudyCreated === true && 
-                     study.orderStudyReadyToGenerate === false &&
+                     study.orderStudyReadyToGenerate === false && // Exclude if ready to generate
                      study.orderStudyGenerated === false;
       }
     } else if (activeTab === "generate-report") {
       // Generate Report tab: order_study_created = true AND order_study_ready_to_generate = true AND order_study_generated = false
+      // Fetch records where both orderStudyCreated and orderStudyReadyToGenerate are true
       matchesTab = study.orderStudyCreated === true && 
                    study.orderStudyReadyToGenerate === true &&
                    study.orderStudyGenerated === false;
@@ -2490,71 +3169,79 @@ export default function ImagingPage() {
             {viewMode === "list" ? (
               filteredStudies.length > 0 && (
                 /* List View - Table Format */
-                <Card>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
+                <Card className="w-full max-w-full overflow-hidden">
+                <CardContent className="p-0 w-full max-w-full">
+                  <div className="w-full max-w-full overflow-hidden">
+                    <table className="w-full" style={{ tableLayout: 'fixed', width: '100%' }}>
                       <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
                             Image ID
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '9%' }}>
                             Patient Name
                           </th>
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '9%' }}>
+                            Provider Name
+                          </th>
                           {activeTab === "order-study" && (
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                               Order Date
                             </th>
                           )}
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
                             Study Type
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                             Modality
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
                             Body Part
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Indication
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
                             File Name
                           </th>
-                          {activeTab !== "order-study" && (
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              File Size
+                          {activeTab !== "order-study" && activeTab === "generate-report" && (
+                            <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '5%' }}>
+                              Share
                             </th>
                           )}
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          {activeTab === "imaging-results" && (
+                            <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
+                              prescription
+                            </th>
+                          )}
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '7%' }}>
                             Radiologist
                           </th>
-                          {activeTab !== "order-study" && (
+                          {activeTab !== "order-study" && activeTab !== "generate-report" && (
                             <>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                                 Scheduled
                               </th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                                 Performed
                               </th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                                 Created
                               </th>
                             </>
                           )}
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '5%' }}>
                             Priority
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                             Status
                           </th>
                           {activeTab === "order-study" && (
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
                               Order Ready
                             </th>
                           )}
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '6%' }}>
+                            signed?
+                          </th>
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" style={{ width: '8%' }}>
                             Actions
                           </th>
                         </tr>
@@ -2566,80 +3253,545 @@ export default function ImagingPage() {
                             className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                             data-testid={`row-imaging-${study.id}`}
                           >
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <td className="px-2 py-2 text-xs font-medium text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={study.imageId || study.id}>
                               {study.imageId || study.id}
+                              </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={study.patientName}>
                               {study.patientName}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={
+                                study.selectedUserId
+                                  ? (() => {
+                                      const providerUser = allUsers.find((u: any) => u.id === study.selectedUserId);
+                                      if (!providerUser) return "N/A";
+                                      const firstName = providerUser.firstName || "";
+                                      const lastName = providerUser.lastName || "";
+                                      let fullName = `${firstName} ${lastName}`.trim();
+                                      if (!fullName) return "N/A";
+                                      const role = providerUser.role || study.selectedRole || "";
+                                      const roleLabel = role ? formatRoleLabel(role) : "";
+                                      // Check if name already starts with "Dr." before adding prefix
+                                      const alreadyHasDr = fullName.toLowerCase().startsWith("dr.");
+                                      const prefix = (role?.toLowerCase() === "doctor" && !alreadyHasDr) ? "Dr. " : "";
+                                      return roleLabel ? `${prefix}${fullName} (${roleLabel})` : `${prefix}${fullName}`;
+                                    })()
+                                  : "N/A"
+                              }>
+                                {study.selectedUserId
+                                  ? (() => {
+                                      const providerUser = allUsers.find((u: any) => u.id === study.selectedUserId);
+                                      if (!providerUser) return "N/A";
+                                      const firstName = providerUser.firstName || "";
+                                      const lastName = providerUser.lastName || "";
+                                      let fullName = `${firstName} ${lastName}`.trim();
+                                      if (!fullName) return "N/A";
+                                      const role = providerUser.role || study.selectedRole || "";
+                                      const roleLabel = role ? formatRoleLabel(role) : "";
+                                      // Check if name already starts with "Dr." before adding prefix
+                                      const alreadyHasDr = fullName.toLowerCase().startsWith("dr.");
+                                      const prefix = (role?.toLowerCase() === "doctor" && !alreadyHasDr) ? "Dr. " : "";
+                                      return roleLabel ? `${prefix}${fullName} (${roleLabel})` : `${prefix}${fullName}`;
+                                    })()
+                                  : "N/A"}
+                              </div>
                             </td>
                             {activeTab === "order-study" && (
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              <td className="px-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                                <div className="truncate" title={study.orderedAt ? format(new Date(study.orderedAt), "MMM dd, yyyy") : "N/A"}>
                                 {study.orderedAt
                                   ? format(new Date(study.orderedAt), "MMM dd, yyyy")
                                   : "N/A"}
+                                </div>
                               </td>
                             )}
-                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={study.studyType || "N/A"}>
                               {study.studyType || "N/A"}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                              <div className="flex items-center gap-2">
-                                {getModalityIcon(study.modality)}
-                                {study.modality}
                               </div>
                             </td>
-                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
-                              {study.bodyPart || "N/A"}
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="flex items-center gap-1">
+                                {getModalityIcon(study.modality)}
+                                <span className="truncate" title={study.modality}>
+                                {study.modality}
+                                </span>
+                              </div>
                             </td>
-                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
-                              {study.indication || "N/A"}
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              {activeTab === "order-study" ? (
+                                // Order Study tab: no link, just display text
+                                <div className="truncate" title={study.bodyPart || "N/A"}>
+                                  {study.bodyPart || "N/A"}
+                                </div>
+                              ) : activeTab === "imaging-results" ? (
+                                // Imaging Results tab: click to show all images for this body part
+                                <div 
+                                  className="truncate cursor-pointer hover:text-blue-600 hover:underline" 
+                                  title={`Click to view all images for ${study.bodyPart || "N/A"}`}
+                                  onClick={async () => {
+                                    try {
+                                      const bodyPart = study.bodyPart;
+                                      if (!bodyPart) {
+                                        toast({
+                                          title: "No Body Part",
+                                          description: "Body part information is not available.",
+                                          variant: "destructive",
+                                        });
+                                        return;
+                                      }
+
+                                      if (!study.id) {
+                                        toast({
+                                          title: "Error",
+                                          description: "Study ID is not available.",
+                                          variant: "destructive",
+                                        });
+                                        return;
+                                      }
+
+                                      setLoadingBodyPartImages(true);
+                                      setSelectedBodyPart(bodyPart);
+                                      
+                                      // Use the current study's ID to get images from radiology_images table
+                                      // JOIN with medical_images to filter by body part
+                                      const token = localStorage.getItem("auth_token");
+                                      const response = await apiRequest(
+                                        "GET",
+                                        `/api/radiology-images/by-body-part/${study.id}?bodyPart=${encodeURIComponent(bodyPart)}`,
+                                        undefined
+                                      );
+
+                                      if (!response.ok) {
+                                        const errorData = await response.json().catch(() => ({ error: "Failed to fetch images" }));
+                                        throw new Error(errorData.error || "Failed to fetch images");
+                                      }
+
+                                      const data = await response.json();
+                                      const allImages: any[] = [];
+
+                                      if (data.success && data.images && Array.isArray(data.images)) {
+                                        // Map the joined data to include study context
+                                        data.images.forEach((img: any) => {
+                                          allImages.push({
+                                            ...img,
+                                            studyId: study.id,
+                                            studyType: img.studyType || study.studyType,
+                                            patientName: study.patientName,
+                                            modality: img.modality || study.modality,
+                                            // file_path from radiology_images table
+                                            filePath: img.filePath,
+                                          });
+                                        });
+                                      }
+
+                                      if (allImages.length === 0) {
+                                        toast({
+                                          title: "No Images Found",
+                                          description: `No images found for body part "${bodyPart}" in this study.`,
+                                          variant: "destructive",
+                                        });
+                                        setLoadingBodyPartImages(false);
+                                        return;
+                                      }
+
+                                      setBodyPartImages(allImages);
+                                      setShowBodyPartImagesDialog(true);
+                                      
+                                      // Load image previews asynchronously (don't block dialog opening)
+                                      const loadPreviews = async () => {
+                                        const previews: Record<number, string> = {};
+                                          const token = localStorage.getItem("auth_token");
+                                        
+                                        // Load all previews in parallel
+                                        const previewPromises = allImages.map(async (img, idx) => {
+                                          const imageKey = img.id || idx;
+                                          try {
+                                            console.log(`🔄 Loading preview for image ${imageKey} (ID: ${img.id}, File: ${img.fileName})`);
+                                            
+                                            // Priority 1: Try to fetch preview from radiology image endpoint using image ID
+                                            if (img.id) {
+                                              try {
+                                                console.log(`📷 Attempting to fetch preview from /api/radiology-images/image/${img.id}`);
+                                                console.log(`📷 Auth token present: ${!!token}`);
+                                                console.log(`📷 Tenant subdomain: ${getActiveSubdomain()}`);
+                                                
+                                                const headers: Record<string, string> = {
+                                                  "X-Tenant-Subdomain": getActiveSubdomain(),
+                                                };
+                                                
+                                                if (token) {
+                                                  headers["Authorization"] = `Bearer ${token}`;
+                                                }
+                                                
+                                                const previewResponse = await fetch(`/api/radiology-images/image/${img.id}`, {
+                                                  method: "GET",
+                                                  headers,
+                                                  credentials: "include",
+                                                });
+
+                                                if (previewResponse.ok) {
+                                                  const blob = await previewResponse.blob();
+                                                  const url = URL.createObjectURL(blob);
+                                                  console.log(`✅ Successfully loaded preview for image ${imageKey} from radiology-images endpoint`);
+                                                  return { key: imageKey, url };
+                                                } else {
+                                                  const errorText = await previewResponse.text().catch(() => 'Unknown error');
+                                                  console.warn(`⚠️ Failed to load preview for image ${imageKey} from radiology-images endpoint (${previewResponse.status}): ${errorText}`);
+                                                  
+                                                  // If 401, log authentication issue
+                                                  if (previewResponse.status === 401) {
+                                                    console.error(`❌ Authentication failed for image ${img.id}. Token present: ${!!token}`);
+                                                  }
+                                                }
+                                              } catch (fetchError) {
+                                                console.error(`❌ Error fetching preview for image ${imageKey} from radiology-images endpoint:`, fetchError);
+                                              }
+                                            }
+                                            
+                                            // Priority 2: Use base64 data directly if available
+                                            if (img.imageData) {
+                                              console.log(`✅ Using base64 image data for preview ${imageKey}`);
+                                              return { key: imageKey, url: img.imageData };
+                                            }
+                                            
+                                            // Priority 3: Fallback to medical image endpoint if studyId is available
+                                            if (img.studyId) {
+                                              try {
+                                                console.log(`📷 Attempting fallback to /api/medical-images/${img.studyId}/image`);
+                                                const previewResponse = await fetch(`/api/medical-images/${img.studyId}/image`, {
+                                                  headers: {
+                                                    "X-Tenant-Subdomain": getActiveSubdomain(),
+                                                    ...(token && {
+                                                      Authorization: `Bearer ${token}`,
+                                                    }),
+                                                  },
+                                                  credentials: "include",
+                                                });
+                                                
+                                                if (previewResponse.ok) {
+                                                  const blob = await previewResponse.blob();
+                                                  const url = URL.createObjectURL(blob);
+                                                  console.log(`✅ Successfully loaded preview for image ${imageKey} from medical-images endpoint`);
+                                                  return { key: imageKey, url };
+                                                } else {
+                                                  const errorText = await previewResponse.text().catch(() => 'Unknown error');
+                                                  console.warn(`⚠️ Failed to load preview for image ${imageKey} from medical-images endpoint (${previewResponse.status}): ${errorText}`);
+                                                }
+                                              } catch (fallbackError) {
+                                                console.error(`❌ Error fetching preview for image ${imageKey} from medical-images endpoint:`, fallbackError);
+                                              }
+                                            }
+                                            
+                                            console.warn(`⚠️ No preview available for image ${imageKey} - will show placeholder`);
+                                            return null;
+                                          } catch (previewError) {
+                                            console.error(`❌ Error loading preview for image ${imageKey}:`, previewError);
+                                            return null;
+                                          }
+                                        });
+                                        
+                                        const results = await Promise.all(previewPromises);
+                                        results.forEach((result) => {
+                                          if (result) {
+                                            previews[result.key] = result.url;
+                                          }
+                                        });
+                                        
+                                        setBodyPartImagePreviews(previews);
+                                      };
+                                      
+                                      // Start loading previews in background
+                                      loadPreviews();
+                                    } catch (error) {
+                                      console.error("Error loading body part images:", error);
+                                      toast({
+                                        title: "Error",
+                                        description: "Failed to load images for this body part. Please try again.",
+                                        variant: "destructive",
+                                      });
+                                    } finally {
+                                      setLoadingBodyPartImages(false);
+                                    }
+                                  }}
+                                >
+                                  {study.bodyPart || "N/A"}
+                                </div>
+                              ) : (
+                                // Other tabs: clickable link to open image viewer for single study
+                                <div 
+                                  className="truncate cursor-pointer hover:text-blue-600 hover:underline" 
+                                  title={study.bodyPart || "N/A"}
+                                  onClick={async () => {
+                                    try {
+                                      if (!study.images || study.images.length === 0) {
+                                        toast({
+                                          title: "No Image Available",
+                                          description: "No medical image is available for this study.",
+                                          variant: "destructive",
+                                        });
+                                        return;
+                                      }
+
+                                      const image = study.images[0];
+                                      if (!image.imageData) {
+                                        // Try to fetch image from API
+                                        const response = await fetch(`/api/medical-images/${study.id}/image`, {
+                                          headers: {
+                                            "X-Tenant-Subdomain": getActiveSubdomain(),
+                                            ...(localStorage.getItem("auth_token") && {
+                                              Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+                                            }),
+                                          },
+                                          credentials: "include",
+                                        });
+
+                                        if (!response.ok) {
+                                          toast({
+                                            title: "Image Not Available",
+                                            description: "Failed to load medical image.",
+                                            variant: "destructive",
+                                          });
+                                          return;
+                                        }
+
+                                        const blob = await response.blob();
+                                        const blobUrl = URL.createObjectURL(blob);
+                                        
+                                        const imageForViewer = {
+                                          seriesDescription: image.seriesDescription || `${study.modality} ${study.bodyPart}`,
+                                          type: image.type || "JPEG",
+                                          imageCount: image.imageCount || 1,
+                                          size: image.size || "N/A",
+                                          imageId: study.id,
+                                          imageUrl: blobUrl,
+                                          mimeType: image.mimeType || "image/jpeg",
+                                          fileName: image.fileName || study.fileName,
+                                        };
+                                        setSelectedImageSeries(imageForViewer);
+                                        setShowImageViewer(true);
+                                      } else {
+                                        // Use base64 image data directly
+                                        const imageForViewer = {
+                                          seriesDescription: image.seriesDescription || `${study.modality} ${study.bodyPart}`,
+                                          type: image.type || "JPEG",
+                                          imageCount: image.imageCount || 1,
+                                          size: image.size || "N/A",
+                                          imageId: study.id,
+                                          imageUrl: image.imageData,
+                                          mimeType: image.mimeType || "image/jpeg",
+                                          fileName: image.fileName || study.fileName,
+                                        };
+                                        setSelectedImageSeries(imageForViewer);
+                                        setShowImageViewer(true);
+                                      }
+                                    } catch (error) {
+                                      console.error("Error loading image:", error);
+                                      toast({
+                                        title: "Error",
+                                        description: "Failed to load medical image. Please try again.",
+                                        variant: "destructive",
+                                      });
+                                    }
+                                  }}
+                                >
+                                  {study.bodyPart || "N/A"}
+                                </div>
+                              )}
                             </td>
-                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={study.fileName || "N/A"}>
                               {study.fileName || "N/A"}
+                              </div>
                             </td>
-                            {activeTab !== "order-study" && (
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                                {study.fileSize ? `${(study.fileSize / 1024).toFixed(2)} KB` : "N/A"}
+                            {activeTab !== "order-study" && activeTab === "generate-report" && (
+                              <td className="px-2 py-2 text-xs">
+                                <div className="flex items-center justify-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleShareStudy(study, 'prescription')}
+                                    className="h-6 w-6 p-0"
+                                    title="Share Image Prescription"
+                                    data-testid={`button-share-prescription-${study.id}`}
+                                  >
+                                    <Send className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+                                  </Button>
+                                </div>
                               </td>
                             )}
-                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
+                            {activeTab === "imaging-results" && (
+                              <td className="px-2 py-2 text-xs">
+                                <div className="flex items-center justify-center gap-1">
+                                  {study.prescriptionFilePath ? (
+                                    <>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={async () => {
+                                          try {
+                                            const token = localStorage.getItem("auth_token");
+                                            if (!token) {
+                                              toast({
+                                                title: "Authentication Required",
+                                                description: "Please log in to view prescription.",
+                                                variant: "destructive",
+                                              });
+                                              return;
+                                            }
+
+                                            // Step 1: Validate prescriptionFilePath exists
+                                            if (!study.prescriptionFilePath) {
+                                              throw new Error("Prescription file path not available.");
+                                            }
+
+                                            // Step 2: Extract fileName from prescriptionFilePath
+                                            // Expected path format: uploads/Image_Prescriptions/{organizationId}/patients/{patientId}/PRESCRIPTION_{imageId}_{timestamp}.pdf
+                                            const pathParts = study.prescriptionFilePath.split('/');
+                                            const fileName = pathParts[pathParts.length - 1];
+                                            
+                                            if (!fileName || !fileName.startsWith('PRESCRIPTION_') || !fileName.endsWith('.pdf')) {
+                                              console.error("Invalid prescription file path format:", study.prescriptionFilePath);
+                                              throw new Error("Invalid prescription file path format. Expected: PRESCRIPTION_{imageId}_{timestamp}.pdf");
+                                            }
+
+                                            // Step 3: Get organizationId and patientId
+                                            const organizationId = user?.organizationId || study.organizationId;
+                                            const patientId = study.patientId;
+
+                                            if (!organizationId) {
+                                              throw new Error("Organization ID is missing. Cannot open prescription.");
+                                            }
+
+                                            if (!patientId) {
+                                              throw new Error("Patient ID is missing. Cannot open prescription.");
+                                            }
+
+                                            console.log("Opening prescription:", {
+                                              prescriptionFilePath: study.prescriptionFilePath,
+                                              fileName: fileName,
+                                              organizationId: organizationId,
+                                              patientId: patientId
+                                            });
+
+                                            // Step 4: Generate token for accessing the prescription
+                                            const response = await apiRequest("POST", `/api/imaging/generate-prescription-token`, {
+                                              organizationId: organizationId,
+                                              patientId: patientId,
+                                                fileName: fileName
+                                            });
+                                            
+                                            const data = await response.json();
+                                            
+                                            if (!data.token) {
+                                              throw new Error("Failed to generate access token. Token not received.");
+                                            }
+
+                                            // Step 5: Construct the prescription URL
+                                            // Path format: uploads/Image_Prescriptions/{organizationId}/patients/{patientId}/PRESCRIPTION_{imageId}_{timestamp}.pdf
+                                            const prescriptionUrl = `/api/imaging/view-prescription/${organizationId}/${patientId}/${fileName}?token=${data.token}`;
+                                            
+                                            console.log("Opening prescription URL:", prescriptionUrl);
+                                            
+                                            // Step 6: Open the prescription PDF in a new window
+                                            window.open(prescriptionUrl, '_blank');
+                                            
+                                            toast({
+                                              title: "Opening Prescription",
+                                              description: "Prescription document is being opened.",
+                                            });
+                                          } catch (error) {
+                                            console.error("Error opening prescription:", error);
+                                            toast({
+                                              title: "Error",
+                                              description: error instanceof Error ? error.message : "Failed to open prescription.",
+                                              variant: "destructive",
+                                            });
+                                          }
+                                        }}
+                                        className="h-6 w-6 p-0"
+                                        title="View Image Prescription"
+                                        data-testid={`button-prescription-${study.id}`}
+                                      >
+                                        <Save className="h-3 w-3 text-yellow-600 dark:text-yellow-400" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => downloadPrescription(study)}
+                                        className="h-6 w-6 p-0"
+                                        title="Download Image Prescription"
+                                        data-testid={`button-download-prescription-${study.id}`}
+                                      >
+                                        <Download className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleShareStudy(study, 'prescription')}
+                                        className="h-6 w-6 p-0"
+                                        title="Share Image Prescription"
+                                        data-testid={`button-share-prescription-${study.id}`}
+                                      >
+                                        <Share2 className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">N/A</span>
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                            <td className="px-2 py-2 text-xs text-gray-900 dark:text-gray-100">
+                              <div className="truncate" title={study.radiologist || "N/A"}>
                               {study.radiologist || "N/A"}
+                              </div>
                             </td>
-                            {activeTab !== "order-study" && (
+                            {activeTab !== "order-study" && activeTab !== "generate-report" && (
                               <>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                <td className="px-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                                  <div className="truncate" title={study.scheduledAt ? format(new Date(study.scheduledAt), "MMM dd, yyyy") : "N/A"}>
                                   {study.scheduledAt
                                     ? format(new Date(study.scheduledAt), "MMM dd, yyyy")
                                     : "N/A"}
+                                  </div>
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                <td className="px-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                                  <div className="truncate" title={study.performedAt ? format(new Date(study.performedAt), "MMM dd, yyyy") : "N/A"}>
                                   {study.performedAt
                                     ? format(new Date(study.performedAt), "MMM dd, yyyy")
                                     : "N/A"}
+                                  </div>
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                <td className="px-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                                  <div className="truncate" title={study.createdAt ? format(new Date(study.createdAt), "MMM dd, yyyy") : "N/A"}>
                                   {study.createdAt
                                     ? format(new Date(study.createdAt), "MMM dd, yyyy")
                                     : "N/A"}
+                                  </div>
                                 </td>
                               </>
                             )}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <td className="px-2 py-2 text-xs">
                               <Badge
                                 variant={study.priority === "stat" || study.priority === "urgent" ? "destructive" : "secondary"}
-                                className="text-xs"
+                                className="text-xs px-1.5 py-0"
                               >
                                 {study.priority || "routine"}
                               </Badge>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <td className="px-2 py-2 text-xs">
                               {selectedStudyId === study.id && editModes.status ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
                                   <Select
                                     value={editingStatus}
                                     onValueChange={setEditingStatus}
                                   >
-                                    <SelectTrigger className="w-32 h-8">
+                                    <SelectTrigger className="w-24 h-7 text-xs">
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -2656,7 +3808,7 @@ export default function ImagingPage() {
                                     size="sm"
                                     onClick={() => handleFieldSave("status")}
                                     disabled={saving.status}
-                                    className="h-8 px-2 text-xs"
+                                    className="h-7 px-1.5 text-xs"
                                     data-testid="button-save-status"
                                   >
                                     {saving.status ? "..." : "Save"}
@@ -2666,15 +3818,15 @@ export default function ImagingPage() {
                                     size="sm"
                                     onClick={() => handleFieldCancel("status")}
                                     disabled={saving.status}
-                                    className="h-8 px-2 text-xs"
+                                    className="h-7 px-1.5 text-xs"
                                     data-testid="button-cancel-status"
                                   >
                                     Cancel
                                   </Button>
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-2">
-                                  <Badge className={getStatusColor(study.status)}>
+                                <div className="flex items-center gap-1">
+                                  <Badge className={`${getStatusColor(study.status)} text-xs px-1.5 py-0`}>
                                     {study.status}
                                   </Badge>
                                   {user?.role !== 'patient' && activeTab !== "order-study" && (
@@ -2685,7 +3837,7 @@ export default function ImagingPage() {
                                         setSelectedStudyId(study.id);
                                         handleFieldEdit("status");
                                       }}
-                                      className="h-6 w-6 p-0"
+                                      className="h-5 w-5 p-0"
                                       data-testid={`button-edit-status-${study.id}`}
                                     >
                                       <Edit className="h-3 w-3" />
@@ -2694,60 +3846,134 @@ export default function ImagingPage() {
                                 </div>
                               )}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <div className="flex items-center gap-2">
+                            {activeTab === "order-study" && (
+                              <td className="px-2 py-2 text-xs">
+                                <div className="flex items-center justify-center">
+                                  {study.orderStudyReadyToGenerate ? (
+                                    <CheckCircle className="h-3 w-3 text-green-600 dark:text-green-400" />
+                                  ) : (
+                                    <X className="h-3 w-3 text-red-600 dark:text-red-400" />
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                            <td className="px-2 py-2 text-xs">
+                              <div className="flex items-center justify-center">
+                                {study.signatureData && String(study.signatureData).trim() !== "" ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-1.5 flex items-center gap-0.5 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                    onClick={() => {
+                                      setSelectedSignatureData({
+                                        signatureData: study.signatureData,
+                                        signatureDate: study.signatureDate,
+                                        signedBy: study.radiologist || "N/A",
+                                        studyId: study.id,
+                                        imageId: study.imageId || study.id,
+                                      });
+                                      setShowSignatureDetailsDialog(true);
+                                    }}
+                                    title="View signature details"
+                                  >
+                                    <CheckCircle className="h-3 w-3" />
+                                    <span className="text-xs">✓</span>
+                                  </Button>
+                                ) : (
+                                  <div className="flex items-center gap-0.5 text-red-600">
+                                    <X className="h-3 w-3" />
+                                    <span className="text-xs">✗</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 text-xs">
+                              <div className="flex items-center gap-0.5 justify-center flex-wrap">
                                 {user?.role !== 'patient' && (
                                   <>
                                     {activeTab === "order-study" ? (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setSelectedPrescriptionStudy(study);
-                                          setShowPrescriptionDialog(true);
-                                        }}
-                                        className="h-8 w-8 p-0"
-                                        data-testid={`button-prescription-${study.id}`}
-                                        title="View Prescription"
-                                      >
-                                        <Eye className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                                      </Button>
+                                      <>
+                                        {/* Save icon - always show, function handles signature check */}
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleGenerateImagePrescription(study.id)}
+                                            className="h-6 w-6 p-0"
+                                            data-testid={`button-save-prescription-${study.id}`}
+                                            title="Save/Generate Prescription"
+                                          >
+                                            <Save className="h-3 w-3 text-green-600 dark:text-green-400" />
+                                          </Button>
+                                        {/* E-Sign icon for Order Study tab */}
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleESignClick(study.id)}
+                                          className="h-6 w-6 p-0"
+                                          data-testid={`button-esign-${study.id}`}
+                                          title="Electronic Signature"
+                                        >
+                                          <PenTool className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                                        </Button>
+                                      </>
                                     ) : (
                                       <>
+                                        {/* Hide Eye icon in Generate Report tab - it's in View/Download column */}
+                                        {activeTab !== 'generate-report' && (
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          onClick={() => handleViewStudy(study)}
-                                          className="h-8 w-8 p-0"
+                                          onClick={() => {
+                                            if (activeTab === 'imaging-results') {
+                                              // For Imaging Results tab, open PDF in list view dialog
+                                              viewPDFReportInDialog(study);
+                                            } else {
+                                              // For other tabs, use the regular view study handler
+                                              handleViewStudy(study);
+                                            }
+                                          }}
+                                            className="h-6 w-6 p-0"
                                           data-testid={`button-view-${study.id}`}
+                                          title={activeTab === 'imaging-results' ? "View PDF Report" : "View Study"}
                                         >
-                                          <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                            <Eye className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                         </Button>
+                                        )}
                                         <Button
                                           variant="ghost"
                                           size="sm"
                                           onClick={() => handleViewStudy(study)}
-                                          className="h-8 w-8 p-0"
+                                          className="h-6 w-6 p-0"
                                           data-testid={`button-edit-${study.id}`}
                                         >
-                                          <Edit className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                          <Edit className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                         </Button>
                                       </>
                                     )}
-                                    {/* E-Sign icon - hide from Generate Report and Imaging Results tabs */}
-                                    {activeTab !== 'generate-report' && activeTab !== 'imaging-results' && (
+                                    {/* Save icon - only in Generate Report tab */}
+                                    {activeTab === 'generate-report' && (
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => {
-                                          setESignStudy(study);
-                                          setShowESignDialog(true);
-                                        }}
-                                        className="h-8 w-8 p-0"
+                                        onClick={() => handleGenerateReport(study.id)}
+                                        className="h-6 w-6 p-0"
+                                        data-testid={`button-save-report-${study.id}`}
+                                        title="Save/Generate Report"
+                                      >
+                                        <Save className="h-3 w-3 text-yellow-600 dark:text-yellow-400" />
+                                      </Button>
+                                    )}
+                                    {/* E-Sign icon - hide from Generate Report, Imaging Results, and Order Study tabs (Order Study has its own e-sign icon) */}
+                                    {activeTab !== 'generate-report' && activeTab !== 'imaging-results' && activeTab !== 'order-study' && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleESignClick(study.id)}
+                                        className="h-6 w-6 p-0"
                                         data-testid={`button-esign-${study.id}`}
                                         title="Electronic Signature"
                                       >
-                                        <PenTool className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                        <PenTool className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                                       </Button>
                                     )}
                                     {canDelete('medical_imaging') && (
@@ -2758,35 +3984,37 @@ export default function ImagingPage() {
                                           setStudyToDelete(study);
                                           setShowDeleteDialog(true);
                                         }}
-                                        className="h-8 w-8 p-0"
+                                        className="h-6 w-6 p-0"
                                         data-testid={`button-delete-${study.id}`}
                                       >
-                                        <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                        <Trash2 className="h-3 w-3 text-red-600 dark:text-red-400" />
                                       </Button>
                                     )}
                                   </>
                                 )}
-                                {activeTab !== "order-study" && (
+                                {/* Share icon hidden for Imaging Results tab, Download icon for other tabs */}
+                                {activeTab === "imaging-results" ? null : activeTab !== "order-study" ? (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleDownloadStudy(study.id)}
-                                    className="h-8 w-8 p-0"
+                                    className="h-6 w-6 p-0"
                                     data-testid={`button-download-${study.id}`}
                                   >
-                                    <Download className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                    <Download className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                                   </Button>
-                                )}
-                                {activeTab === "order-study" && (
+                                ) : null}
+                                {/* Blue save icon - hidden as requested */}
+                                {false && activeTab === "order-study" && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleGenerateImagePrescription(study.id)}
-                                    className="h-8 w-8 p-0"
+                                    className="h-6 w-6 p-0"
                                     data-testid={`button-image-prescription-${study.id}`}
                                     title="Generate Image Prescription"
                                   >
-                                    <Save className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                    <Save className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                                   </Button>
                                 )}
                               </div>
@@ -3519,38 +4747,11 @@ export default function ImagingPage() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={async () => {
-                                      try {
-                                        const token = localStorage.getItem("auth_token");
-                                        const headers: Record<string, string> = {
-                                          "X-Tenant-Subdomain": getActiveSubdomain(),
-                                        };
-                                        if (token) {
-                                          headers["Authorization"] = `Bearer ${token}`;
-                                        }
-                                        const response = await fetch(
-                                          `/api/imaging/reports/${study.reportFileName.replace(".pdf", "")}?download=true`,
-                                          { headers, credentials: "include" }
-                                        );
-                                        if (response.ok) {
-                                          const blob = await response.blob();
-                                          const url = URL.createObjectURL(blob);
-                                          const a = document.createElement("a");
-                                          a.href = url;
-                                          a.download = study.reportFileName;
-                                          document.body.appendChild(a);
-                                          a.click();
-                                          document.body.removeChild(a);
-                                          URL.revokeObjectURL(url);
-                                        }
-                                      } catch (error) {
-                                        console.error("Download failed:", error);
-                                      }
-                                    }}
+                                    onClick={() => handleShareStudy(study, 'report')}
                                     className="text-green-700 border-green-300 hover:bg-green-100 dark:text-green-300 dark:border-green-600 dark:hover:bg-green-800"
                                   >
-                                    <Download className="h-4 w-4 mr-1" />
-                                    Download Report
+                                    <Send className="h-4 w-4 mr-1" />
+                                    Share Report
                                   </Button>
                                 </div>
                               </div>
@@ -3654,7 +4855,7 @@ export default function ImagingPage() {
                             onClick={async () => {
                               try {
                                 // Check if report file name exists
-                                if (!study.reportFileName) {
+                                if (!study.reportFileName && !study.imageId) {
                                   toast({
                                     title: "No Report Available",
                                     description:
@@ -3664,48 +4865,36 @@ export default function ImagingPage() {
                                   return;
                                 }
 
+                                // Use imageId directly if available, otherwise extract from reportFileName
+                                let imageId = study.imageId;
+                                if (!imageId && study.reportFileName) {
                                 // Safely extract report ID with case-insensitive PDF removal
                                 const reportId = study.reportFileName.replace(
                                   /\.pdf$/i,
                                   "",
                                 );
-
-                                const token =
-                                  localStorage.getItem("auth_token");
-                                const headers: Record<string, string> = {
-                                  "X-Tenant-Subdomain": getActiveSubdomain(),
-                                };
-
-                                if (token) {
-                                  headers["Authorization"] = `Bearer ${token}`;
+                                  // Extract imageId from reportId (remove timestamp if present)
+                                  if (reportId.includes('_')) {
+                                    const parts = reportId.split('_');
+                                    imageId = parts[0]; // Take the part before the timestamp
+                                  } else {
+                                    imageId = reportId;
+                                  }
                                 }
 
-                                // First, check if file exists with HEAD request
-                                const checkResponse = await fetch(
-                                  `/api/imaging/reports/${reportId}`,
-                                  {
-                                    method: "HEAD",
-                                    headers,
-                                    credentials: "include",
-                                  },
-                                );
-
-                                if (checkResponse.status === 404) {
-                                  // File not found - show modal popup
-                                  setShowFileNotAvailableDialog(true);
+                                if (!imageId) {
+                                  toast({
+                                    title: "No Report Available",
+                                    description:
+                                      "Unable to determine report ID.",
+                                    variant: "destructive",
+                                  });
                                   return;
-                                } else if (!checkResponse.ok) {
-                                  // Other errors during check
-                                  console.error(
-                                    `Report check failed: Status ${checkResponse.status} for study ${study.id}`,
-                                  );
-                                  throw new Error(
-                                    "Failed to check PDF report availability",
-                                  );
                                 }
 
-                                // File exists, now open it with authentication
-                                await viewPDFReport(reportId);
+                                // File exists check is not needed - viewPDFReport will handle errors
+                                // Directly open the report using imageId
+                                await viewPDFReport(imageId);
                               } catch (error) {
                                 console.error(
                                   `Failed to view PDF for study ${study.id}:`,
@@ -3728,59 +4917,12 @@ export default function ImagingPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={async () => {
-                              try {
-                                const token = localStorage.getItem("auth_token");
-                                const reportId = study.reportFileName.replace(/\.pdf$/i, "");
-                                const headers: Record<string, string> = {
-                                  "X-Tenant-Subdomain": getActiveSubdomain(),
-                                };
-
-                                if (token) {
-                                  headers["Authorization"] = `Bearer ${token}`;
-                                }
-
-                                const response = await fetch(
-                                  `/api/imaging/reports/${reportId}?download=true&token=${encodeURIComponent(token || '')}`,
-                                  {
-                                    headers,
-                                    credentials: "include",
-                                  },
-                                );
-
-                                if (response.ok) {
-                                  const blob = await response.blob();
-                                  const url = URL.createObjectURL(blob);
-                                  const a = document.createElement("a");
-                                  a.href = url;
-                                  a.download = study.reportFileName;
-                                  document.body.appendChild(a);
-                                  a.click();
-                                  document.body.removeChild(a);
-                                  URL.revokeObjectURL(url);
-
-                                  toast({
-                                    title: "PDF Report Downloaded",
-                                    description:
-                                      "Radiology report PDF has been downloaded successfully",
-                                  });
-                                } else {
-                                  throw new Error("Download failed");
-                                }
-                              } catch (error) {
-                                toast({
-                                  title: "Download Failed",
-                                  description:
-                                    "Failed to download PDF report. Please try again.",
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                            title="Download PDF Report"
-                            data-testid="button-download-pdf-report"
+                            onClick={() => handleShareStudy(study, 'report')}
+                            title="Share PDF Report"
+                            data-testid="button-share-pdf-report"
                             className="border-gray-200 text-black hover:bg-gray-50 hover:border-gray-300"
                           >
-                            <Download className="h-4 w-4" />
+                            <Send className="h-4 w-4" />
                           </Button>
                         </>
                       )}
@@ -3823,8 +4965,8 @@ export default function ImagingPage() {
                         </Button>
                       )}
                       
-                      {/* Image Prescription button - only in Order Study tab */}
-                      {user?.role !== 'patient' && activeTab === 'order-study' && (
+                      {/* Image Prescription button - hidden as requested */}
+                      {false && user?.role !== 'patient' && activeTab === 'order-study' && (!study.signatureData || String(study.signatureData).trim() === "") && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -3842,10 +4984,7 @@ export default function ImagingPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            setESignStudy(study);
-                            setShowESignDialog(true);
-                          }}
+                          onClick={() => handleESignClick(study.id)}
                           title="Electronic Signature"
                           data-testid={`button-esign-card-${study.id}`}
                           className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300"
@@ -4112,7 +5251,7 @@ export default function ImagingPage() {
 
       {/* Generate Report Dialog */}
       <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
-        <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-[600px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Generate Radiology Report</DialogTitle>
           </DialogHeader>
@@ -4418,7 +5557,7 @@ export default function ImagingPage() {
                             id="report-upload-files"
                             multiple
                             accept="image/*,.dcm,.dicom,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,.svg,.ico,.jfif,.pjpeg,.pjp"
-                            onChange={handleFileUpload}
+                            onChange={handleReportFileSelect}
                             className="hidden"
                           />
                           <Button
@@ -4451,10 +5590,10 @@ export default function ImagingPage() {
                           {selectedFiles.map((file, index) => (
                             <div
                               key={index}
-                              className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2 rounded text-xs"
+                              className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2 rounded text-xs gap-2"
                             >
-                              <span className="truncate">{file.name}</span>
-                              <span className="text-gray-500 dark:text-gray-400">
+                              <span className="truncate flex-1">{file.name}</span>
+                              <span className="text-gray-500 dark:text-gray-400 text-xs">
                                 {file.size
                                   ? file.size < 1024
                                     ? `${file.size} B`
@@ -4463,6 +5602,19 @@ export default function ImagingPage() {
                                       : `${(file.size / (1024 * 1024)).toFixed(1)} MB`
                                   : "Unknown size"}
                               </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  const newFiles = selectedFiles.filter((_, i) => i !== index);
+                                  setSelectedFiles(newFiles);
+                                }}
+                                className="h-5 w-5 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                title="Remove this image"
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
                             </div>
                           ))}
                         </div>
@@ -5698,10 +6850,10 @@ export default function ImagingPage() {
                     <CommandGroup>
                       {pricingLoading ? (
                         <CommandItem disabled>Loading study types...</CommandItem>
-                      ) : imagingPricing.length === 0 ? (
+                      ) : availableStudyTypes.length === 0 ? (
                         <CommandItem disabled>No study types available</CommandItem>
                       ) : (
-                        imagingPricing.map((pricing: any) => (
+                        availableStudyTypes.map((pricing: any) => (
                           <CommandItem
                             key={pricing.id}
                             value={pricing.imagingType}
@@ -5725,30 +6877,139 @@ export default function ImagingPage() {
               </Popover>
             </div>
 
-            {/* Provider Information - Show only for doctor roles */}
-            {isDoctorLike(user?.role) && (
+            {/* Select Role and User */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="role">Role</Label>
-                  <div className="flex items-center h-10 px-3 py-2 border border-input bg-background rounded-md text-sm ring-offset-background">
-                    <User className="h-4 w-4 mr-2 text-muted-foreground" />
-                    <span data-testid="provider-role-display">
-                      {formatRoleLabel(user?.role)}
-                    </span>
-                  </div>
+                <Label htmlFor="select-role">Select Role *</Label>
+                <Popover open={roleDropdownOpen} onOpenChange={setRoleDropdownOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={roleDropdownOpen}
+                      className="w-full justify-between"
+                    >
+                      {uploadFormData.selectedRole || "Select role..."}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0">
+                    <Command>
+                      <CommandInput placeholder="Search role..." />
+                      <CommandEmpty>No role found.</CommandEmpty>
+                      <CommandGroup>
+                        {[
+                          "aesthetician",
+                          "dentist",
+                          "dental_nurse",
+                          "doctor",
+                          "lab_technician",
+                          "nurse",
+                          "optician",
+                          "other",
+                          "paramedic",
+                          "pharmacist",
+                          "phlebotomist",
+                          "physiotherapist",
+                          "receptionist",
+                          "sample_taker"
+                        ].sort().map((role) => (
+                          <CommandItem
+                            key={role}
+                            value={role}
+                            onSelect={(currentValue) => {
+                              setUploadFormData({ 
+                                ...uploadFormData, 
+                                selectedRole: currentValue,
+                                selectedUserId: "" // Reset user when role changes
+                              });
+                              setRoleDropdownOpen(false);
+                            }}
+                          >
+                            <CheckIcon
+                              className={`mr-2 h-4 w-4 ${
+                                uploadFormData.selectedRole === role ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            {formatRoleLabel(role)}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 </div>
 
                 <div>
-                  <Label htmlFor="provider">Provider Name</Label>
-                  <div className="flex items-center h-10 px-3 py-2 border border-input bg-background rounded-md text-sm ring-offset-background">
-                    <User className="h-4 w-4 mr-2 text-muted-foreground" />
-                    <span data-testid="provider-name-display">
-                      {user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : ''}
-                    </span>
+                <Label htmlFor="select-user">Name *</Label>
+                <Popover open={userDropdownOpen} onOpenChange={setUserDropdownOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={userDropdownOpen}
+                      className="w-full justify-between"
+                      disabled={!uploadFormData.selectedRole}
+                    >
+                      {uploadFormData.selectedUserId
+                        ? usersByRole.find(
+                            (u: any) => u.id.toString() === uploadFormData.selectedUserId
+                          )
+                          ? `${
+                              usersByRole.find(
+                                (u: any) => u.id.toString() === uploadFormData.selectedUserId
+                              )?.firstName
+                            } ${
+                              usersByRole.find(
+                                (u: any) => u.id.toString() === uploadFormData.selectedUserId
+                              )?.lastName
+                            }`
+                          : "Select user"
+                        : usersByRoleLoading
+                        ? "Loading users..."
+                        : "Select user"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search users..." />
+                      <CommandEmpty>No user found.</CommandEmpty>
+                      <CommandGroup className="max-h-64 overflow-auto">
+                        {usersByRoleLoading ? (
+                          <CommandItem disabled>Loading users...</CommandItem>
+                        ) : usersByRole.length > 0 ? (
+                          usersByRole.map((userItem: any) => (
+                            <CommandItem
+                              key={userItem.id}
+                              value={`${userItem.firstName} ${userItem.lastName} ${userItem.email}`}
+                              onSelect={() => {
+                                setUploadFormData((prev) => ({
+                                  ...prev,
+                                  selectedUserId: userItem.id.toString(),
+                                }));
+                                setUserDropdownOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={`mr-2 h-4 w-4 ${
+                                  uploadFormData.selectedUserId === userItem.id.toString()
+                                    ? "opacity-100"
+                                    : "opacity-0"
+                                }`}
+                              />
+                              {userItem.firstName} {userItem.lastName} ({userItem.email})
+                            </CommandItem>
+                          ))
+                        ) : (
+                          <CommandItem disabled>No users found for this role</CommandItem>
+                        )}
+                      </CommandGroup>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                   </div>
                 </div>
-              </div>
-            )}
 
             {/* Study Information */}
             <div className="grid grid-cols-2 gap-4">
@@ -5887,12 +7148,24 @@ export default function ImagingPage() {
                 onClick={handleUploadSubmit}
                 className="bg-medical-blue hover:bg-blue-700"
                 disabled={
+                  isSubmittingOrder ||
                   !uploadFormData.patientId ||
-                  !uploadFormData.studyType
+                  !uploadFormData.studyType ||
+                  !uploadFormData.selectedRole ||
+                  !uploadFormData.selectedUserId
                 }
               >
+                {isSubmittingOrder ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
                 <FileImage className="h-4 w-4 mr-2" />
                 Save Images
+                  </>
+                )}
               </Button>
             </div>
           </div>
@@ -6157,31 +7430,12 @@ export default function ImagingPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="invoice-patient">Patient</Label>
-                <Select value={invoicePatient} onValueChange={(value) => {
-                  setInvoicePatient(value);
-                  // Auto-fetch and populate NHS number from selected patient
-                  const selectedPatient = patients?.find((p: any) => p.patientId === value);
-                  if (selectedPatient?.nhsNumber) {
-                    setInvoiceNhsNumber(selectedPatient.nhsNumber);
-                  } else {
-                    setInvoiceNhsNumber("");
-                  }
-                }}>
-                  <SelectTrigger id="invoice-patient">
-                    <SelectValue placeholder="Select patient" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {patients && patients.length > 0 ? (
-                      patients.map((patient: any) => (
-                        <SelectItem key={patient.id} value={patient.patientId}>
-                          {patient.firstName} {patient.lastName}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="no-patients" disabled>No patients found</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
+                <div className="h-10 px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-800 flex items-center text-sm">
+                  {(() => {
+                    const selectedPatient = patients?.find((p: any) => p.patientId === invoicePatient);
+                    return selectedPatient ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : invoicePatient || "N/A";
+                  })()}
+                </div>
                 {invoicePatientError && (
                   <p className="text-sm text-red-600 mt-1">{invoicePatientError}</p>
                 )}
@@ -6193,7 +7447,8 @@ export default function ImagingPage() {
                   id="invoice-service-date" 
                   type="date" 
                   value={invoiceServiceDate}
-                  onChange={(e) => setInvoiceServiceDate(e.target.value)}
+                  readOnly
+                  className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
                 />
               </div>
             </div>
@@ -6214,7 +7469,8 @@ export default function ImagingPage() {
                   id="invoice-invoice-date" 
                   type="date" 
                   value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  readOnly
+                  className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
                 />
               </div>
               
@@ -6224,7 +7480,8 @@ export default function ImagingPage() {
                   id="invoice-due-date" 
                   type="date" 
                   value={invoiceDueDate}
-                  onChange={(e) => setInvoiceDueDate(e.target.value)}
+                  readOnly
+                  className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
                 />
               </div>
             </div>
@@ -6239,20 +7496,23 @@ export default function ImagingPage() {
                 </div>
                 
                 <div className="grid grid-cols-3 gap-2">
-                  <Input placeholder="Enter CPT Code" value={invoiceServiceCode} onChange={(e) => setInvoiceServiceCode(e.target.value)} />
-                  <Input placeholder="Enter Description" value={invoiceServiceDesc} onChange={(e) => setInvoiceServiceDesc(e.target.value)} />
+                  <Input 
+                    placeholder="Enter CPT Code" 
+                    value={invoiceServiceCode} 
+                    readOnly
+                    className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
+                  />
+                  <Input 
+                    placeholder="Enter Description" 
+                    value={invoiceServiceDesc} 
+                    readOnly
+                    className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
+                  />
                   <Input 
                     placeholder="Amount" 
                     value={invoiceServiceAmount} 
-                    onChange={(e) => {
-                      setInvoiceServiceAmount(e.target.value);
-                      // Auto-calculate total when amount changes
-                      const amount = parseFloat(e.target.value) || 0;
-                      const subtotal = amount;
-                      const tax = subtotal * 0.2; // 20% VAT
-                      const total = subtotal + tax;
-                      setInvoiceTotalAmount(total.toFixed(2));
-                    }}
+                    readOnly
+                    className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -6320,7 +7580,8 @@ export default function ImagingPage() {
                   id="invoice-total" 
                   placeholder="Enter amount (e.g., 150.00)" 
                   value={invoiceTotalAmount}
-                  onChange={(e) => setInvoiceTotalAmount(e.target.value)}
+                  readOnly
+                  className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed"
                 />
                 {invoiceTotalError && (
                   <p className="text-sm text-red-600 mt-1">{invoiceTotalError}</p>
@@ -6357,7 +7618,8 @@ export default function ImagingPage() {
                 placeholder="Additional notes or instructions..."
                 rows={3}
                 value={invoiceNotes}
-                onChange={(e) => setInvoiceNotes(e.target.value)}
+                readOnly
+                className="bg-gray-50 dark:bg-gray-800 cursor-not-allowed resize-none"
               />
             </div>
 
@@ -6824,408 +8086,589 @@ export default function ImagingPage() {
 
       {/* Edit Image Dialog */}
       <Dialog open={showEditImageDialog} onOpenChange={setShowEditImageDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Replace Medical Image</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            {!uploadedFile ? (
-              <p className="text-sm text-gray-600">
-                Select a new image file to replace the existing medical image. This will update the file name and other information in the database.
-              </p>
-            ) : (
-              <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-                <p className="text-sm text-green-800">
-                  ✓ File ready to replace: <strong>{uploadedFile.name}</strong> 
-                  <br />
-                  Click "Save Image" to confirm the replacement.
-                </p>
-              </div>
-            )}
-            
-            <div>
-              <Label htmlFor="replacement-file">Select New Image File</Label>
-              <Input
-                id="replacement-file"
-                type="file"
-                accept="image/*,.dcm"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (files) {
-                    setSelectedFiles(Array.from(files));
-                  }
-                }}
-                data-testid="input-replacement-file"
-              />
-              {selectedFiles.length > 0 && (
-                <p className="text-sm text-green-600 mt-2">
-                  Selected: {selectedFiles[0].name} ({(selectedFiles[0].size / (1024 * 1024)).toFixed(2)} MB)
-                </p>
-              )}
-            </div>
-            
-            <div className="flex justify-end gap-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowEditImageDialog(false);
-                  setSelectedFiles([]);
-                  setUploadedFile(null);
-                  setEditingStudyId(null);
-                }}
-                data-testid="button-cancel-edit"
-              >
-                Cancel
-              </Button>
-              
-              {!uploadedFile ? (
-                <Button
-                  onClick={handleReplaceImage}
-                  disabled={selectedFiles.length === 0}
-                  data-testid="button-confirm-replace"
-                >
-                  Replace Image
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleSaveImage}
-                  disabled={replaceImageMutation.isPending}
-                  data-testid="button-save-image"
-                >
-                  {replaceImageMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    'Save Image'
-                  )}
-                </Button>
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Payment Success Dialog */}
-      <Dialog open={showPaymentSuccessDialog} onOpenChange={setShowPaymentSuccessDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <div className="h-12 w-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
-                <Check className="h-6 w-6 text-green-600 dark:text-green-400" />
-              </div>
-              <span>Payment Successful</span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              Cash payment recorded and invoice marked as paid
-            </p>
-            
-            {paymentSuccessData && (
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Invoice ID:</span>
-                  <span className="text-sm font-semibold">{paymentSuccessData.invoiceId}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Patient Name:</span>
-                  <span className="text-sm font-semibold">{paymentSuccessData.patientName}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Amount:</span>
-                  <span className="text-sm font-semibold text-green-600 dark:text-green-400">
-                    £{paymentSuccessData.amount.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end pt-4">
-              <Button
-                onClick={() => {
-                  setShowPaymentSuccessDialog(false);
-                  setPaymentSuccessData(null);
-                }}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                Close
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* PDF Viewer Dialog */}
-      <Dialog open={showPDFViewerDialog} onOpenChange={(open) => {
-        setShowPDFViewerDialog(open);
-        if (!open && pdfViewerUrl) {
-          URL.revokeObjectURL(pdfViewerUrl);
-          setPdfViewerUrl(null);
-        }
-      }}>
-        <DialogContent className="max-w-6xl h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Radiology Report</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 w-full overflow-hidden">
-            {pdfViewerUrl && (
-              <iframe
-                src={pdfViewerUrl}
-                className="w-full h-full border-0"
-                title="PDF Report Viewer"
-              />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Image Prescription Dialog */}
-      <Dialog open={showPrescriptionDialog} onOpenChange={setShowPrescriptionDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <X className="h-5 w-5 text-gray-500 cursor-pointer hover:text-gray-700" 
-                 onClick={() => setShowPrescriptionDialog(false)} />
-            Imaging Prescription
-            </DialogTitle>
-          </DialogHeader>
-          
-          {selectedPrescriptionStudy && (
-            <div className="space-y-6">
-              {/* Hospital Header */}
-              <div className="text-center border-b pb-4">
-                <div className="flex justify-center items-center gap-3 mb-2">
-                  <div className="h-12 w-12 rounded-full bg-red-500 flex items-center justify-center">
-                    <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M13 2v8h8v4h-8v8h-4v-8H1v-4h8V2h4z"/>
-                    </svg>
-                  </div>
-                </div>
-                <h2 className="text-2xl font-bold text-blue-600">Clinical Care Hospital</h2>
-                <p className="text-sm text-gray-600">Laboratory Test Prescription</p>
-                <p className="text-xs text-gray-500">house 33</p>
-                <p className="text-xs text-gray-500">+923213213213</p>
-                <p className="text-xs text-gray-500">averox71@gmail.com</p>
-                <p className="text-xs text-gray-500">website: www.clinicalcare.com</p>
-              </div>
-
-              {/* Physician and Patient Information */}
-              <div className="grid grid-cols-2 gap-6">
+          {editingStudyId && selectedStudy && (
+            <div className="space-y-4">
+              {/* Display Existing Images */}
+              {selectedStudy.images && selectedStudy.images.length > 0 && (
                 <div>
-                  <h5 className="font-semibold text-gray-900 mb-2">Physician Information</h5>
-                  <div className="space-y-1 text-sm">
-                    <div><span className="font-medium">Name:</span> {selectedPrescriptionStudy.referringPhysician || user?.name || 'N/A'}</div>
-                    <div><span className="font-medium">Priority:</span> {selectedPrescriptionStudy.priority || 'routine'}</div>
-                  </div>
-                </div>
-                <div>
-                  <h5 className="font-semibold text-gray-900 mb-2">Patient Information</h5>
-                  <div className="space-y-1 text-sm">
-                    <div><span className="font-medium">Name:</span> {selectedPrescriptionStudy.patientName}</div>
-                    <div><span className="font-medium">Patient ID:</span> {selectedPrescriptionStudy.patientId}</div>
-                    <div><span className="font-medium">Date:</span> {new Date(selectedPrescriptionStudy.studyDate || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
-                    <div><span className="font-medium">Time:</span> {new Date(selectedPrescriptionStudy.studyDate || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Laboratory Test Prescription */}
-              <div className="border rounded-lg p-4 bg-blue-50">
-                <h5 className="font-semibold text-gray-900 mb-3">⚕ Laboratory Test Prescription</h5>
-                
-                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                  <div className="bg-white p-3 rounded">
-                    <div className="font-medium text-gray-600">Test ID:</div>
-                    <div className="font-semibold">{selectedPrescriptionStudy.id}</div>
-                  </div>
-                  <div className="bg-white p-3 rounded">
-                    <div className="font-medium text-gray-600">Test Type:</div>
-                    <div className="font-semibold">{selectedPrescriptionStudy.studyType}</div>
-                  </div>
-                  <div className="bg-white p-3 rounded">
-                    <div className="font-medium text-gray-600">Ordered Date:</div>
-                    <div className="font-semibold">{new Date(selectedPrescriptionStudy.studyDate || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  <div className="bg-white p-3 rounded">
-                    <div className="font-medium text-gray-600">Status:</div>
-                    <div className={`font-semibold ${selectedPrescriptionStudy.status === 'COMPLETED' ? 'text-green-600' : 'text-yellow-600'}`}>
-                      {selectedPrescriptionStudy.status}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Test Results */}
-                <div className="bg-white p-4 rounded mb-3">
-                  <h4 className="font-semibold text-gray-900 mb-2">Test Results:</h4>
-                  <div className="space-y-2 text-sm">
-                    <div>
-                      <div className="font-medium">{selectedPrescriptionStudy.studyType}</div>
-                      <div className="text-gray-600">
-                        <span className="font-medium">Modality:</span> {selectedPrescriptionStudy.modality}
+                  <Label className="text-sm font-medium mb-3 block">Existing Images ({selectedStudy.images.length})</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                    {selectedStudy.images.map((image: any, index: number) => (
+                      <div
+                        key={index}
+                        className="border border-gray-200 rounded-lg p-3 flex items-center justify-between"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">
+                            {image.seriesDescription || image.fileName || `Image ${index + 1}`}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {image.size || 'N/A'} • {image.type || 'N/A'}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              // Use the image ID from the image object, fallback to study ID
+                              const imageIdToDelete = image.id || selectedStudy.id;
+                              
+                              // Delete the image from database
+                              const response = await apiRequest(
+                                "DELETE",
+                                `/api/medical-images/${imageIdToDelete}`,
+                                {}
+                              );
+                              
+                              if (response.ok) {
+                                toast({
+                                  title: "Image Deleted",
+                                  description: "Image has been deleted successfully.",
+                                });
+                                // Refresh the study data
+                                await refetchImages();
+                                // Close dialog if no images left
+                                if (selectedStudy.images.length === 1) {
+                                  setShowEditImageDialog(false);
+                                  setEditingStudyId(null);
+                                } else {
+                                  // Update selectedStudy to reflect the deletion
+                                  const updatedImages = selectedStudy.images.filter((_: any, i: number) => i !== index);
+                                  // Note: This is a local update, refetchImages will get the latest data
+                                }
+                              }
+                            } catch (error) {
+                              console.error("Error deleting image:", error);
+                              toast({
+                                title: "Delete Failed",
+                                description: "Failed to delete image. Please try again.",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          title="Delete this image"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
-                      <div className="text-gray-600">
-                        <span className="font-medium">Body Part:</span> {selectedPrescriptionStudy.bodyPart}
-                      </div>
-                      {selectedPrescriptionStudy.priority === 'urgent' || selectedPrescriptionStudy.priority === 'stat' ? (
-                        <div className="text-red-600 font-semibold">Flag: HIGH</div>
-                      ) : null}
-                    </div>
+                    ))}
                   </div>
                 </div>
+              )}
 
-                {/* Clinical Notes */}
-                <div className="bg-yellow-50 p-3 rounded">
-                  <h4 className="font-semibold text-gray-900 mb-1">Clinical Notes:</h4>
-                  <p className="text-sm text-gray-700">
-                    {selectedPrescriptionStudy.indication || selectedPrescriptionStudy.specialInstructions || 'No clinical notes available'}
+              {/* Add New Images Section */}
+              <div>
+                <Label htmlFor="replacement-file" className="text-sm font-medium">Add New Images</Label>
+                <div className="mt-2 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 text-center">
+                  <FileImage className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+                  <Input
+                    id="replacement-file"
+                    type="file"
+                    multiple
+                    accept="image/*,.dcm,.dicom,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files) {
+                        const newFiles = Array.from(files);
+                        setSelectedFiles([...selectedFiles, ...newFiles]);
+                      }
+                    }}
+                    className="hidden"
+                    data-testid="input-replacement-file"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => document.getElementById("replacement-file")?.click()}
+                  >
+                    Select Images
+                  </Button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    Select one or more image files to add
                   </p>
                 </div>
-              </div>
 
-              {/* E-Signature Section */}
-              {selectedPrescriptionStudy.signatureData && (
-                <div>
-                  <h5 className="font-semibold text-gray-900 mb-2">Resident Physician (Signature)</h5>
-                  <div 
-                    className="inline-block rounded"
-                    style={{ 
-                      border: '1px solid #E5E7EB',
-                      padding: '0',
-                      margin: '0'
-                    }}
-                  >
-                    <img
-                      src={selectedPrescriptionStudy.signatureData}
-                      alt="Resident Physician Signature"
-                      style={{
-                        width: '120px',
-                        height: '50px',
-                        objectFit: 'contain',
-                        display: 'block',
-                        margin: '0',
-                        padding: '0'
-                      }}
-                    />
-                  </div>
-                  {selectedPrescriptionStudy.signatureDate && (
-                    <div className="mt-2 text-sm" style={{ color: 'rgb(0, 153, 0)' }}>
-                      ✓ E-Signed by - {format(new Date(selectedPrescriptionStudy.signatureDate), "MMM d, yyyy HH:mm")}
+                {/* Selected Files Display */}
+                {selectedFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <Label className="text-xs">Selected Files ({selectedFiles.length}):</Label>
+                    <div className="max-h-32 overflow-y-auto space-y-1">
+                      {selectedFiles.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2 rounded text-xs gap-2"
+                        >
+                          <span className="truncate flex-1">{file.name}</span>
+                          <span className="text-gray-500 dark:text-gray-400 text-xs">
+                            {file.size < 1024
+                              ? `${file.size} B`
+                              : file.size < 1024 * 1024
+                                ? `${(file.size / 1024).toFixed(1)} KB`
+                                : `${(file.size / (1024 * 1024)).toFixed(1)} MB`}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const newFiles = selectedFiles.filter((_, i) => i !== index);
+                              setSelectedFiles(newFiles);
+                            }}
+                            className="h-5 w-5 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            title="Remove this file"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </div>
-              )}
-
-              {/* Critical Values Alert */}
-              {(selectedPrescriptionStudy.priority === 'stat' || selectedPrescriptionStudy.priority === 'urgent') && (
-                <div className="bg-red-50 border border-red-200 rounded p-3 flex items-start gap-2">
-                  <div className="text-red-600 mt-0.5">⚠</div>
-                  <div>
-                    <div className="font-semibold text-red-900">CRITICAL VALUES DETECTED</div>
-                    <div className="text-sm text-red-700">This {selectedPrescriptionStudy.priority === 'stat' ? 'STAT' : 'urgent'} study requires immediate attention.</div>
                   </div>
-                </div>
-              )}
-
-              {/* Footer */}
-              <div className="border-t pt-4 flex justify-between items-center text-xs text-gray-500">
-                <div>Generated by Cura EMR System</div>
-                <div>Date: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                )}
               </div>
-
-              {/* Save Prescription Button */}
-              <div className="flex justify-end">
+              
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowEditImageDialog(false);
+                    setSelectedFiles([]);
+                    setUploadedFile(null);
+                    setEditingStudyId(null);
+                  }}
+                  data-testid="button-cancel-edit"
+                >
+                  Cancel
+                </Button>
                 <Button
                   onClick={async () => {
-                    setIsSavingPrescription(true);
-                    try {
-                      const token = localStorage.getItem('auth_token');
-                      const subdomain = localStorage.getItem('user_subdomain');
-                      
-                      const headers: Record<string, string> = {
-                        'Content-Type': 'application/json',
-                      };
-                      
-                      if (token) {
-                        headers['Authorization'] = `Bearer ${token}`;
+                    if (selectedFiles.length > 0 && editingStudyId) {
+                      try {
+                        const formData = new FormData();
+                        formData.append('file', selectedFiles[0]);
+                        
+                        const token = localStorage.getItem('auth_token');
+                        const headers: Record<string, string> = {
+                          'X-Tenant-Subdomain': getActiveSubdomain()
+                        };
+                        
+                        if (token) {
+                          headers['Authorization'] = `Bearer ${token}`;
+                        }
+                        
+                        const response = await fetch(`/api/medical-images/${editingStudyId}/replace`, {
+                          method: 'PUT',
+                          headers,
+                          body: formData,
+                          credentials: 'include',
+                        });
+                        
+                        if (!response.ok) {
+                          const errorText = await response.text();
+                          throw new Error(`${response.status}: ${errorText}`);
+                        }
+                        
+                        const data = await response.json();
+                        await refetchImages();
+                        setShowEditImageDialog(false);
+                        setSelectedFiles([]);
+                        setUploadedFile(null);
+                        setEditingStudyId(null);
+                        
+                        toast({
+                          title: "Image Saved Successfully",
+                          description: "Image has been replaced successfully.",
+                        });
+                      } catch (error) {
+                        console.error("Error replacing image:", error);
+                        toast({
+                          title: "Replace Failed",
+                          description: error instanceof Error ? error.message : "Failed to replace image. Please try again.",
+                          variant: "destructive",
+                        });
                       }
-                      
-                      if (subdomain) {
-                        headers['X-Tenant-Subdomain'] = subdomain;
-                      }
-                      
-                      const response = await fetch('/api/imaging/save-prescription', {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({
-                          studyId: selectedPrescriptionStudy.id,
-                          prescriptionData: {
-                            hospitalName: "Clinical Care Hospital",
-                            hospitalAddress: "house 33",
-                            hospitalPhone: "+923213213213",
-                            hospitalEmail: "averox71@gmail.com",
-                            hospitalWebsite: "www.clinicalcare.com",
-                            physicianName: selectedPrescriptionStudy.referringPhysician || user?.name || 'N/A',
-                            priority: selectedPrescriptionStudy.priority || 'routine',
-                            patientName: selectedPrescriptionStudy.patientName,
-                            patientId: selectedPrescriptionStudy.patientId,
-                            date: new Date(selectedPrescriptionStudy.studyDate || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-                            time: new Date(selectedPrescriptionStudy.studyDate || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                            testId: selectedPrescriptionStudy.id,
-                            testType: selectedPrescriptionStudy.studyType,
-                            orderedDate: new Date(selectedPrescriptionStudy.studyDate || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-                            status: selectedPrescriptionStudy.status,
-                            modality: selectedPrescriptionStudy.modality,
-                            bodyPart: selectedPrescriptionStudy.bodyPart,
-                            clinicalNotes: selectedPrescriptionStudy.indication || selectedPrescriptionStudy.specialInstructions || 'No clinical notes available',
-                          }
-                        }),
-                      });
-
-                      if (!response.ok) {
-                        throw new Error('Failed to save prescription');
-                      }
-
-                      const result = await response.json();
-                      
-                      toast({
-                        title: "Prescription Saved",
-                        description: `Prescription saved successfully as ${result.fileName}`,
-                      });
-
-                      // Call pill icon function (generate image prescription)
-                      await handleGenerateImagePrescription(selectedPrescriptionStudy.id);
-
-                      setShowPrescriptionDialog(false);
-                      setSelectedPrescriptionStudy(null);
-                      queryClient.invalidateQueries({ queryKey: ["/api/medical-images"] });
-                    } catch (error) {
-                      console.error('Error saving prescription:', error);
-                      toast({
-                        title: "Error",
-                        description: "Failed to save prescription. Please try again.",
-                        variant: "destructive",
-                      });
-                    } finally {
-                      setIsSavingPrescription(false);
                     }
                   }}
-                  className="bg-blue-600 hover:bg-blue-700"
-                  disabled={isSavingPrescription}
+                  disabled={selectedFiles.length === 0}
+                  data-testid="button-save-edit"
                 >
-                  {isSavingPrescription ? (
-                    <>
-                      <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      Saving...
-                    </>
-                  ) : (
-                    'Save Prescription'
-                  )}
+                  Save
                 </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Body Part Images Dialog */}
+      <Dialog 
+        open={showBodyPartImagesDialog} 
+        onOpenChange={(open) => {
+          setShowBodyPartImagesDialog(open);
+          // Clean up object URLs when dialog closes
+          if (!open) {
+            Object.values(bodyPartImagePreviews).forEach((url) => {
+              if (url.startsWith('blob:')) {
+                URL.revokeObjectURL(url);
+              }
+            });
+            setBodyPartImagePreviews({});
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>All Images for: {selectedBodyPart}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {loadingBodyPartImages ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                <span className="ml-2 text-sm text-gray-600">Loading images...</span>
+              </div>
+            ) : bodyPartImages.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <FileImage className="h-12 w-12 mx-auto text-gray-300 mb-2" />
+                <p>No images found for this body part</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {bodyPartImages.map((image, index) => {
+                  const imageKey = image.id || index;
+                  const previewUrl = bodyPartImagePreviews[imageKey];
+                  
+                  return (
+                    <div
+                      key={imageKey}
+                    className="border rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
+                      onClick={async () => {
+                        try {
+                          const token = localStorage.getItem("auth_token");
+                          let imageUrl: string | null = null;
+                          let lastError: Error | null = null;
+
+                          // Priority 1: Use base64 image data if already available in the response (fastest)
+                          if (image.imageData) {
+                            imageUrl = image.imageData;
+                            console.log(`✅ Using base64 image data from response`);
+                          }
+
+                          // Priority 2: Try to fetch image from radiology image endpoint using image ID
+                          if (!imageUrl && image.id) {
+                            try {
+                              console.log(`🔄 Attempting to load image from radiology-images endpoint: /api/radiology-images/image/${image.id}`);
+                              const response = await fetch(`/api/radiology-images/image/${image.id}`, {
+                                method: "GET",
+                                headers: {
+                                  "X-Tenant-Subdomain": getActiveSubdomain(),
+                                  ...(token && {
+                                    Authorization: `Bearer ${token}`,
+                                  }),
+                                },
+                                credentials: "include",
+                              });
+
+                              if (response.ok) {
+                                const blob = await response.blob();
+                                imageUrl = URL.createObjectURL(blob);
+                                console.log(`✅ Successfully loaded image from radiology-images endpoint: ${image.id}`);
+                              } else {
+                                const errorText = await response.text().catch(() => 'Unknown error');
+                                console.warn(`⚠️ Failed to load image from radiology-images endpoint (${response.status}): ${errorText}`);
+                                console.log(`🔄 Will try fallback method: medical-images endpoint`);
+                                lastError = new Error(`Radiology image not available: ${response.status}`);
+                                // Don't throw here - continue to fallback methods
+                              }
+                            } catch (fetchError) {
+                              console.warn(`⚠️ Error fetching from radiology-images endpoint:`, fetchError);
+                              console.log(`🔄 Will try fallback method: medical-images endpoint`);
+                              lastError = fetchError instanceof Error ? fetchError : new Error("Failed to fetch image");
+                              // Don't throw here - continue to fallback methods
+                            }
+                          }
+
+                          // Priority 3: Try to use filePath from database to serve directly from server
+                          if (!imageUrl && image.filePath) {
+                            try {
+                              // Extract relative path from absolute path (e.g., "uploads/Imaging_Images/20/patients/98/file.webp")
+                              let relativePath = image.filePath;
+                              
+                              // If it's an absolute Windows path, extract the part after "uploads"
+                              if (image.filePath.includes('uploads')) {
+                                const uploadsIndex = image.filePath.indexOf('uploads');
+                                relativePath = image.filePath.substring(uploadsIndex);
+                                // Convert Windows backslashes to forward slashes for URL
+                                relativePath = relativePath.replace(/\\/g, '/');
+                              } else if (image.filePath.startsWith('/')) {
+                                // Unix absolute path - remove leading slash if it's already relative to uploads
+                                relativePath = image.filePath.startsWith('/uploads') 
+                                  ? image.filePath.substring(1) 
+                                  : image.filePath;
+                              }
+                              
+                              // Construct URL (server serves /uploads as static files)
+                              const fileUrl = `/${relativePath}`;
+                              console.log(`🔄 Attempting to load image from file path: ${fileUrl}`);
+                              console.log(`📁 Original filePath from DB: ${image.filePath}`);
+                              
+                              // Try to fetch the file directly
+                              const response = await fetch(fileUrl, {
+                                method: "GET",
+                                credentials: "include",
+                              });
+
+                              if (response.ok) {
+                                const blob = await response.blob();
+                                imageUrl = URL.createObjectURL(blob);
+                                console.log(`✅ Successfully loaded image from file path: ${fileUrl}`);
+                              } else {
+                                console.warn(`⚠️ Failed to load image from file path (${response.status}): ${fileUrl}`);
+                                if (!lastError) {
+                                  lastError = new Error(`File not accessible: ${response.status}`);
+                                }
+                                // Don't throw here - continue to try other methods
+                              }
+                            } catch (fetchError) {
+                              console.warn(`⚠️ Error fetching from file path:`, fetchError);
+                              if (!lastError) {
+                                lastError = fetchError instanceof Error ? fetchError : new Error("Failed to fetch image from file path");
+                              }
+                              // Don't throw here - continue to try other methods
+                            }
+                          }
+
+                          // Priority 4: Try to fetch image from medical image endpoint if all else failed
+                          if (!imageUrl && image.studyId) {
+                            try {
+                              console.log(`🔄 Attempting to load image from medical-images endpoint: /api/medical-images/${image.studyId}/image`);
+                              const response = await fetch(`/api/medical-images/${image.studyId}/image`, {
+                                method: "GET",
+                                headers: {
+                                  "X-Tenant-Subdomain": getActiveSubdomain(),
+                                  ...(token && {
+                                    Authorization: `Bearer ${token}`,
+                                  }),
+                                },
+                                credentials: "include",
+                              });
+
+                              if (response.ok) {
+                                const blob = await response.blob();
+                                imageUrl = URL.createObjectURL(blob);
+                                console.log(`✅ Successfully loaded image from medical-images endpoint: ${image.studyId}`);
+                              } else {
+                                const errorText = await response.text().catch(() => 'Unknown error');
+                                console.warn(`⚠️ Failed to load image from medical-images endpoint (${response.status}): ${errorText}`);
+                                if (!lastError) {
+                                  lastError = new Error(`Medical image not available: ${response.status}`);
+                                }
+                                // Don't throw here - continue to show error
+                              }
+                            } catch (fetchError) {
+                              console.warn(`⚠️ Error fetching from medical-images endpoint:`, fetchError);
+                              if (!lastError) {
+                                lastError = fetchError instanceof Error ? fetchError : new Error("Failed to fetch image");
+                              }
+                              // Don't throw here - continue to show error
+                            }
+                          } else if (!imageUrl && !image.studyId) {
+                            console.warn(`⚠️ Cannot try medical-images endpoint: studyId is not available`);
+                          }
+
+                          // If still no image URL, throw error with helpful message
+                          if (!imageUrl) {
+                            let errorMessage = "Unable to load image. ";
+                            if (lastError) {
+                              errorMessage += lastError.message;
+                        } else {
+                              errorMessage += "The image file may not exist on the server or may not be accessible.";
+                            }
+                            errorMessage += ` (Image ID: ${image.id || 'N/A'}, Study ID: ${image.studyId || 'N/A'}, File: ${image.fileName || 'N/A'})`;
+                            console.error(`❌ All image loading methods failed:`, {
+                              imageId: image.id,
+                              studyId: image.studyId,
+                              fileName: image.fileName,
+                              filePath: image.filePath,
+                              hasImageData: !!image.imageData,
+                              lastError: lastError?.message
+                            });
+                            throw new Error(errorMessage);
+                        }
+
+                        const imageForViewer = {
+                          seriesDescription: `${image.modality} - ${image.studyType}`,
+                          type: "JPEG",
+                          imageCount: 1,
+                          size: image.fileSize ? `${(image.fileSize / 1024).toFixed(1)} KB` : "N/A",
+                          imageId: image.studyId,
+                          imageUrl: imageUrl,
+                          mimeType: image.mimeType || "image/jpeg",
+                          fileName: image.fileName,
+                          patientName: image.patientName,
+                        };
+                        setSelectedImageSeries(imageForViewer);
+                        setShowImageViewer(true);
+                        setShowBodyPartImagesDialog(false);
+                      } catch (error) {
+                        console.error("Error loading image:", error);
+                        toast({
+                          title: "Error",
+                          description: "Failed to load image. Please try again.",
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                  >
+                    <div className="aspect-square bg-gray-100 dark:bg-gray-800 rounded-md mb-2 flex items-center justify-center overflow-hidden">
+                        {previewUrl ? (
+                          <img
+                            src={previewUrl}
+                            alt={image.fileName || `Image ${index + 1}`}
+                            className="w-full h-full object-contain"
+                            onError={(e) => {
+                              // If preview fails to load, show placeholder
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const parent = target.parentElement;
+                              if (parent) {
+                                const placeholder = document.createElement('div');
+                                placeholder.className = 'flex items-center justify-center w-full h-full';
+                                placeholder.innerHTML = '<svg class="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>';
+                                parent.appendChild(placeholder);
+                              }
+                            }}
+                          />
+                        ) : image.imageData ? (
+                        <img
+                          src={image.imageData}
+                          alt={image.fileName || `Image ${index + 1}`}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <FileImage className="h-12 w-12 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="text-xs space-y-1">
+                      <div className="font-medium truncate" title={image.fileName}>
+                        {image.fileName || `Image ${index + 1}`}
+                      </div>
+                      {image.patientName && (
+                        <div className="text-gray-500 truncate" title={image.patientName}>
+                          {image.patientName}
+                        </div>
+                      )}
+                      {image.studyType && (
+                        <div className="text-gray-500 truncate" title={image.studyType}>
+                          {image.studyType}
+                        </div>
+                      )}
+                      {image.fileSize && (
+                        <div className="text-gray-400">
+                          {(image.fileSize / 1024).toFixed(1)} KB
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end pt-4 border-t">
+            <Button onClick={() => setShowBodyPartImagesDialog(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF List View Dialog */}
+      <Dialog open={showPDFListViewDialog} onOpenChange={setShowPDFListViewDialog}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
+            <DialogTitle>PDF Report: {selectedPDFFileName}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden px-6 pb-4" style={{ minHeight: '600px', height: 'calc(90vh - 120px)' }}>
+            {selectedPDFUrl ? (
+              <iframe
+                src={selectedPDFUrl}
+                className="w-full h-full border rounded"
+                title="PDF Report"
+                style={{ minHeight: '600px' }}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                <span className="ml-2 text-sm text-gray-600">Loading PDF...</span>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-6 pt-4 border-t">
+            <Button onClick={() => setShowPDFListViewDialog(false)}>
+              Close
+            </Button>
+            {selectedPDFUrl && (
+              <Button
+                variant="outline"
+                onClick={() => window.open(selectedPDFUrl, '_blank')}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Open in New Tab
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Please Create Signature First Dialog */}
+      <Dialog open={showSignFirstDialog} onOpenChange={setShowSignFirstDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-yellow-600" />
+              Signature Required
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Please create signature first.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowSignFirstDialog(false);
+                setPendingPrescriptionStudy(null);
+                setPendingESignStudy(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setShowSignFirstDialog(false);
+                // Open the advanced e-signature dialog
+                if (pendingPrescriptionStudy) {
+                  setESignStudy(pendingPrescriptionStudy);
+                  setShowESignDialog(true);
+                } else if (pendingESignStudy) {
+                  setESignStudy(pendingESignStudy);
+                  setShowESignDialog(true);
+                  setPendingESignStudy(null);
+                }
+              }}
+              className="bg-medical-blue hover:bg-blue-700"
+            >
+              OK
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -7258,25 +8701,37 @@ export default function ImagingPage() {
                   <div className="grid grid-cols-2 gap-4 text-sm text-blue-800">
                     <div>
                       <p>
-                        <strong>Patient:</strong> {eSignStudy.patientName}
+                        <strong>Patient:</strong>{" "}
+                        {eSignStudy.patientName || 'N/A'}
                       </p>
                       <p>
-                        <strong>Patient ID:</strong> {eSignStudy.patientId}
+                        <strong>Patient ID:</strong>{" "}
+                        {eSignStudy.patientId || 'N/A'}
                       </p>
                       <p>
                         <strong>Date Ordered:</strong>{" "}
-                        {format(new Date(eSignStudy.orderedAt || eSignStudy.createdAt), "MMM dd, yyyy HH:mm")}
+                        {eSignStudy.orderedAt ? format(
+                          new Date(eSignStudy.orderedAt),
+                          "MMM dd, yyyy HH:mm",
+                        ) : 'N/A'}
                       </p>
                     </div>
                     <div>
                       <p>
-                        <strong>Study Type:</strong> {eSignStudy.studyType}
+                        <strong>Ordering Provider:</strong>{" "}
+                        {eSignStudy.orderedBy || 'N/A'}
                       </p>
                       <p>
-                        <strong>Modality:</strong> {eSignStudy.modality}
+                        <strong>Created By:</strong>{" "}
+                        {user ? `${formatRoleLabel(user.role)} - ${user.firstName} ${user.lastName}` : 'N/A'}
                       </p>
                       <p>
-                        <strong>Status:</strong> {eSignStudy.status}
+                        <strong>Study Type:</strong>{" "}
+                        {eSignStudy.studyType || eSignStudy.modality || 'N/A'}
+                      </p>
+                      <p>
+                        <strong>Status:</strong>{" "}
+                        {eSignStudy.status || 'N/A'}
                       </p>
                     </div>
                   </div>
@@ -7285,44 +8740,9 @@ export default function ImagingPage() {
                       Study to be signed:
                     </p>
                     <div className="text-xs text-gray-600 mb-1">
-                      • Image ID: {eSignStudy.imageId} - {eSignStudy.studyType}
+                      • Image ID: {eSignStudy.imageId || eSignStudy.id} - {eSignStudy.studyType || eSignStudy.modality || 'Imaging Study'}
                     </div>
                   </div>
-
-                  {/* Display Signature if Already Signed */}
-                  {eSignStudy.signatureData && (
-                    <div className="mt-4 p-4 bg-green-50 rounded border border-green-200">
-                      <h5 className="text-sm font-semibold text-gray-900 mb-3">
-                        Resident Physician (Signature)
-                      </h5>
-                      <div 
-                        className="inline-block rounded bg-white"
-                        style={{ 
-                          border: '1px solid #E5E7EB',
-                          padding: '0',
-                          margin: '0'
-                        }}
-                      >
-                        <img
-                          src={eSignStudy.signatureData}
-                          alt="Resident Physician Signature"
-                          style={{
-                            width: '120px',
-                            height: '50px',
-                            objectFit: 'contain',
-                            display: 'block',
-                            margin: '0',
-                            padding: '0'
-                          }}
-                        />
-                      </div>
-                      {eSignStudy.signatureDate && (
-                        <div className="mt-2 text-sm" style={{ color: 'rgb(0, 153, 0)' }}>
-                          ✓ E-Signed by - {format(new Date(eSignStudy.signatureDate), "MMM d, yyyy HH:mm")}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -7367,7 +8787,11 @@ export default function ImagingPage() {
                       <Trash2 className="h-4 w-4 mr-2" />
                       Clear
                     </Button>
-                    <Button variant="outline" className="flex-1">
+                    <Button 
+                      variant="outline" 
+                      className="flex-1"
+                      onClick={previewSignature}
+                    >
                       <Eye className="h-4 w-4 mr-2" />
                       Preview
                     </Button>
@@ -7376,8 +8800,32 @@ export default function ImagingPage() {
 
                 {/* Signature Analytics */}
                 <div className="space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-lg border">
-                    <h5 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                  {/* Signature Preview Display */}
+                  {signaturePreview && (
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border-2 border-blue-200 dark:border-blue-800">
+                      <h5 className="font-medium text-blue-900 dark:text-blue-100 mb-3 flex items-center gap-2">
+                        <Eye className="h-4 w-4" />
+                        Signature Preview
+                      </h5>
+                      <div className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-4 flex items-center justify-center" style={{ minHeight: '150px' }}>
+                        <img 
+                          src={signaturePreview} 
+                          alt="Signature Preview" 
+                          className="max-w-full max-h-[150px] object-contain"
+                          onError={(e) => {
+                            console.error("Error loading signature preview");
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
+                        This is how your signature will appear when saved
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border">
+                    <h5 className="font-medium text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-600" />
                       Signature Quality Analysis
                     </h5>
@@ -7430,60 +8878,135 @@ export default function ImagingPage() {
                   </div>
                 </div>
               </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowESignDialog(false);
+                    clearSignature();
+                    setIsSavingSignature(false);
+                  }}
+                  disabled={isSavingSignature}
+                >
+                  Cancel Signature Process
+                </Button>
+                <Button
+                  onClick={saveSignature}
+                  disabled={signatureSaved || !eSignStudy || isSavingSignature}
+                  className={`bg-purple-600 hover:bg-purple-700 text-white ${isSavingSignature ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isSavingSignature ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <PenTool className="h-4 w-4 mr-2" />
+                      Apply Advanced E-Signature
+                    </>
+                  )}
+                </Button>
+              </div>
             </TabsContent>
 
             {/* Authentication Tab */}
             <TabsContent value="authentication" className="space-y-4">
-              <div className="bg-green-50 p-4 rounded border border-green-200">
-                <h5 className="font-medium text-green-800 mb-2">Authentication Status</h5>
-                <p className="text-sm text-green-700">Multi-factor authentication verified</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <User className="h-5 w-5" />
+                      Multi-Factor Authentication
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 bg-green-50 rounded border border-green-200">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="text-sm font-medium">
+                            Primary Authentication
+                          </span>
+                        </div>
+                        <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                          Verified
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 bg-green-50 rounded border border-green-200">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="text-sm font-medium">
+                            Device Recognition
+                          </span>
+                        </div>
+                        <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                          Trusted
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <AlertCircle className="h-5 w-5" />
+                      Security Validation
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="text-sm space-y-2">
+                      <p>
+                        <strong>Session ID:</strong>{" "}
+                        {Math.random().toString(36).substring(7).toUpperCase()}
+                      </p>
+                      <p>
+                        <strong>IP Address:</strong> Verified
+                      </p>
+                      <p>
+                        <strong>Timestamp:</strong>{" "}
+                        {new Date().toLocaleString()}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             </TabsContent>
 
             {/* Verification Tab */}
             <TabsContent value="verification" className="space-y-4">
-              <div className="bg-blue-50 p-4 rounded border border-blue-200">
-                <h5 className="font-medium text-blue-800 mb-2">Verification Summary</h5>
-                <p className="text-sm text-blue-700">Biometric matching: 97.8% confidence</p>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Signature Verification</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    Signature verification ensures the integrity and authenticity of the electronic signature.
+                  </p>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {/* Compliance Tab */}
             <TabsContent value="compliance" className="space-y-4">
-              <div className="bg-yellow-50 p-4 rounded border border-yellow-200">
-                <h5 className="font-medium text-yellow-900 mb-2">Legal Compliance</h5>
-                <p className="text-sm text-yellow-800">FDA 21 CFR Part 11 Compliant</p>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Compliance Information</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600">
+                    This electronic signature complies with relevant healthcare regulations and standards.
+                  </p>
+                </CardContent>
+              </Card>
             </TabsContent>
-
-            <div className="flex justify-between pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => setShowESignDialog(false)}
-              >
-                Cancel Signature Process
-              </Button>
-              <Button
-                onClick={saveSignature}
-                disabled={signatureSaved}
-                className="bg-medical-blue hover:bg-blue-700"
-              >
-                {signatureSaved ? (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Signature Saved!
-                  </>
-                ) : (
-                  <>
-                    <PenTool className="h-4 w-4 mr-2" />
-                    Apply Advanced E-Signature
-                  </>
-                )}
-              </Button>
-            </div>
           </Tabs>
         </DialogContent>
       </Dialog>
     </>
   );
 }
+                

@@ -11,7 +11,7 @@ const DEFAULT_DEV_API = (() => {
   return "http://localhost:1100";
 })();
 
-function buildUrl(path: string) {
+export function buildUrl(path: string) {
   if (path.startsWith("http")) {
     return path;
   }

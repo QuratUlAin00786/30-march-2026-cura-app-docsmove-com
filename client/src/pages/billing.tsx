@@ -474,29 +474,34 @@ function PricingManagementDashboard() {
 
   const { data: doctorsFeesData = [], isLoading: loadingDoctors } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/doctors-fees"],
+    queryFn: () => fetchResource("/api/pricing/doctors-fees"),
     enabled: pricingTab === "doctors"
   });
   const doctorsFees: any[] = doctorsFeesData ?? [];
 
   const { data: labTestsData = [], isLoading: loadingLabs } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/lab-tests"],
+    queryFn: () => fetchResource("/api/pricing/lab-tests"),
     enabled: pricingTab === "lab-tests"
   });
   const labTests: any[] = labTestsData ?? [];
 
   const { data: imagingData = [], isLoading: loadingImaging } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/imaging"],
+    queryFn: () => fetchResource("/api/pricing/imaging"),
     enabled: pricingTab === "imaging"
   });
   const imaging: any[] = imagingData ?? [];
 
   const { data: treatmentsData = [], isLoading: loadingTreatments } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/treatments"],
+    queryFn: () => fetchResource("/api/pricing/treatments"),
     enabled: pricingTab === "treatments"
   });
   const treatments: any[] = treatmentsData ?? [];
   const { data: treatmentsInfoList = [], isLoading: loadingTreatmentsInfo } = useQuery<any[], Error>({
     queryKey: ["/api/treatments-info"],
+    queryFn: () => fetchResource("/api/treatments-info"),
     enabled: true
   });
 
@@ -833,12 +838,7 @@ function PricingManagementDashboard() {
       ];
 
       // Fetch existing imaging to check for duplicates
-      const response = await fetch('/api/pricing/imaging', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'X-Tenant-Subdomain': localStorage.getItem('user_subdomain') || 'demo'
-        }
-      });
+      const response = await apiRequest('GET', '/api/pricing/imaging');
       const existingImaging = await response.json();
 
       let successCount = 0;
@@ -3130,21 +3130,48 @@ export default function BillingPage() {
   useEffect(() => {
     const fetchClinicBranding = async () => {
       try {
-        const [headerResponse, footerResponse] = await Promise.all([
+        // Use Promise.allSettled to handle individual failures gracefully
+        const [headerResult, footerResult] = await Promise.allSettled([
           apiRequest('GET', '/api/clinic-headers', undefined),
           apiRequest('GET', '/api/clinic-footers', undefined)
         ]);
         
-        const headerData = await headerResponse.json();
-        const footerData = await footerResponse.json();
+        // Handle header response
+        if (headerResult.status === 'fulfilled') {
+          const headerResponse = headerResult.value;
+          const contentType = headerResponse.headers.get('content-type') || '';
+          
+          if (headerResponse.ok && contentType.includes('application/json')) {
+            try {
+              const headerData = await headerResponse.json();
+              if (headerData) {
+                setClinicHeader(headerData);
+              }
+            } catch (jsonError) {
+              // Silently ignore JSON parse errors - endpoint might return HTML
+            }
+          }
+        }
         
-        console.log('📋 Clinic Header Data:', headerData);
-        console.log('📋 Clinic Footer Data:', footerData);
-        
-        setClinicHeader(headerData);
-        setClinicFooter(footerData);
-      } catch (error) {
-        console.error('Failed to fetch clinic branding:', error);
+        // Handle footer response
+        if (footerResult.status === 'fulfilled') {
+          const footerResponse = footerResult.value;
+          const contentType = footerResponse.headers.get('content-type') || '';
+          
+          if (footerResponse.ok && contentType.includes('application/json')) {
+            try {
+              const footerData = await footerResponse.json();
+              if (footerData) {
+                setClinicFooter(footerData);
+              }
+            } catch (jsonError) {
+              // Silently ignore JSON parse errors - endpoint might return HTML
+            }
+          }
+        }
+      } catch (error: any) {
+        // Silently handle errors - clinic branding is optional
+        // The endpoints might not exist yet or the server might not have restarted
       }
     };
     

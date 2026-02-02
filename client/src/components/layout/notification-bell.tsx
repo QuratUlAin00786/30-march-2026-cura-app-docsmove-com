@@ -106,10 +106,15 @@ export function NotificationBell() {
   });
 
   const totalNotifications = (totalNotificationsData as { count: number })?.count || notifications.length;
-  const badgeCount = unreadCount;
   const visibleNotifications = notifications.filter(
     (notification) => notification.status !== "dismissed" && notification.status !== "archived",
   );
+  // Calculate actual unread count from visible notifications
+  const actualUnreadCount = visibleNotifications.filter(
+    (notification) => notification.status === "unread"
+  ).length;
+  // Use actual unread count if notifications are loaded, otherwise use API count
+  const badgeCount = notifications.length > 0 ? actualUnreadCount : unreadCount;
 
   // Mark as read mutation
   const markAsReadMutation = useMutation({
@@ -220,12 +225,12 @@ export function NotificationBell() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="relative">
           <Bell className="h-5 w-5 text-neutral-600" />
-          {unreadCount > 0 && (
+          {badgeCount > 0 && (
             <Badge 
               variant="destructive" 
               className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
             >
-              {unreadCount}
+              {badgeCount}
             </Badge>
           )}
         </Button>
@@ -241,7 +246,7 @@ export function NotificationBell() {
         <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
           <h3 className="font-semibold text-lg">Notifications</h3>
           <div className="flex items-center gap-2">
-            {unreadCount > 0 && (
+            {badgeCount > 0 && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -253,7 +258,7 @@ export function NotificationBell() {
               </Button>
             )}
             <Badge variant="secondary" className="ml-2">
-              {badgeCount} total
+              {visibleNotifications.length} {visibleNotifications.length === 1 ? 'notification' : 'notifications'}
             </Badge>
           </div>
         </div>

@@ -272,16 +272,26 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
     }
 
     // Support both Authorization header and query parameter token (for iframe PDF viewing)
-    let token = authService.extractTokenFromHeader(req.get("Authorization"));
+    const authHeader = req.get("Authorization");
+    const originalUrl = req.originalUrl || req.url;
+    console.log(`[AUTH-MIDDLEWARE] Path: ${req.path}, OriginalUrl: ${originalUrl}, Auth header: ${authHeader ? 'present' : 'missing'}`);
+    if (authHeader) {
+      console.log(`[AUTH-MIDDLEWARE] Auth header value: ${authHeader.substring(0, 20)}...`);
+    }
+    let token = authService.extractTokenFromHeader(authHeader);
     
     // If no header token, check query parameter (for iframe compatibility)
     if (!token && req.query.token) {
       token = req.query.token as string;
+      console.log(`[AUTH-MIDDLEWARE] Using token from query parameter`);
     }
     
     if (!token) {
+      console.error(`[AUTH-MIDDLEWARE] No token found for path: ${req.path}`);
       return res.status(401).json({ error: "Authentication required" });
     }
+    
+    console.log(`[AUTH-MIDDLEWARE] Token found, verifying...`);
 
     const payload = authService.verifyToken(token);
     if (!payload) {
@@ -294,22 +304,38 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
     }
 
     // Get user details
-    const user = await storage.getUser(payload.userId, payload.organizationId);
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: "User not found or inactive" });
+    try {
+      const user = await storage.getUser(payload.userId, payload.organizationId);
+      if (!user || !user.isActive) {
+        console.error(`[AUTH-MIDDLEWARE] User not found or inactive: userId=${payload.userId}, orgId=${payload.organizationId}`);
+        return res.status(401).json({ error: "User not found or inactive" });
+      }
+
+      req.user = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        organizationId: user.organizationId
+      };
+
+      console.log(`[AUTH-MIDDLEWARE] User authenticated: id=${user.id}, role=${user.role}, email=${user.email}`);
+      next();
+    } catch (dbError: any) {
+      console.error(`[AUTH-MIDDLEWARE] Database error getting user:`, dbError);
+      console.error(`[AUTH-MIDDLEWARE] Database error stack:`, dbError?.stack);
+      // Don't send response if already sent
+      if (!res.headersSent) {
+        return res.status(500).json({ error: "Authentication required", details: "Database error" });
+      }
     }
-
-    req.user = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      organizationId: user.organizationId
-    };
-
-    next();
-  } catch (error) {
-    console.error("Auth middleware error:", error);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (error: any) {
+    console.error("[AUTH-MIDDLEWARE] Auth middleware error:", error);
+    console.error("[AUTH-MIDDLEWARE] Error stack:", error?.stack);
+    console.error("[AUTH-MIDDLEWARE] Error message:", error?.message);
+    // Don't send response if already sent
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Authentication required", details: error?.message });
+    }
   }
 }
 

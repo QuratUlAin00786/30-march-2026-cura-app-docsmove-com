@@ -125,6 +125,7 @@ export default function Settings() {
   const [showViewClinicInfoDialog, setShowViewClinicInfoDialog] = useState(false);
   const [showHeaderSuccessModal, setShowHeaderSuccessModal] = useState(false);
   const [showFooterSuccessModal, setShowFooterSuccessModal] = useState(false);
+  const [showPasswordChangeSuccessModal, setShowPasswordChangeSuccessModal] = useState(false);
   const [clinicHeaderInfo, setClinicHeaderInfo] = useState({
     clinicName: "",
     address: "",
@@ -432,21 +433,8 @@ export default function Settings() {
       });
       setPasswordErrors({});
       
-      // Parse response to get message
-      let responseData;
-      try {
-        const responseText = await response.text();
-        responseData = responseText ? JSON.parse(responseText) : {};
-      } catch (e) {
-        responseData = {};
-      }
-      
-      const message = responseData.message || "Your password has been changed successfully. An email with your new password and a reset password link has been sent to your email address.";
-      
-      toast({
-        title: "Password Changed",
-        description: message,
-      });
+      // Show success modal
+      setShowPasswordChangeSuccessModal(true);
     },
     onError: (error: any) => {
       console.error("[PASSWORD CHANGE] Error:", error);
@@ -679,6 +667,14 @@ export default function Settings() {
       });
     }
   }, [savedHeader, savedFooter]);
+
+  // Refetch header and footer when dialog opens
+  useEffect(() => {
+    if (showViewClinicInfoDialog) {
+      refetchHeader();
+      refetchFooter();
+    }
+  }, [showViewClinicInfoDialog, refetchHeader, refetchFooter]);
 
   const handleSaveHeader = async () => {
     if (clinicLogoError) {
@@ -2135,6 +2131,33 @@ export default function Settings() {
                   onClick={() => setShowFooterSuccessModal(false)}
                   className="mt-6 w-full"
                   data-testid="button-close-footer-success"
+                >
+                  Close
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Password Change Success Modal */}
+          <Dialog open={showPasswordChangeSuccessModal} onOpenChange={setShowPasswordChangeSuccessModal}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="sr-only">Password Changed Successfully</DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-col items-center justify-center py-6">
+                <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 mb-4">
+                  <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                  Password Changed Successfully
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                  Password changed successfully. Your new password has been sent to your email with a secure viewing link.
+                </p>
+                <Button
+                  onClick={() => setShowPasswordChangeSuccessModal(false)}
+                  className="mt-6 w-full"
+                  data-testid="button-close-password-success"
                 >
                   Close
                 </Button>

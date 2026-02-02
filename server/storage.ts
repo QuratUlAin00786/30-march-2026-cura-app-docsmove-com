@@ -1,6 +1,6 @@
 import { isDoctorLike } from './utils/role-utils.js';
 import { 
-  organizations, users, patients, medicalRecords, appointments, invoices, payments, aiInsights, subscriptions, patientCommunications, consultations, notifications, prescriptions, documents, medicalImages, clinicalPhotos, labResults, riskAssessments, claims, revenueRecords, insuranceVerifications, clinicalProcedures, emergencyProtocols, medicationsDatabase, roles, staffShifts, doctorDefaultShifts, gdprConsents, gdprDataRequests, gdprAuditTrail, gdprProcessingActivities, conversations as conversationsTable, messages, messageCampaigns, messageTemplates, voiceNotes, saasOwners, saasPackages, saasSubscriptions, saasPayments, saasInvoices, saasSettings, chatbotConfigs, chatbotSessions, chatbotMessages, chatbotAnalytics, musclePositions, userDocumentPreferences, letterDrafts, forecastModels, financialForecasts, quickbooksConnections, quickbooksSyncLogs, quickbooksCustomerMappings, quickbooksInvoiceMappings, quickbooksPaymentMappings, quickbooksAccountMappings, quickbooksItemMappings, quickbooksSyncConfigs, doctorsFee, labTestPricing, imagingPricing, treatments, treatmentsInfo, clinicHeaders, clinicFooters, symptomChecks, forms, formSections, formFields, formShares, formShareLogs, formResponses, formResponseValues,
+  organizations, users, patients, medicalRecords, appointments, invoices, payments, aiInsights, subscriptions, patientCommunications, consultations, notifications, prescriptions, documents, medicalImages, clinicalPhotos, labResults, riskAssessments, claims, revenueRecords, insuranceVerifications, clinicalProcedures, emergencyProtocols, medicationsDatabase, roles, staffShifts, doctorDefaultShifts, gdprConsents, gdprDataRequests, gdprAuditTrail, gdprProcessingActivities, conversations as conversationsTable, messages, messageCampaigns, messageTemplates, voiceNotes, saasOwners, saasPackages, saasSubscriptions, saasPayments, saasInvoices, saasSettings, chatbotConfigs, chatbotSessions, chatbotMessages, chatbotAnalytics, musclePositions, userDocumentPreferences, letterDrafts, forecastModels, financialForecasts, quickbooksConnections, quickbooksSyncLogs, quickbooksCustomerMappings, quickbooksInvoiceMappings, quickbooksPaymentMappings, quickbooksAccountMappings, quickbooksItemMappings, quickbooksSyncConfigs, doctorsFee, labTestPricing, imagingPricing, treatments, treatmentsInfo, clinicHeaders, clinicFooters, symptomChecks,   forms, formSections, formFields, formShares, formShareLogs, formResponses, formResponseValues, prescriptionShareLogs,
   type Organization, type InsertOrganization,
   type User, type InsertUser,
   type Role, type InsertRole,
@@ -766,6 +766,7 @@ export class DatabaseStorage implements IStorage {
     const tables = [
       { key: "formResponses", table: formResponses },
       { key: "formShareLogs", table: formShareLogs },
+      { key: "prescriptionShareLogs", table: prescriptionShareLogs },
       { key: "formShares", table: formShares },
       { key: "formFields", table: formFields },
       { key: "formSections", table: formSections },
@@ -817,6 +818,7 @@ export class DatabaseStorage implements IStorage {
     const tables = [
       { key: "formResponses", table: formResponses },
       { key: "formShareLogs", table: formShareLogs },
+      { key: "prescriptionShareLogs", table: prescriptionShareLogs },
       { key: "formShares", table: formShares },
       { key: "formFields", table: formFields },
       { key: "formSections", table: formSections },
@@ -8565,6 +8567,76 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(clinicFooters.id, id), eq(clinicFooters.organizationId, organizationId)))
       .returning();
     return updated || undefined;
+  }
+
+  // Prescription Share Logs
+  async createPrescriptionShareLog(data: {
+    prescriptionId: number;
+    organizationId: number;
+    patientId: number;
+    sentBy?: number;
+    recipientEmail?: string;
+    pharmacyEmail?: string;
+    pharmacyName?: string;
+    status?: string;
+    emailSent?: boolean;
+    emailSubject?: string;
+    emailHtml?: string;
+    emailText?: string;
+    emailError?: string;
+  }) {
+    const [log] = await db
+      .insert(prescriptionShareLogs)
+      .values({
+        prescriptionId: data.prescriptionId,
+        organizationId: data.organizationId,
+        patientId: data.patientId,
+        sentBy: data.sentBy,
+        recipientEmail: data.recipientEmail,
+        pharmacyEmail: data.pharmacyEmail,
+        pharmacyName: data.pharmacyName,
+        status: data.status || "sent",
+        emailSent: data.emailSent || false,
+        emailSubject: data.emailSubject,
+        emailHtml: data.emailHtml,
+        emailText: data.emailText,
+        emailError: data.emailError,
+        sharedAt: new Date(),
+      } as any)
+      .returning();
+    return log;
+  }
+
+  async getPrescriptionShareLogs(prescriptionId: number, organizationId: number) {
+    return await db
+      .select({
+        id: prescriptionShareLogs.id,
+        prescriptionId: prescriptionShareLogs.prescriptionId,
+        organizationId: prescriptionShareLogs.organizationId,
+        patientId: prescriptionShareLogs.patientId,
+        sentBy: prescriptionShareLogs.sentBy,
+        recipientEmail: prescriptionShareLogs.recipientEmail,
+        pharmacyEmail: prescriptionShareLogs.pharmacyEmail,
+        pharmacyName: prescriptionShareLogs.pharmacyName,
+        status: prescriptionShareLogs.status,
+        emailSent: prescriptionShareLogs.emailSent,
+        emailSubject: prescriptionShareLogs.emailSubject,
+        emailHtml: prescriptionShareLogs.emailHtml,
+        emailText: prescriptionShareLogs.emailText,
+        emailError: prescriptionShareLogs.emailError,
+        sharedAt: prescriptionShareLogs.sharedAt,
+        createdAt: prescriptionShareLogs.createdAt,
+        sentByName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+      })
+      .from(prescriptionShareLogs)
+      .leftJoin(users, eq(users.id, prescriptionShareLogs.sentBy))
+      .where(
+        and(
+          eq(prescriptionShareLogs.prescriptionId, prescriptionId),
+          eq(prescriptionShareLogs.organizationId, organizationId)
+        )
+      )
+      .orderBy(desc(prescriptionShareLogs.sharedAt));
   }
 }
 

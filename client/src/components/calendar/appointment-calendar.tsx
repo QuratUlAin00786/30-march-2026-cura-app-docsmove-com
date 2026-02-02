@@ -1614,10 +1614,23 @@ Medical License: [License Number]
     });
 
   // Helper functions
-  const getPatientName = (patientId: number) => {
-    if (!patientsData || !Array.isArray(patientsData)) return `Patient ${patientId}`;
-    const patient = patientsData.find((p: any) => p.id === patientId);
-    return patient ? `${patient.firstName} ${patient.lastName}` : `Patient ${patientId}`;
+  const getPatientName = (patientId: number | string) => {
+    if (!patientsData || !Array.isArray(patientsData)) {
+      console.warn(`[Calendar] patientsData not available, returning fallback for patientId: ${patientId}`);
+      return `Patient ${patientId}`;
+    }
+    // Try both number and string comparison to handle type mismatches
+    const patient = patientsData.find((p: any) => 
+      p.id === patientId || 
+      p.id === Number(patientId) || 
+      String(p.id) === String(patientId)
+    );
+    if (patient) {
+      const name = `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
+      return name || `Patient ${patientId}`;
+    }
+    console.warn(`[Calendar] Patient not found for patientId: ${patientId}, patientsData length: ${patientsData.length}`);
+    return `Patient ${patientId}`;
   };
 
   const selectedProvider = useMemo(() => {
@@ -1769,9 +1782,9 @@ Medical License: [License Number]
   }) : [])
     .map((apt: any) => {
       try {
-        // Always try to get actual names, fall back to IDs if data not available
-        const patientName = getPatientName(apt.patientId);
-        const providerName = getProviderName(apt.providerId);
+        // Use patientName from backend if available, otherwise try to get it from patientsData
+        const patientName = apt.patientName || getPatientName(apt.patientId);
+        const providerName = apt.providerName || getProviderName(apt.providerId);
         const processed = {
           ...apt,
           patientName,
@@ -1779,7 +1792,7 @@ Medical License: [License Number]
           // Ensure scheduledAt is valid
           scheduledAt: apt.scheduledAt
         };
-        console.log("[Calendar] Processed appointment:", processed.id, processed.title, processed.scheduledAt);
+        console.log("[Calendar] Processed appointment:", processed.id, processed.title, processed.patientName, processed.scheduledAt);
         return processed;
       } catch (error) {
         console.error('[Calendar] Error processing appointment:', apt.id, error);
@@ -2038,7 +2051,9 @@ Medical License: [License Number]
                         </div>
                         <div className="flex items-center space-x-2 mt-1">
                           <User className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm text-gray-600 dark:text-gray-300">{getPatientName(appointment.patientId)}</span>
+                          <span className="text-sm text-gray-600 dark:text-gray-300">
+                            {appointment.patientName || getPatientName(appointment.patientId)}
+                          </span>
                         </div>
                       {serviceInfo && (
                         <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
@@ -2188,7 +2203,7 @@ Medical License: [License Number]
                   </div>
                   <div className="mt-2">
                     <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                      {getPatientName(selectedAppointment.patientId)}
+                      {selectedAppointment.patientName || getPatientName(selectedAppointment.patientId)}
                     </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Service: {selectedAppointment.service || selectedAppointment.appointmentType || "N/A"}

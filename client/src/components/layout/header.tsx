@@ -4,18 +4,49 @@ import { useAuth } from "@/hooks/use-auth";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 const curaIconPath = "/cura-logo.png";
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
+  createdBy?: number;
+  updatedBy?: number;
 }
 
-export function Header({ title, subtitle }: HeaderProps) {
+export function Header({ title, subtitle, createdBy, updatedBy }: HeaderProps) {
   const { tenant } = useTenant();
   const { user } = useAuth();
   const [location, setLocation] = useLocation();
+
+  // Fetch users data to get names from IDs
+  const { data: usersData = [] } = useQuery({
+    queryKey: ["/api/users"],
+    queryFn: async () => {
+      try {
+        const res = await apiRequest("GET", "/api/users");
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        return [];
+      }
+    },
+    enabled: (user?.role === 'admin' && (!!createdBy || !!updatedBy)),
+  });
+
+  // Helper function to get user name from ID
+  const getUserName = (userId?: number) => {
+    if (!userId || !Array.isArray(usersData)) return null;
+    const foundUser = usersData.find((u: any) => u?.id === userId);
+    if (!foundUser) return null;
+    const firstName = foundUser?.firstName ?? "";
+    const lastName = foundUser?.lastName ?? "";
+    if (!firstName && !lastName) return null;
+    return `${firstName} ${lastName}`.trim();
+  };
 
   const handleBack = () => {
     window.history.back();
@@ -31,6 +62,23 @@ export function Header({ title, subtitle }: HeaderProps) {
             <h2 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-foreground truncate">{title}</h2>
             {subtitle && (
               <p className="text-neutral-600 dark:text-muted-foreground mt-1 text-sm lg:text-base truncate">{subtitle}</p>
+            )}
+            {/* Show created by / updated by for admin users */}
+            {user?.role === 'admin' && (createdBy || updatedBy) && (
+              <div className="mt-1 flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+                {updatedBy && (() => {
+                  const userName = getUserName(updatedBy);
+                  return userName ? (
+                    <span className="truncate">Updated by: {userName}</span>
+                  ) : null;
+                })()}
+                {createdBy && !updatedBy && (() => {
+                  const userName = getUserName(createdBy);
+                  return userName ? (
+                    <span className="truncate">Created by: {userName}</span>
+                  ) : null;
+                })()}
+              </div>
             )}
           </div>
         </div>

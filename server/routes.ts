@@ -19,7 +19,7 @@ import { messagingService } from "./messaging-service";
 import { isDoctorLike } from './utils/role-utils.js';
 // PayPal imports moved to dynamic imports to avoid initialization errors when credentials are missing
 import { gdprComplianceService } from "./services/gdpr-compliance";
-import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, User, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema, InsertSaaSSubscription } from "../shared/schema";
+import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, User, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema, InsertSaaSSubscription, imagingPricing } from "../shared/schema";
 import * as schema from "../shared/schema";
 import { db, pool } from "./db";
 import { and, eq, sql, desc, isNull, isNotNull, or, gte, lte, ne } from "drizzle-orm";
@@ -36,7 +36,7 @@ import { createNotification, createBulkNotifications } from "./notification-help
 import { startAppointmentReminderScheduler } from "./appointment-reminders";
 import * as fs from 'fs';
 import * as fse from 'fs-extra';
-import { readFile, access } from 'fs/promises';
+import { readFile, access, stat } from 'fs/promises';
 import { createCanvas, loadImage } from 'canvas';
 import sharp from 'sharp';
 
@@ -2860,6 +2860,90 @@ The Cura EMR Team`,
   // Headers already set by earlier middleware at line 724
   app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
+  // Prescription PDF endpoint - MUST be before global authMiddleware to ensure tenantMiddleware runs first
+  app.get("/api/prescriptions/:prescriptionId/pdf", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      console.log(`[VIEW-PRESCRIPTION-PDF] Route handler called - user: ${req.user?.id}, tenant: ${req.tenant?.id}`);
+      
+      if (!req.user) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] No user found in request`);
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      if (!req.tenant || !req.tenant.id) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] No tenant found for request`);
+        return res.status(500).json({ error: "Tenant not found" });
+      }
+
+      const prescriptionId = parseInt(req.params.prescriptionId);
+
+      if (isNaN(prescriptionId)) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] Invalid prescription ID: ${req.params.prescriptionId}`);
+        return res.status(400).json({ error: "Invalid prescription ID" });
+      }
+
+      const organizationId = req.tenant.id;
+
+      console.log(`[VIEW-PRESCRIPTION-PDF] Fetching PDF for prescription ID: ${prescriptionId}, org: ${organizationId}`);
+
+      // Get prescription from database to retrieve saved_pdf_path
+      const prescription = await storage.getPrescription(prescriptionId, organizationId);
+      
+      if (!prescription) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] Prescription not found: ${prescriptionId}`);
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+
+      if (!prescription.savedPdfPath) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] No saved PDF path for prescription: ${prescriptionId}`);
+        return res.status(404).json({ error: "PDF not found for this prescription" });
+      }
+
+      // Verify user can access (must be the owner, patient who owns the prescription, or admin/doctor/nurse)
+      const isOwner = req.user.id === prescription.prescriptionCreatedBy;
+      const patientId = typeof prescription.patientId === 'string' ? parseInt(prescription.patientId) : prescription.patientId;
+      const isPatientOwner = req.user.role === 'patient' && req.user.id === patientId;
+      const isStaff = ['admin', 'doctor', 'nurse'].includes(req.user.role || '');
+      const canAccess = isOwner || isPatientOwner || isStaff;
+
+      if (!canAccess) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] Access denied - user: ${req.user.id}, creator: ${prescription.prescriptionCreatedBy}, patientId: ${prescription.patientId}, role: ${req.user.role}`);
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Use the exact path from database (remove leading slash if present for path.resolve)
+      const savedPath = prescription.savedPdfPath.startsWith('/') 
+        ? prescription.savedPdfPath.substring(1) 
+        : prescription.savedPdfPath;
+      
+      const filePath = path.resolve(process.cwd(), savedPath);
+
+      console.log(`[VIEW-PRESCRIPTION-PDF] Using path from database: ${prescription.savedPdfPath}`);
+      console.log(`[VIEW-PRESCRIPTION-PDF] Resolved file path: ${filePath}`);
+      
+      if (!await fse.pathExists(filePath)) {
+        console.error(`[VIEW-PRESCRIPTION-PDF] File not found at: ${filePath}`);
+        return res.status(404).json({ error: "PDF file not found on server" });
+      }
+
+      console.log(`[VIEW-PRESCRIPTION-PDF] File found at: ${filePath}`);
+
+      const fileName = path.basename(prescription.savedPdfPath);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      
+      // Use fs/promises readFile instead of fse.readFile
+      const fileBuffer = await readFile(filePath);
+      res.send(fileBuffer);
+
+    } catch (error: any) {
+      console.error("[VIEW-PRESCRIPTION-PDF] Error:", error);
+      console.error("[VIEW-PRESCRIPTION-PDF] Error stack:", error?.stack);
+      console.error("[VIEW-PRESCRIPTION-PDF] Error message:", error?.message);
+      res.status(500).json({ error: "Failed to retrieve PDF", details: error?.message });
+    }
+  });
+
   // Protected routes (auth required)
   app.use("/api", authMiddleware);
 
@@ -5070,7 +5154,46 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
       }
       
-      res.json(appointments);
+      // Enrich appointments with patient names (similar to lab results)
+      // Get unique patient IDs from appointments
+      const uniquePatientIds = [...new Set(appointments.map(apt => apt.patientId))];
+      
+      // Fetch patients in parallel for better performance and reliability
+      // This handles cases where getPatientsByOrganization limit might exclude some patients
+      const patientPromises = uniquePatientIds.map(patientId => 
+        storage.getPatient(patientId, req.tenant!.id).catch(error => {
+          console.warn(`[Appointments] Failed to fetch patient ${patientId}:`, error);
+          return undefined;
+        })
+      );
+      const patientResults = await Promise.all(patientPromises);
+      
+      // Create a map for quick lookup
+      const patientMap = new Map();
+      patientResults.forEach((patient, index) => {
+        if (patient) {
+          patientMap.set(uniquePatientIds[index], patient);
+        }
+      });
+      
+      const enrichedAppointments = appointments.map(apt => {
+        const patient = patientMap.get(apt.patientId);
+        if (patient) {
+          const name = `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
+          return {
+            ...apt,
+            patientName: name || `Patient ${apt.patientId}`
+          };
+        }
+        // Log warning if patient not found for debugging
+        console.warn(`[Appointments] Patient not found for appointment ${apt.id}, patientId: ${apt.patientId}`);
+        return {
+          ...apt,
+          patientName: `Patient ${apt.patientId}`
+        };
+      });
+      
+      res.json(enrichedAppointments);
     } catch (error) {
       console.error("Appointments fetch error:", error);
       res.status(500).json({ error: "Failed to fetch appointments" });
@@ -5760,6 +5883,298 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error checking for duplicate doctor fee:", error);
       res.status(500).json({ error: "Failed to check for duplicate" });
+    }
+  });
+
+  // Get imaging pricing
+  app.get("/api/pricing/imaging", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+
+      // Fetch all active imaging pricing for this organization
+      const pricing = await db
+        .select()
+        .from(imagingPricing)
+        .where(
+          and(
+            eq(imagingPricing.organizationId, organizationId),
+            eq(imagingPricing.isActive, true)
+          )
+        )
+        .orderBy(imagingPricing.imagingType);
+
+      res.json(pricing);
+    } catch (error) {
+      console.error("Error fetching imaging pricing:", error);
+      res.status(500).json({ error: "Failed to fetch imaging pricing" });
+    }
+  });
+
+  // Get doctors fees pricing
+  app.get("/api/pricing/doctors-fees", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+
+      // Fetch all doctors fees for this organization (including inactive ones)
+      const fees = await db
+        .select()
+        .from(schema.doctorsFee)
+        .where(
+          eq(schema.doctorsFee.organizationId, organizationId)
+        )
+        .orderBy(schema.doctorsFee.serviceName);
+
+      console.log(`[DOCTORS FEES] Fetched ${fees.length} doctors fees for organization ${organizationId}`);
+      
+      // Return empty array if no fees found, not an error
+      res.json(fees || []);
+    } catch (error) {
+      console.error("Error fetching doctors fees:", error);
+      res.status(500).json({ error: "Failed to fetch doctors fees", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Create doctors fee
+  app.post("/api/pricing/doctors-fees", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant || !req.user) {
+        return res.status(401).json({ error: "Organization or user not found" });
+      }
+
+      const organizationId = req.tenant.id;
+      const userId = req.user.id;
+
+      // Validate request body
+      const feeData = schema.insertDoctorsFeeSchema.parse({
+        ...req.body,
+        organizationId,
+        createdBy: userId,
+        isActive: req.body.isActive !== undefined ? req.body.isActive : true,
+        currency: req.body.currency || "GBP",
+        version: req.body.version || 1
+      });
+
+      // Insert the doctors fee
+      const [newFee] = await db
+        .insert(schema.doctorsFee)
+        .values(feeData)
+        .returning();
+
+      console.log(`[DOCTORS FEES] Created doctors fee ${newFee.id} for organization ${organizationId}`);
+      res.status(201).json(newFee);
+    } catch (error) {
+      console.error("Error creating doctors fee:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create doctors fee", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Update doctors fee
+  app.patch("/api/pricing/doctors-fees/:id", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+      const feeId = parseInt(req.params.id);
+
+      if (isNaN(feeId)) {
+        return res.status(400).json({ error: "Invalid fee ID" });
+      }
+
+      // Check if fee exists and belongs to organization
+      const existingFee = await db
+        .select()
+        .from(schema.doctorsFee)
+        .where(
+          and(
+            eq(schema.doctorsFee.id, feeId),
+            eq(schema.doctorsFee.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (existingFee.length === 0) {
+        return res.status(404).json({ error: "Doctors fee not found" });
+      }
+
+      // Update the fee
+      const updateData = { ...req.body };
+      delete updateData.id;
+      delete updateData.organizationId;
+      delete updateData.createdAt;
+      delete updateData.updatedAt;
+
+      const [updatedFee] = await db
+        .update(schema.doctorsFee)
+        .set({
+          ...updateData,
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(schema.doctorsFee.id, feeId),
+            eq(schema.doctorsFee.organizationId, organizationId)
+          )
+        )
+        .returning();
+
+      console.log(`[DOCTORS FEES] Updated doctors fee ${feeId} for organization ${organizationId}`);
+      res.json(updatedFee);
+    } catch (error) {
+      console.error("Error updating doctors fee:", error);
+      res.status(500).json({ error: "Failed to update doctors fee", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Delete doctors fee
+  app.delete("/api/pricing/doctors-fees/:id", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+      const feeId = parseInt(req.params.id);
+
+      if (isNaN(feeId)) {
+        return res.status(400).json({ error: "Invalid fee ID" });
+      }
+
+      // Check if fee exists and belongs to organization
+      const existingFee = await db
+        .select()
+        .from(schema.doctorsFee)
+        .where(
+          and(
+            eq(schema.doctorsFee.id, feeId),
+            eq(schema.doctorsFee.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (existingFee.length === 0) {
+        return res.status(404).json({ error: "Doctors fee not found" });
+      }
+
+      // Delete the fee
+      await db
+        .delete(schema.doctorsFee)
+        .where(
+          and(
+            eq(schema.doctorsFee.id, feeId),
+            eq(schema.doctorsFee.organizationId, organizationId)
+          )
+        );
+
+      console.log(`[DOCTORS FEES] Deleted doctors fee ${feeId} for organization ${organizationId}`);
+      res.json({ success: true, message: "Doctors fee deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting doctors fee:", error);
+      res.status(500).json({ error: "Failed to delete doctors fee", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Get lab tests pricing
+  app.get("/api/pricing/lab-tests", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+
+      // Fetch all active lab test pricing for this organization
+      const tests = await db
+        .select()
+        .from(schema.labTestPricing)
+        .where(
+          and(
+            eq(schema.labTestPricing.organizationId, organizationId),
+            eq(schema.labTestPricing.isActive, true)
+          )
+        )
+        .orderBy(schema.labTestPricing.testName);
+
+      res.json(tests);
+    } catch (error) {
+      console.error("Error fetching lab tests pricing:", error);
+      res.status(500).json({ error: "Failed to fetch lab tests pricing" });
+    }
+  });
+
+  // Get treatments pricing
+  app.get("/api/pricing/treatments", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+
+      // Fetch all active treatments for this organization
+      const treatments = await db
+        .select()
+        .from(schema.treatments)
+        .where(
+          and(
+            eq(schema.treatments.organizationId, organizationId),
+            eq(schema.treatments.isActive, true)
+          )
+        )
+        .orderBy(schema.treatments.name);
+
+      res.json(treatments);
+    } catch (error) {
+      console.error("Error fetching treatments pricing:", error);
+      res.status(500).json({ error: "Failed to fetch treatments pricing" });
+    }
+  });
+
+  // Get active clinic header
+  app.get("/api/clinic-headers", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+      const header = await storage.getActiveClinicHeader(organizationId);
+      
+      // Return null if no header exists (not an error)
+      res.json(header || null);
+    } catch (error) {
+      console.error("Error fetching clinic header:", error);
+      res.status(500).json({ error: "Failed to fetch clinic header" });
+    }
+  });
+
+  // Get active clinic footer
+  app.get("/api/clinic-footers", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+      const footer = await storage.getActiveClinicFooter(organizationId);
+      
+      // Return null if no footer exists (not an error)
+      res.json(footer || null);
+    } catch (error) {
+      console.error("Error fetching clinic footer:", error);
+      res.status(500).json({ error: "Failed to fetch clinic footer" });
     }
   });
 
@@ -6986,6 +7401,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Users fetch error:", error);
       res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Get users by role
+  app.get("/api/users/by-role/:role", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const role = req.params.role;
+      const users = await storage.getUsersByRole(role, req.tenant!.id);
+      
+      // Remove passwordHash from response
+      const safeUsers = users.map(user => {
+        const { passwordHash, ...safeUser } = user;
+        return safeUser;
+      });
+      
+      res.json(safeUsers);
+    } catch (error) {
+      console.error("Error fetching users by role:", error);
+      res.status(500).json({ error: "Failed to fetch users by role" });
     }
   });
 
@@ -9144,7 +9578,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           orderedAt: lr.orderedAt,
           collectedAt: lr.collectedAt,
           completedAt: lr.completedAt,
-          signatureData: lr.signatureData,
+          signature: lr.signature,
           orderedBy: lr.orderedBy,
           mainSpecialty: lr.mainSpecialty,
           subSpecialty: lr.subSpecialty
@@ -9467,13 +9901,35 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const emailHTML = generatePrescriptionEmailHTML(patientName, clinicHeader, clinicFooter);
 
       // Send email to pharmacy
+      const pharmacyEmail = pharmacyData.email || 'pharmacy@halohealth.com';
       const emailSent = await sendEmail({
-        to: pharmacyData.email || 'pharmacy@halohealth.com',
+        to: pharmacyEmail,
         from: process.env.SENDGRID_FROM_EMAIL || 'noreply@curaemr.ai',
         subject: `Prescription for ${patientName}`,
         html: emailHTML,
         text: `Please find attached the electronic prescription for ${patientName}.`
       });
+
+      // Log the share activity
+      try {
+        await storage.createPrescriptionShareLog({
+          prescriptionId: prescriptionId,
+          organizationId: req.tenant!.id,
+          patientId: prescription.patientId,
+          sentBy: req.user.id,
+          pharmacyEmail: pharmacyEmail,
+          pharmacyName: pharmacyData.name,
+          status: emailSent ? "success" : "failed",
+          emailSent: emailSent,
+          emailSubject: `Prescription for ${patientName}`,
+          emailHtml: emailHTML,
+          emailText: `Please find attached the electronic prescription for ${patientName}.`,
+          emailError: emailSent ? undefined : "Failed to send email",
+        });
+      } catch (logError) {
+        console.error("Error logging prescription share:", logError);
+        // Don't fail the request if logging fails
+      }
 
       if (!emailSent) {
         return res.status(500).json({ error: "Failed to send email to pharmacy" });
@@ -9488,6 +9944,36 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error sending prescription to pharmacy:", error);
       res.status(500).json({ error: "Failed to send prescription to pharmacy" });
+    }
+  });
+
+  // Get prescription share logs
+  app.get("/api/prescriptions/:id/share-logs", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const prescriptionId = parseInt(req.params.id);
+      const organizationId = requireOrgId(req);
+
+      if (!prescriptionId) {
+        return res.status(400).json({ error: "Prescription ID is required" });
+      }
+
+      // Verify prescription exists and belongs to organization
+      const prescription = await storage.getPrescription(prescriptionId, organizationId);
+      if (!prescription) {
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+
+      // Get share logs
+      const shareLogs = await storage.getPrescriptionShareLogs(prescriptionId, organizationId);
+
+      res.json({ shareLogs });
+    } catch (error) {
+      console.error("Error fetching prescription share logs:", error);
+      res.status(500).json({ error: (error as Error).message || "Failed to fetch share logs" });
     }
   });
 
@@ -10062,9 +10548,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: "Signature data is required" });
       }
 
+      // Create signature data (same format as prescriptions)
+      const signatureData = {
+        doctorSignature: signature,
+        signedBy: `${(req.user as any).firstName || ''} ${(req.user as any).lastName || ''}`.trim(),
+        signedAt: new Date().toISOString(),
+        signerId: req.user.id
+      };
+
       // Update the lab result with signature
       const updatedLabResult = await storage.updateLabResult(labResultId, req.tenant!.id, {
-        signatureData: signature
+        signature: signatureData
       });
 
       if (!updatedLabResult) {
@@ -10074,6 +10568,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       res.json({
         success: true,
         message: "E-signature applied successfully",
+        signature: signatureData,
         labResult: updatedLabResult
       });
     } catch (error) {
@@ -11518,12 +12013,40 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(403).json({ error: "Invalid or expired link" });
       }
 
-      const { imageId, organizationId, patientId } = payload;
+      const { imageId, organizationId, patientId, fileId } = payload;
       
-      // Construct file path
-      const fileName = `${imageId}.pdf`;
-      const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${fileName}`;
-      const fullPath = path.join(process.cwd(), relativePath);
+      // Get medical image from database to retrieve reportFileName
+      let fileName: string;
+      let fullPath: string;
+      
+      if (fileId) {
+        // Try to get the medical image to retrieve reportFileName
+        try {
+          const medicalImage = await storage.getMedicalImage(fileId, organizationId);
+          if (medicalImage?.reportFileName) {
+            // Use the stored reportFileName (includes timestamp)
+            fileName = medicalImage.reportFileName;
+            const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${fileName}`;
+            fullPath = path.join(process.cwd(), relativePath);
+          } else {
+            // Fallback to old pattern (backward compatibility)
+            fileName = `${imageId}.pdf`;
+            const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${fileName}`;
+            fullPath = path.join(process.cwd(), relativePath);
+          }
+        } catch (error) {
+          console.error("[IMAGING-VIEW] Error fetching medical image:", error);
+          // Fallback to old pattern
+          fileName = `${imageId}.pdf`;
+          const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${fileName}`;
+          fullPath = path.join(process.cwd(), relativePath);
+        }
+      } else {
+        // Fallback to old pattern if fileId is not in token
+        fileName = `${imageId}.pdf`;
+        const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${fileName}`;
+        fullPath = path.join(process.cwd(), relativePath);
+      }
 
       // Check if file exists
       const fileExists = await fse.pathExists(fullPath);
@@ -17223,7 +17746,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         imageData: z.string().optional(), // Add base64 image data field
         mimeType: z.string().optional(), // Add MIME type field
         status: z.string().optional(), // Add status field for orders vs uploads
-        orderStudyCreated: z.boolean().optional() // Add order study tracking
+        orderStudyCreated: z.boolean().optional(), // Add order study tracking
+        selectedRole: z.string().optional().nullable(), // Selected role
+        selectedUserId: z.number().optional().nullable() // Selected user ID
       }).parse(req.body);
 
       // Generate imageId if not provided
@@ -17244,7 +17769,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         organizationId: req.tenant!.id,
         imageData: imageData.imageData || null, // Store the base64 image data
         status: imageData.status || "uploaded", // Use provided status or default to uploaded
-        orderStudyCreated: imageData.orderStudyCreated || false // Track order study creation
+        orderStudyCreated: imageData.orderStudyCreated || false, // Track order study creation
+        selectedRole: imageData.selectedRole || null, // Selected role
+        selectedUserId: imageData.selectedUserId || null // Selected user ID
       }, 'uploadedBy');
 
 
@@ -17282,23 +17809,30 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log('📷 UPDATE CHECK: updateImageId received:', updateImageId);
 
       // Process each uploaded file
-      for (const file of files) {
-        // Validate form data
-        const imageData = z.object({
-          patientId: z.coerce.number(),
-          imageType: z.string().optional(),
-          bodyPart: z.string().optional(),
-          notes: z.string().optional(),
-          modality: z.string().optional(),
-          priority: z.string().optional(),
-          studyType: z.string().optional(),
-          indication: z.string().optional(),
-          updateImageId: z.string().optional()
-        }).parse(req.body);
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        const file = files[fileIndex];
+        
+        try {
+          console.log(`📷 Processing file ${fileIndex + 1}/${files.length}: ${file.originalname} (${file.size} bytes)`);
+          
+          // Validate form data
+          const imageData = z.object({
+            patientId: z.coerce.number(),
+            imageType: z.string().optional(),
+            bodyPart: z.string().optional(),
+            notes: z.string().optional(),
+            modality: z.string().optional(),
+            priority: z.string().optional(),
+            studyType: z.string().optional(),
+            indication: z.string().optional(),
+            updateImageId: z.string().optional()
+          }).parse(req.body);
 
-        // Check if we should UPDATE existing ORDER row or CREATE new row
-        let savedImage;
-        const timestamp = Date.now();
+          // Check if we should UPDATE existing ORDER row or CREATE new row
+          let savedImage;
+          // Generate unique timestamp for each file to avoid conflicts
+          // Use Date.now() + fileIndex + random offset to ensure uniqueness even for rapid uploads
+          const timestamp = Date.now() + fileIndex * 1000 + Math.floor(Math.random() * 100);
         
         if (updateImageId) {
           // UPDATE existing ORDER row with image data
@@ -17399,11 +17933,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           savedImage = await storage.getMedicalImage(savedImage.id, req.tenant!.id);
         }
         
-        uploadedImages.push({
-          ...savedImage,
-          originalName: file.originalname,
-          uniqueFilename: savedImage.fileName
-        });
+          uploadedImages.push({
+            ...savedImage,
+            originalName: file.originalname,
+            uniqueFilename: savedImage.fileName
+          });
+          
+          console.log(`📷 Successfully processed file ${fileIndex + 1}/${files.length}: ${file.originalname} -> ${savedImage.fileName}`);
+        } catch (fileError) {
+          console.error(`📷 Error processing file ${fileIndex + 1}/${files.length} (${file.originalname}):`, fileError);
+          // Continue processing other files even if one fails
+          // Add error info to response
+          uploadedImages.push({
+            error: fileError instanceof Error ? fileError.message : 'Unknown error',
+            originalName: file.originalname,
+            failed: true
+          });
+        }
       }
 
       res.status(201).json({
@@ -17419,6 +17965,605 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
       }
       res.status(500).json({ error: "Failed to upload medical images" });
+    }
+  });
+
+  // Get radiology images for a medical image (report)
+  app.get("/api/radiology-images/:medicalImageId", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const medicalImageId = parseInt(req.params.medicalImageId);
+      if (isNaN(medicalImageId)) {
+        return res.status(400).json({ error: "Invalid medical image ID" });
+      }
+
+      const radiologyImages = await db
+        .select()
+        .from(schema.radiologyImages)
+        .where(
+          and(
+            eq(schema.radiologyImages.medicalImageId, medicalImageId),
+            eq(schema.radiologyImages.organizationId, req.tenant!.id)
+          )
+        )
+        .orderBy(schema.radiologyImages.displayOrder);
+
+      res.json({
+        success: true,
+        images: radiologyImages
+      });
+    } catch (error) {
+      console.error("Error fetching radiology images:", error);
+      res.status(500).json({ error: "Failed to fetch radiology images" });
+    }
+  });
+
+  // Get radiology images for a specific medical image ID with body part filter (JOIN with medical_images)
+  app.get("/api/radiology-images/by-body-part/:medicalImageId", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const medicalImageId = parseInt(req.params.medicalImageId);
+      const bodyPart = req.query.bodyPart as string;
+      
+      if (isNaN(medicalImageId)) {
+        return res.status(400).json({ error: "Invalid medical image ID" });
+      }
+
+      if (!bodyPart) {
+        return res.status(400).json({ error: "Body part is required" });
+      }
+
+      // First, verify the medical image exists and get its body part
+      const medicalImage = await db
+        .select({
+          id: schema.medicalImages.id,
+          bodyPart: schema.medicalImages.bodyPart,
+          studyType: schema.medicalImages.studyType,
+          modality: schema.medicalImages.modality,
+          patientId: schema.medicalImages.patientId,
+        })
+        .from(schema.medicalImages)
+        .where(
+          and(
+            eq(schema.medicalImages.id, medicalImageId),
+            eq(schema.medicalImages.organizationId, req.tenant!.id)
+          )
+        )
+        .limit(1);
+
+      if (medicalImage.length === 0) {
+        return res.status(404).json({ error: "Medical image not found" });
+      }
+
+      const medicalImageData = medicalImage[0];
+
+      // Verify body part matches (optional validation)
+      if (medicalImageData.bodyPart !== bodyPart) {
+        console.warn(`⚠️ Body part mismatch: Expected "${bodyPart}", but medical image has "${medicalImageData.bodyPart}"`);
+        // Still proceed, but log the mismatch
+      }
+
+      // Get radiology images ONLY for this specific medical_image_id
+      // No need to join with medical_images since we already have the data
+      const radiologyImages = await db
+        .select({
+          // Radiology image fields
+          id: schema.radiologyImages.id,
+          medicalImageId: schema.radiologyImages.medicalImageId,
+          organizationId: schema.radiologyImages.organizationId,
+          fileName: schema.radiologyImages.fileName,
+          filePath: schema.radiologyImages.filePath,
+          fileSize: schema.radiologyImages.fileSize,
+          mimeType: schema.radiologyImages.mimeType,
+          displayOrder: schema.radiologyImages.displayOrder,
+          imageData: schema.radiologyImages.imageData,
+          createdAt: schema.radiologyImages.createdAt,
+          updatedAt: schema.radiologyImages.updatedAt,
+        })
+        .from(schema.radiologyImages)
+        .where(
+          and(
+            eq(schema.radiologyImages.medicalImageId, medicalImageId),
+            eq(schema.radiologyImages.organizationId, req.tenant!.id)
+          )
+        )
+        .orderBy(schema.radiologyImages.displayOrder);
+
+      // Add medical image context to each radiology image
+      const imagesWithContext = radiologyImages.map(img => ({
+        ...img,
+        bodyPart: medicalImageData.bodyPart,
+        studyType: medicalImageData.studyType,
+        modality: medicalImageData.modality,
+        patientId: medicalImageData.patientId,
+      }));
+
+      console.log(`📷 SERVER: Found ${imagesWithContext.length} radiology images for medical_image_id ${medicalImageId} (body part: ${bodyPart})`);
+
+      res.json({
+        success: true,
+        images: imagesWithContext
+      });
+    } catch (error) {
+      console.error("Error fetching radiology images by body part:", error);
+      res.status(500).json({ error: "Failed to fetch radiology images" });
+    }
+  });
+
+  // Serve radiology image by ID (for previews)
+  app.get("/api/radiology-images/image/:id", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const radiologyImageId = parseInt(req.params.id);
+      if (isNaN(radiologyImageId)) {
+        return res.status(400).json({ error: "Invalid radiology image ID" });
+      }
+
+      // Get the radiology image from the database
+      const radiologyImage = await db
+        .select()
+        .from(schema.radiologyImages)
+        .where(
+          and(
+            eq(schema.radiologyImages.id, radiologyImageId),
+            eq(schema.radiologyImages.organizationId, req.tenant!.id)
+          )
+        )
+        .limit(1);
+
+      if (radiologyImage.length === 0) {
+        return res.status(404).json({ error: "Radiology image not found" });
+      }
+
+      const image = radiologyImage[0];
+
+      // FIRST PRIORITY: Check if the image has base64 data in database
+      if (image.imageData) {
+        console.log("📷 SERVER: Serving radiology image from database base64 data (FIRST PRIORITY)");
+        
+        // Extract base64 data (remove data:image/xxx;base64, prefix if present)
+        const base64Data = image.imageData.includes(',') 
+          ? image.imageData.split(',')[1] 
+          : image.imageData;
+        
+        // Set appropriate headers
+        const mimeType = image.mimeType || 'image/jpeg';
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+        res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+        
+        // Convert base64 to buffer and send
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        res.send(imageBuffer);
+        return;
+      }
+
+      // SECOND PRIORITY: Try to load from file path
+      if (image.filePath) {
+        try {
+          const rawPath = image.filePath;
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] ==========================================`);
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Original file path from DB: "${rawPath}"`);
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] File name: "${image.fileName}"`);
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Organization ID: ${image.organizationId}, Patient ID: ${image.patientId}`);
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Process CWD: "${process.cwd()}"`);
+          
+          // Check if it's a Windows absolute path (starts with drive letter like C:\)
+          const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(rawPath);
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Is Windows absolute path: ${isWindowsAbsolute}`);
+          
+          let imagePath: string = '';
+          let fileExists = false;
+          
+          // DIRECT CHECK: Try the exact path as stored in DB (after cleaning double backslashes)
+          const directPath = rawPath.replace(/\\\\/g, '\\');
+          console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Direct path (cleaned): "${directPath}"`);
+          fileExists = await fse.pathExists(directPath);
+          if (fileExists) {
+            console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Direct path works!`);
+            imagePath = directPath;
+            const imageBuffer = await fse.readFile(imagePath);
+            const mimeType = image.mimeType || 'image/jpeg';
+            
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+            res.setHeader('Cache-Control', 'public, max-age=31536000');
+            res.send(imageBuffer);
+            console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] Successfully served from direct path: ${imagePath}`);
+            return;
+          } else {
+            console.log(`❌ SERVER: [Image ID: ${radiologyImageId}] Direct path does not exist`);
+            // Try to find the file by listing the directory and matching by filename pattern
+            try {
+              const dirPath = path.dirname(directPath);
+              const dirExists = await fse.pathExists(dirPath);
+              if (dirExists) {
+                const filesInDir = await fse.readdir(dirPath);
+                console.log(`📁 SERVER: [Image ID: ${radiologyImageId}] Files in directory: ${filesInDir.slice(0, 20).join(', ')}`);
+                
+                // Try to find file by matching the beginning of the filename (before the extension)
+                // This handles cases where the filename in DB doesn't exactly match the file on disk
+                // Extract the timestamp part from the filename (e.g., "IMG1770014277449" from "IMG177001427744911570NC.webp")
+                const fileNameWithoutExt = image.fileName.replace(/\.[^/.]+$/, '');
+                // Extract the timestamp part (everything after "IMG" and before the last part)
+                const timestampMatch = fileNameWithoutExt.match(/^IMG(\d+)/);
+                const matchingFile = filesInDir.find(f => {
+                  const fWithoutExt = f.replace(/\.[^/.]+$/, '');
+                  // If we can extract timestamp, match by timestamp
+                  if (timestampMatch) {
+                    const timestamp = timestampMatch[1];
+                    // Match if the file starts with the same timestamp (e.g., "IMG1770014277449")
+                    return fWithoutExt.startsWith(`IMG${timestamp}`);
+                  }
+                  // Fallback: match if the first 15 characters match
+                  return fWithoutExt.startsWith(fileNameWithoutExt.substring(0, 15)) || 
+                         fileNameWithoutExt.startsWith(fWithoutExt.substring(0, 15));
+                });
+                
+                if (matchingFile) {
+                  const foundPath = path.join(dirPath, matchingFile);
+                  console.log(`🔍 SERVER: [Image ID: ${radiologyImageId}] Found matching file: "${matchingFile}"`);
+                  console.log(`🔍 SERVER: [Image ID: ${radiologyImageId}] Matching file path: "${foundPath}"`);
+                  const foundFileExists = await fse.pathExists(foundPath);
+                  if (foundFileExists) {
+                    console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Found matching file!`);
+                    imagePath = foundPath;
+                    const imageBuffer = await fse.readFile(imagePath);
+                    const mimeType = image.mimeType || 'image/jpeg';
+                    
+                    res.setHeader('Content-Type', mimeType);
+                    res.setHeader('Content-Disposition', `inline; filename="${matchingFile}"`);
+                    res.setHeader('Cache-Control', 'public, max-age=31536000');
+                    res.send(imageBuffer);
+                    console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] Successfully served from matching file: ${imagePath}`);
+                    return;
+                  }
+                }
+              }
+            } catch (dirError) {
+              console.error(`📷 SERVER: [Image ID: ${radiologyImageId}] Error checking directory for matching file:`, dirError);
+            }
+          }
+          
+          // Strategy 1: Try absolute path as-is (for Windows paths like C:\Users\...)
+          if (isWindowsAbsolute || path.isAbsolute(rawPath)) {
+            // Handle double backslashes that might be in the database string
+            // Replace double backslashes with single backslashes first
+            let cleanedPath = rawPath.replace(/\\\\/g, '\\');
+            // For absolute paths, normalize directly (preserves Windows backslashes)
+            imagePath = path.normalize(cleanedPath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Absolute path normalized: "${imagePath}"`);
+            
+            fileExists = await fse.pathExists(imagePath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+            
+            // If file doesn't exist, try to list the directory to see what files are there
+            if (!fileExists) {
+              try {
+                const dirPath = path.dirname(imagePath);
+                const dirExists = await fse.pathExists(dirPath);
+                console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Directory exists: ${dirExists ? '✅ YES' : '❌ NO'}`);
+                if (dirExists) {
+                  const files = await fse.readdir(dirPath);
+                  console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Files in directory (first 10): ${files.slice(0, 10).join(', ')}`);
+                  console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Looking for: "${image.fileName}"`);
+                  const fileFound = files.includes(image.fileName);
+                  console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - File found in directory listing: ${fileFound ? '✅ YES' : '❌ NO'}`);
+                }
+              } catch (dirError) {
+                console.error(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Error checking directory:`, dirError);
+              }
+            }
+            
+            if (fileExists) {
+              const imageBuffer = await fse.readFile(imagePath);
+              const mimeType = image.mimeType || 'image/jpeg';
+              
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+              res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+              res.send(imageBuffer);
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] Successfully served from Strategy 1: ${imagePath}`);
+              return;
+            }
+          }
+          
+          // Strategy 2: Extract relative path from "uploads" if absolute path failed
+          if (!fileExists && rawPath.includes('uploads')) {
+            const uploadsIndex = rawPath.indexOf('uploads');
+            let relativePath = rawPath.substring(uploadsIndex);
+            // Handle double backslashes and normalize
+            relativePath = relativePath.replace(/\\\\/g, '/').replace(/\\/g, '/');
+            imagePath = path.resolve(process.cwd(), relativePath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 2 - Relative path from uploads: "${imagePath}"`);
+            
+            fileExists = await fse.pathExists(imagePath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 2 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+            
+            if (fileExists) {
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Strategy 2`);
+              const imageBuffer = await fse.readFile(imagePath);
+              const mimeType = image.mimeType || 'image/jpeg';
+              
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+              res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+              res.send(imageBuffer);
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] Successfully served from Strategy 2: ${imagePath}`);
+              return;
+            }
+          }
+          
+          // Strategy 3: Construct path from expected location using organizationId and patientId
+          if (!fileExists && image.organizationId && image.patientId) {
+            const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(image.organizationId), 'patients', String(image.patientId));
+            imagePath = path.join(imagesDir, image.fileName);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 3 - Constructed path: "${imagePath}"`);
+            
+            fileExists = await fse.pathExists(imagePath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 3 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+            
+            if (fileExists) {
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Strategy 3`);
+              const imageBuffer = await fse.readFile(imagePath);
+              const mimeType = image.mimeType || 'image/jpeg';
+              
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+              res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+              res.send(imageBuffer);
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] Successfully served from Strategy 3: ${imagePath}`);
+              return;
+            }
+          }
+          
+          // Strategy 4: Try relative path resolution (if not already tried)
+          if (!fileExists && !isWindowsAbsolute && !path.isAbsolute(rawPath)) {
+            imagePath = path.resolve(process.cwd(), rawPath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 4 - Relative path resolved: "${imagePath}"`);
+            
+            fileExists = await fse.pathExists(imagePath);
+            console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 4 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+            
+            if (fileExists) {
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Strategy 4`);
+              const imageBuffer = await fse.readFile(imagePath);
+              const mimeType = image.mimeType || 'image/jpeg';
+              
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
+              res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+              res.send(imageBuffer);
+              console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] Successfully served from Strategy 4: ${imagePath}`);
+              return;
+            }
+          }
+          
+          console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] All strategies failed. Last tried path: ${imagePath || 'N/A'}`);
+          console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Raw path from DB: "${rawPath}"`);
+          console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] File name: "${image.fileName}"`);
+          console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Organization ID: ${image.organizationId}, Patient ID: ${image.patientId}`);
+          
+          // Try to list directory to see what files are actually there
+          try {
+            const expectedDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(image.organizationId), 'patients', String(image.patientId));
+            const dirExists = await fse.pathExists(expectedDir);
+            console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Expected directory exists: ${dirExists ? '✅ YES' : '❌ NO'}`);
+            if (dirExists) {
+              const filesInDir = await fse.readdir(expectedDir);
+              console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Files in expected directory (first 20): ${filesInDir.slice(0, 20).join(', ')}`);
+              console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Looking for: "${image.fileName}"`);
+              const fileFound = filesInDir.includes(image.fileName);
+              console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] File found in directory: ${fileFound ? '✅ YES' : '❌ NO'}`);
+            }
+          } catch (dirError) {
+            console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Error checking directory:`, dirError);
+          }
+        } catch (fileError) {
+          console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Error reading radiology image file:`, fileError);
+          console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Error stack:`, (fileError as Error).stack);
+        }
+      }
+
+      // No image data available
+      console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Returning 404 - Radiology image data not available`);
+      return res.status(404).json({ error: "Radiology image data not available" });
+    } catch (error) {
+      console.error("Error serving radiology image:", error);
+      res.status(500).json({ error: "Failed to serve radiology image" });
+    }
+  });
+
+  // Save radiology images to radiology_images table
+  app.post("/api/radiology-images", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const { medicalImageId, imageFileNames, organizationId, patientId } = req.body;
+
+      if (!medicalImageId || !imageFileNames || !Array.isArray(imageFileNames) || imageFileNames.length === 0) {
+        return res.status(400).json({ error: "Medical image ID and image file names are required" });
+      }
+
+      const medicalImageIdNum = parseInt(medicalImageId);
+      if (isNaN(medicalImageIdNum)) {
+        return res.status(400).json({ error: "Invalid medical image ID" });
+      }
+
+      // Verify medical image exists
+      const medicalImage = await storage.getMedicalImage(medicalImageIdNum, req.tenant!.id);
+      if (!medicalImage) {
+        return res.status(404).json({ error: "Medical image not found" });
+      }
+
+      const orgId = organizationId || req.tenant!.id;
+      const patId = patientId || medicalImage.patientId;
+      const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(orgId), 'patients', String(patId));
+
+      const savedImages = [];
+      
+      // Ensure directory exists
+      await fse.ensureDir(imagesDir);
+      console.log(`📁 SERVER: Radiology images directory: ${imagesDir}`);
+      console.log(`📁 SERVER: Directory exists: ${await fse.pathExists(imagesDir) ? '✅ YES' : '❌ NO'}`);
+      
+      for (let i = 0; i < imageFileNames.length; i++) {
+        const fileName = imageFileNames[i];
+        const filePath = path.join(imagesDir, fileName);
+        
+        console.log(`📷 SERVER: ==========================================`);
+        console.log(`📷 SERVER: Processing image ${i + 1}/${imageFileNames.length}`);
+        console.log(`📷 SERVER: File name from frontend: "${fileName}"`);
+        console.log(`📷 SERVER: Expected file path: "${filePath}"`);
+        console.log(`📷 SERVER: Images directory: "${imagesDir}"`);
+        
+        try {
+          // Check if file exists
+          const fileExists = await fse.pathExists(filePath);
+          console.log(`📷 SERVER: File exists at path: ${fileExists ? '✅ YES' : '❌ NO'}`);
+          
+          if (!fileExists) {
+            console.error(`❌ SERVER: File does not exist at path: ${filePath}`);
+            console.error(`❌ SERVER: Cannot save radiology image record - file not found on server!`);
+            // List files in directory to help debug
+            try {
+              const filesInDir = await fse.readdir(imagesDir);
+              console.log(`📁 SERVER: Total files in directory: ${filesInDir.length}`);
+              console.log(`📁 SERVER: Files in directory (first 20): ${filesInDir.slice(0, 20).join(', ')}`);
+              console.log(`📁 SERVER: Looking for: "${fileName}"`);
+              const fileFound = filesInDir.includes(fileName);
+              console.log(`📁 SERVER: File found in directory listing: ${fileFound ? '✅ YES' : '❌ NO'}`);
+              
+              // Check for similar filenames (case-insensitive or partial match)
+              const similarFiles = filesInDir.filter(f => 
+                f.toLowerCase() === fileName.toLowerCase() || 
+                f.includes(fileName.split('.')[0]) || 
+                fileName.includes(f.split('.')[0])
+              );
+              if (similarFiles.length > 0) {
+                console.log(`📁 SERVER: Similar files found: ${similarFiles.join(', ')}`);
+              }
+            } catch (dirError) {
+              console.error(`❌ SERVER: Error reading directory:`, dirError);
+            }
+            // Skip this file - don't save record if file doesn't exist
+            continue;
+          }
+          
+          const fileStats = await fs.promises.stat(filePath);
+          console.log(`📷 SERVER: File size: ${fileStats.size} bytes`);
+          console.log(`📷 SERVER: File exists and is accessible ✅`);
+          
+          // Read file to get MIME type
+          const ext = path.extname(fileName).toLowerCase();
+          let mimeType = 'image/jpeg'; // default
+          if (ext === '.png') mimeType = 'image/png';
+          else if (ext === '.gif') mimeType = 'image/gif';
+          else if (ext === '.bmp') mimeType = 'image/bmp';
+          else if (ext === '.tiff' || ext === '.tif') mimeType = 'image/tiff';
+          else if (ext === '.webp') mimeType = 'image/webp';
+          else if (ext === '.svg') mimeType = 'image/svg+xml';
+          else if (ext === '.dcm' || ext === '.dicom') mimeType = 'application/dicom';
+
+          // Store absolute path in database (for Windows compatibility)
+          // This matches the path where the file actually exists
+          const absoluteFilePath = path.resolve(filePath);
+          console.log(`📷 SERVER: Absolute file path to store in DB: "${absoluteFilePath}"`);
+          console.log(`📷 SERVER: Verifying absolute path exists: ${await fse.pathExists(absoluteFilePath) ? '✅ YES' : '❌ NO'}`);
+
+          // Insert into radiology_images table
+          const [radiologyImage] = await db
+            .insert(schema.radiologyImages)
+            .values({
+              medicalImageId: medicalImageIdNum,
+              organizationId: orgId,
+              patientId: patId,
+              fileName: fileName,
+              filePath: absoluteFilePath, // Store absolute path
+              fileSize: fileStats.size,
+              mimeType: mimeType,
+              uploadedBy: req.user.id,
+              displayOrder: i,
+              imageData: null, // Don't store base64, use file path
+            })
+            .returning();
+
+          savedImages.push(radiologyImage);
+          console.log(`✅ SERVER: Saved radiology image ${i + 1}/${imageFileNames.length}: ${fileName} (ID: ${radiologyImage.id})`);
+          console.log(`✅ SERVER: File path stored in DB: ${absoluteFilePath}`);
+          console.log(`✅ SERVER: File name matches: ${radiologyImage.fileName === fileName ? '✅ YES' : '❌ NO'}`);
+          console.log(`📷 SERVER: ==========================================`);
+        } catch (fileError: any) {
+          console.error(`❌ SERVER: Error saving radiology image ${fileName}:`, fileError);
+          console.error(`❌ SERVER: Error details:`, fileError.message);
+          console.error(`❌ SERVER: Error stack:`, fileError.stack);
+          // Continue with other images even if one fails
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully saved ${savedImages.length} image(s) to radiology_images table`,
+        savedCount: savedImages.length,
+        images: savedImages
+      });
+    } catch (error) {
+      console.error("Error saving radiology images:", error);
+      res.status(500).json({ 
+        error: "Failed to save radiology images",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Delete a radiology image
+  app.delete("/api/radiology-images/:id", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const radiologyImageId = parseInt(req.params.id);
+      if (isNaN(radiologyImageId)) {
+        return res.status(400).json({ error: "Invalid radiology image ID" });
+      }
+
+      // Get the radiology image record
+      const radiologyImage = await db
+        .select()
+        .from(schema.radiologyImages)
+        .where(
+          and(
+            eq(schema.radiologyImages.id, radiologyImageId),
+            eq(schema.radiologyImages.organizationId, req.tenant!.id)
+          )
+        )
+        .limit(1);
+
+      if (radiologyImage.length === 0) {
+        return res.status(404).json({ error: "Radiology image not found" });
+      }
+
+      const image = radiologyImage[0];
+
+      // Delete image file from filesystem if it exists
+      if (image.filePath) {
+        try {
+          await fs.promises.unlink(image.filePath);
+          console.log(`Deleted radiology image file: ${image.filePath}`);
+        } catch (fileError: any) {
+          if (fileError.code !== 'ENOENT') {
+            console.error(`Error deleting radiology image file ${image.filePath}:`, fileError);
+          }
+        }
+      }
+
+      // Delete the record from radiology_images table
+      await db.delete(schema.radiologyImages)
+        .where(eq(schema.radiologyImages.id, radiologyImageId));
+
+      res.json({
+        success: true,
+        message: "Radiology image deleted successfully"
+      });
+    } catch (error) {
+      console.error("Error deleting radiology image:", error);
+      res.status(500).json({ error: "Failed to delete radiology image" });
     }
   });
 
@@ -17484,7 +18629,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: "Invalid image ID" });
       }
 
-      // Validate update data - allow updating scheduledAt, performedAt, status, priority, imageId, orderStudyGenerated, and signatureData
+      // Validate update data - allow updating scheduledAt, performedAt, status, priority, imageId, orderStudyGenerated, orderStudyReadyToGenerate, and signatureData
       const validatedData = z.object({
         scheduledAt: z.string().optional(),
         performedAt: z.string().optional(),
@@ -17492,6 +18637,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         priority: z.string().optional(),
         imageId: z.string().optional(),
         orderStudyGenerated: z.boolean().optional(),
+        orderStudyReadyToGenerate: z.boolean().optional(),
         signatureData: z.string().optional(),
       }).parse(req.body);
 
@@ -17514,6 +18660,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
       if (validatedData.orderStudyGenerated !== undefined) {
         updateData.orderStudyGenerated = validatedData.orderStudyGenerated;
+      }
+      if (validatedData.orderStudyReadyToGenerate !== undefined) {
+        updateData.orderStudyReadyToGenerate = validatedData.orderStudyReadyToGenerate;
       }
       if (validatedData.signatureData) {
         console.log("✅ SIGNATURE UPDATE: Saving signature for image ID:", imageId);
@@ -18929,6 +20078,32 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       console.log('[PRESCRIPTION-EMAIL] emailService.sendEmail() returned:', emailSent);
 
+      // Get prescription for logging
+      const prescription = await storage.getPrescription(prescriptionId, req.tenant!.id);
+
+      // Log the share activity
+      if (prescription) {
+        try {
+          await storage.createPrescriptionShareLog({
+            prescriptionId: prescriptionId,
+            organizationId: req.tenant!.id,
+            patientId: prescription.patientId,
+            sentBy: req.user?.id,
+            pharmacyEmail: pharmacyEmail,
+            pharmacyName: pharmacyName,
+            status: emailSent ? "success" : "failed",
+            emailSent: emailSent,
+            emailSubject: emailTemplate.subject,
+            emailHtml: emailTemplate.html,
+            emailText: emailTemplate.text,
+            emailError: emailSent ? undefined : "Failed to send email",
+          });
+        } catch (logError) {
+          console.error("Error logging prescription share:", logError);
+          // Don't fail the request if logging fails
+        }
+      }
+
       if (emailSent) {
         const attachmentInfo = attachments.length > 0 
           ? ` with ${attachments.length} attachment(s)`
@@ -18949,6 +20124,1189 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: "Failed to send prescription PDF" });
+    }
+  });
+
+  // Save Prescription as PDF endpoint
+  app.post("/api/prescriptions/:id/save-pdf", authMiddleware, requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const prescriptionId = parseInt(req.params.id);
+      if (isNaN(prescriptionId)) {
+        return res.status(400).json({ error: "Invalid prescription ID" });
+      }
+
+      const organizationId = req.tenant!.id;
+      const userId = req.user.id;
+
+      console.log(`[SAVE-PRESCRIPTION-PDF] Starting for prescription ID: ${prescriptionId}, org: ${organizationId}, user: ${userId}`);
+
+      // Fetch prescription
+      const prescription = await storage.getPrescription(prescriptionId, organizationId);
+      if (!prescription) {
+        return res.status(404).json({ error: "Prescription not found" });
+      }
+
+      // Fetch patient
+      const patient = await storage.getPatient(prescription.patientId, organizationId);
+      if (!patient) {
+        return res.status(404).json({ error: "Patient not found" });
+      }
+
+      // Fetch provider/doctor info
+      let doctorInfo = null;
+      if (prescription.doctorId) {
+        const doctor = await storage.getUser(prescription.doctorId, organizationId);
+        if (doctor) {
+          doctorInfo = doctor;
+        }
+      }
+
+      // Fetch creator info
+      let creatorInfo = null;
+      if (prescription.prescriptionCreatedBy) {
+        const creator = await storage.getUser(prescription.prescriptionCreatedBy, organizationId);
+        if (creator) {
+          creatorInfo = creator;
+        }
+      }
+
+      // Get organization info
+      const organization = await storage.getOrganization(organizationId);
+      const organizationName = organization?.brandName || organization?.name || "CURA HEALTH EMR";
+
+      // Get clinic header and footer
+      let clinicHeader = null;
+      let clinicFooter = null;
+      try {
+        clinicHeader = await storage.getActiveClinicHeader(organizationId);
+        clinicFooter = await storage.getActiveClinicFooter(organizationId);
+      } catch (error) {
+        console.log('[SAVE-PRESCRIPTION-PDF] Could not fetch clinic header/footer:', error);
+      }
+
+      // Import pdf-lib dynamically
+      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+
+      // Create PDF document
+      const pdfDoc = await PDFDocument.create();
+      let page = pdfDoc.addPage([595, 842]); // A4 size
+      const { width, height } = page.getSize();
+
+      // Load fonts
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const helveticaBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+      const margin = 50;
+      const lineHeight = 14;
+      const smallFontSize = 7; // Reduced from 8
+      const normalFontSize = 8; // Reduced from 10
+      const mediumFontSize = 9; // Reduced from 12
+      const largeFontSize = 12; // Reduced from 16
+      const titleFontSize = 14; // Reduced from 20
+
+      // Format date for header
+      const now = new Date();
+      const headerDate = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear().toString().slice(-2)}, ${now.getHours() % 12 || 12}:${now.getMinutes().toString().padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`;
+      
+      // Patient name for header
+      const patientName = `${patient.firstName || ""} ${patient.lastName || ""}`.trim();
+
+      let yPosition = height - 30;
+      const logoSize = 60; // Logo size
+      const logoMargin = 15; // Margin between logo and text
+      let textStartX = margin;
+
+      // Add clinic header with logo on left
+      if (clinicHeader?.logoBase64) {
+        try {
+          // Extract base64 data
+          let imageData = clinicHeader.logoBase64;
+          if (imageData.includes(',')) {
+            imageData = imageData.split(',')[1];
+          }
+          
+          // Convert base64 to Uint8Array
+          const logoBytes = Uint8Array.from(Buffer.from(imageData, 'base64'));
+          
+          // Try to embed as PNG first, then JPG if that fails
+          let logoImage;
+          try {
+            logoImage = await pdfDoc.embedPng(logoBytes);
+          } catch (pngErr) {
+            try {
+              logoImage = await pdfDoc.embedJpg(logoBytes);
+            } catch (jpgErr) {
+              console.log('[SAVE-PRESCRIPTION-PDF] Could not embed logo as PNG or JPG:', jpgErr);
+            }
+          }
+          
+          if (logoImage) {
+            // Scale logo to fit
+            const logoDims = logoImage.scaleToFit(logoSize, logoSize);
+            page.drawImage(logoImage, {
+              x: margin,
+              y: yPosition - logoDims.height,
+              width: logoDims.width,
+              height: logoDims.height,
+            });
+            textStartX = margin + logoDims.width + logoMargin;
+          }
+        } catch (err) {
+          console.log('[SAVE-PRESCRIPTION-PDF] Could not add logo:', err);
+        }
+      }
+
+      // Clinic header text (to the right of logo)
+      const clinicName = clinicHeader?.clinicName || organizationName;
+      const clinicNameFontSize = parseInt(clinicHeader?.clinicNameFontSize?.replace('pt', '') || '16');
+      page.drawText(clinicName, {
+        x: textStartX,
+        y: yPosition,
+        size: Math.min(clinicNameFontSize, 16),
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+
+      yPosition -= 15;
+
+      // Clinic address, phone, email, website
+      if (clinicHeader?.address) {
+        page.drawText(clinicHeader.address, {
+          x: textStartX,
+          y: yPosition,
+          size: smallFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+        yPosition -= 10;
+      }
+
+      if (clinicHeader?.phone) {
+        page.drawText(clinicHeader.phone, {
+          x: textStartX,
+          y: yPosition,
+          size: smallFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+        yPosition -= 10;
+      }
+
+      if (clinicHeader?.email) {
+        page.drawText(clinicHeader.email, {
+          x: textStartX,
+          y: yPosition,
+          size: smallFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+        yPosition -= 10;
+      }
+
+      if (clinicHeader?.website) {
+        page.drawText(clinicHeader.website, {
+          x: textStartX,
+          y: yPosition,
+          size: smallFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+        yPosition -= 10;
+      }
+
+      // Prescription number and status (right side)
+      const prescriptionNum = prescription.prescriptionNumber || "N/A";
+      page.drawText(`Prescription #: ${prescriptionNum}`, {
+        x: width - margin - 150,
+        y: height - 30,
+        size: smallFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // ACTIVE status badge (right side)
+      const statusText = (prescription.status || "active").toUpperCase();
+      const statusWidth = helveticaBoldFont.widthOfTextAtSize(statusText, smallFontSize);
+      page.drawRectangle({
+        x: width - margin - statusWidth - 10,
+        y: height - 50,
+        width: statusWidth + 10,
+        height: 15,
+        color: rgb(0.2, 0.8, 0.2),
+      });
+      page.drawText(statusText, {
+        x: width - margin - statusWidth - 5,
+        y: height - 47,
+        size: smallFontSize,
+        font: helveticaBoldFont,
+        color: rgb(1, 1, 1),
+      });
+
+      // Provider Section (Centered, below header)
+      yPosition -= 30;
+      const providerName = doctorInfo 
+        ? `${doctorInfo.firstName || ""} ${doctorInfo.lastName || ""}`.trim() || "Provider undefined"
+        : "Provider undefined";
+      
+      const providerNameWidth = helveticaFont.widthOfTextAtSize(providerName, normalFontSize);
+      page.drawText(providerName, {
+        x: (width - providerNameWidth) / 2,
+        y: yPosition,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      yPosition -= 30;
+
+      // Patient Information - Two Columns
+      const leftColumnX = margin;
+      const rightColumnX = width / 2 + 20;
+
+      // Left Column
+      const nameLabel = "Name: ";
+      const nameValue = patientName;
+      page.drawText(nameLabel, {
+        x: leftColumnX,
+        y: yPosition,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(nameValue, {
+        x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(nameLabel, normalFontSize),
+        y: yPosition,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      const patientAddress = patient.address || "";
+      const patientCountry = patient.country || "United Kingdom";
+      const addressLabel = "Address: ";
+      const addressValue = `${patientAddress ? patientAddress + ", " : ""}${patientCountry}`;
+      page.drawText(addressLabel, {
+        x: leftColumnX,
+        y: yPosition - 15,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(addressValue, {
+        x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(addressLabel, normalFontSize),
+        y: yPosition - 15,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      const allergies = patient.allergies || "-";
+      const allergiesLabel = "Allergies: ";
+      page.drawText(allergiesLabel, {
+        x: leftColumnX,
+        y: yPosition - 30,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(allergies, {
+        x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(allergiesLabel, normalFontSize),
+        y: yPosition - 30,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      const weight = patient.weight || "-";
+      const weightLabel = "Weight: ";
+      page.drawText(weightLabel, {
+        x: leftColumnX,
+        y: yPosition - 45,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(weight, {
+        x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(weightLabel, normalFontSize),
+        y: yPosition - 45,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // Provider info in left column
+      const providerLabel = "Provider: ";
+      const providerValue = providerName !== "Provider undefined" ? providerName : "N/A";
+      page.drawText(providerLabel, {
+        x: leftColumnX,
+        y: yPosition - 60,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(providerValue, {
+        x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(providerLabel, normalFontSize),
+        y: yPosition - 60,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // Right Column
+      if (patient.dateOfBirth) {
+        const dob = new Date(patient.dateOfBirth);
+        const day = dob.getDate();
+        const month = dob.toLocaleDateString('en-GB', { month: 'short' });
+        const year = dob.getFullYear();
+        const suffix = day > 3 && day < 21 ? 'th' : ['th', 'st', 'nd', 'rd'][day % 10] || 'th';
+        const formattedDOB = `${day}${suffix} ${month} ${year}`;
+        const dobLabel = "DOB: ";
+        page.drawText(dobLabel, {
+          x: rightColumnX,
+          y: yPosition,
+          size: normalFontSize,
+          font: helveticaBoldFont,
+          color: rgb(0, 0, 0),
+        });
+        page.drawText(formattedDOB, {
+          x: rightColumnX + helveticaBoldFont.widthOfTextAtSize(dobLabel, normalFontSize),
+          y: yPosition,
+          size: normalFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+      }
+
+      if (patient.dateOfBirth) {
+        const dob = new Date(patient.dateOfBirth);
+        const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        const ageLabel = "Age: ";
+        page.drawText(ageLabel, {
+          x: rightColumnX,
+          y: yPosition - 15,
+          size: normalFontSize,
+          font: helveticaBoldFont,
+          color: rgb(0, 0, 0),
+        });
+        page.drawText(String(age), {
+          x: rightColumnX + helveticaBoldFont.widthOfTextAtSize(ageLabel, normalFontSize),
+          y: yPosition - 15,
+          size: normalFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+      }
+
+      const gender = patient.genderAtBirth || "Not specified";
+      const sexLabel = "Sex: ";
+      page.drawText(sexLabel, {
+        x: rightColumnX,
+        y: yPosition - 30,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(gender, {
+        x: rightColumnX + helveticaBoldFont.widthOfTextAtSize(sexLabel, normalFontSize),
+        y: yPosition - 30,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      const prescriptionDate = prescription.issuedDate 
+        ? new Date(prescription.issuedDate)
+        : new Date();
+      const day = prescriptionDate.getDate();
+      const month = prescriptionDate.toLocaleDateString('en-GB', { month: 'short' });
+      const year = prescriptionDate.getFullYear();
+      const suffix = day > 3 && day < 21 ? 'th' : ['th', 'st', 'nd', 'rd'][day % 10] || 'th';
+      const formattedDate = `${day}${suffix} ${month} ${year}`;
+      const dateLabel = "Date: ";
+      page.drawText(dateLabel, {
+        x: rightColumnX,
+        y: yPosition - 45,
+        size: normalFontSize,
+        font: helveticaBoldFont,
+        color: rgb(0, 0, 0),
+      });
+      page.drawText(formattedDate, {
+        x: rightColumnX + helveticaBoldFont.widthOfTextAtSize(dateLabel, normalFontSize),
+        y: yPosition - 45,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      yPosition -= 90;
+
+      // Medications Section
+      if (prescription.medications && prescription.medications.length > 0) {
+        for (const med of prescription.medications) {
+          if (yPosition < 200) {
+            const newPage = pdfDoc.addPage([595, 842]);
+            page = newPage;
+            yPosition = height - 100;
+          }
+
+          const medName = med.name || "Unknown Medication";
+          page.drawText(medName, {
+            x: margin,
+            y: yPosition,
+            size: normalFontSize,
+            font: helveticaBoldFont,
+            color: rgb(0, 0, 0),
+          });
+
+          yPosition -= 20;
+
+          // Sig (Instructions)
+          if (med.instructions) {
+            const sigLabel = "Sig: ";
+            page.drawText(sigLabel, {
+              x: margin,
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaBoldFont,
+              color: rgb(0, 0, 0),
+            });
+            page.drawText(med.instructions, {
+              x: margin + helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize),
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaFont,
+              color: rgb(0, 0, 0),
+            });
+            yPosition -= 15;
+          }
+
+          // Disp (Quantity and Duration)
+          const quantity = med.quantity || 0;
+          const duration = med.duration || "";
+          const dispLabel = "Disp: ";
+          const dispValue = `${quantity}${duration ? ` (${duration})` : ""}`;
+          page.drawText(dispLabel, {
+            x: margin,
+            y: yPosition,
+            size: normalFontSize,
+            font: helveticaBoldFont,
+            color: rgb(0, 0, 0),
+          });
+          page.drawText(dispValue, {
+            x: margin + helveticaBoldFont.widthOfTextAtSize(dispLabel, normalFontSize),
+            y: yPosition,
+            size: normalFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+          yPosition -= 15;
+
+          // Refills
+          const refills = med.refills || 0;
+          const refillsLabel = "Refills: ";
+          page.drawText(refillsLabel, {
+            x: margin,
+            y: yPosition,
+            size: normalFontSize,
+            font: helveticaBoldFont,
+            color: rgb(0, 0, 0),
+          });
+          page.drawText(String(refills), {
+            x: margin + helveticaBoldFont.widthOfTextAtSize(refillsLabel, normalFontSize),
+            y: yPosition,
+            size: normalFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+
+          yPosition -= 25;
+        }
+      }
+
+      // Diagnosis Section
+      if (prescription.diagnosis) {
+        if (yPosition < 150) {
+          const newPage = pdfDoc.addPage([595, 842]);
+          page = newPage;
+          yPosition = height - 100;
+        }
+
+        const diagnosisLabel = "Diagnosis: ";
+        page.drawText(diagnosisLabel, {
+          x: margin,
+          y: yPosition,
+          size: normalFontSize,
+          font: helveticaBoldFont,
+          color: rgb(0, 0, 0),
+        });
+        page.drawText(prescription.diagnosis, {
+          x: margin + helveticaBoldFont.widthOfTextAtSize(diagnosisLabel, normalFontSize),
+          y: yPosition,
+          size: normalFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
+        yPosition -= 40;
+      }
+
+      // Signature Section
+      if (yPosition < 150) {
+        const newPage = pdfDoc.addPage([595, 842]);
+        page = newPage;
+        yPosition = height - 100;
+        // Add watermark to new page
+        const watermarkText = "HHC";
+        const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
+        page.drawText(watermarkText, {
+          x: (width - watermarkWidth) / 2,
+          y: height / 2,
+          size: 100,
+          font: helveticaBoldFont,
+          color: rgb(0.85, 0.85, 0.85),
+          opacity: 0.15,
+        });
+      }
+
+      page.drawText("Resident Physician", {
+        x: margin,
+        y: yPosition,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      page.drawText("(Signature)", {
+        x: margin,
+        y: yPosition - 12,
+        size: smallFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // Signature box with border
+      const signatureBoxY = yPosition - 20;
+      const boxX = margin;
+      const boxY = signatureBoxY - 60;
+      const boxWidth = 160;
+      const boxHeight = 60;
+      
+      // Draw border using lines (pdf-lib doesn't support borderColor/borderWidth in drawRectangle)
+      const borderColor = rgb(0.7, 0.7, 0.7);
+      // Top line
+      page.drawLine({
+        start: { x: boxX, y: boxY + boxHeight },
+        end: { x: boxX + boxWidth, y: boxY + boxHeight },
+        color: borderColor,
+        thickness: 0.5,
+      });
+      // Right line
+      page.drawLine({
+        start: { x: boxX + boxWidth, y: boxY + boxHeight },
+        end: { x: boxX + boxWidth, y: boxY },
+        color: borderColor,
+        thickness: 0.5,
+      });
+      // Bottom line
+      page.drawLine({
+        start: { x: boxX + boxWidth, y: boxY },
+        end: { x: boxX, y: boxY },
+        color: borderColor,
+        thickness: 0.5,
+      });
+      // Left line
+      page.drawLine({
+        start: { x: boxX, y: boxY },
+        end: { x: boxX, y: boxY + boxHeight },
+        color: borderColor,
+        thickness: 0.5,
+      });
+
+      // Add signature image if available
+      if (prescription.signature && (prescription.signature as any).doctorSignature) {
+        try {
+          const signatureImage = (prescription.signature as any).doctorSignature;
+          // Handle base64 data URL format
+          let imageData = signatureImage;
+          if (signatureImage.includes(',')) {
+            imageData = signatureImage.split(',')[1];
+          }
+          
+          // Convert base64 to Uint8Array
+          const signatureImageBytes = Uint8Array.from(Buffer.from(imageData, 'base64'));
+          
+          // Try to embed as PNG first, then JPG if that fails
+          let signatureImageEmbed;
+          try {
+            signatureImageEmbed = await pdfDoc.embedPng(signatureImageBytes);
+          } catch (pngErr) {
+            try {
+              signatureImageEmbed = await pdfDoc.embedJpg(signatureImageBytes);
+            } catch (jpgErr) {
+              console.log('[SAVE-PRESCRIPTION-PDF] Could not embed signature image as PNG or JPG:', jpgErr);
+              throw jpgErr;
+            }
+          }
+          
+          // Scale image to fit in signature box (160x60)
+          const maxWidth = 156; // 160 - 4 (2px padding on each side)
+          const maxHeight = 56; // 60 - 4 (2px padding on top/bottom)
+          const dims = signatureImageEmbed.scale(0.5);
+          const scaleX = Math.min(maxWidth / dims.width, maxHeight / dims.height, 1);
+          const finalWidth = dims.width * scaleX;
+          const finalHeight = dims.height * scaleX;
+          
+          // Center the image in the box
+          const imageX = boxX + (boxWidth - finalWidth) / 2;
+          const imageY = boxY + (boxHeight - finalHeight) / 2;
+          
+          page.drawImage(signatureImageEmbed, {
+            x: imageX,
+            y: imageY,
+            width: finalWidth,
+            height: finalHeight,
+          });
+        } catch (err) {
+          console.log('[SAVE-PRESCRIPTION-PDF] Could not add signature image:', err);
+        }
+      }
+
+      // E-Signed by information
+      if (prescription.signature && (prescription.signature as any).signedAt) {
+        const signedAt = new Date((prescription.signature as any).signedAt);
+        const formattedDate = signedAt.toLocaleDateString('en-GB', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
+        const formattedTime = signedAt.toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        // Use "(check)" instead of checkmark symbol to avoid encoding issues
+        const eSignText = `(check) E-Signed by - ${formattedDate} ${formattedTime}`;
+        
+        page.drawText(eSignText, {
+          x: margin,
+          y: signatureBoxY - 85,
+          size: smallFontSize,
+          font: helveticaFont,
+          color: rgb(0, 0.6, 0), // Green color for E-Signed text
+        });
+      }
+
+      // May Substitute (bottom right)
+      page.drawText("May Substitute", {
+        x: width - margin - 80,
+        y: yPosition,
+        size: normalFontSize,
+        font: helveticaFont,
+        color: rgb(0, 0, 0),
+      });
+
+      // HHC Watermark (faint, centered) - add to current page
+      const watermarkText = "HHC";
+      const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
+      page.drawText(watermarkText, {
+        x: (width - watermarkWidth) / 2,
+        y: height / 2,
+        size: 100,
+        font: helveticaBoldFont,
+        color: rgb(0.85, 0.85, 0.85),
+        opacity: 0.15,
+      });
+
+      // Add watermark to all pages
+      const pages = pdfDoc.getPages();
+      for (let i = 0; i < pages.length; i++) {
+        const currentPage = pages[i];
+        const watermarkText = "HHC";
+        const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
+        currentPage.drawText(watermarkText, {
+          x: (width - watermarkWidth) / 2,
+          y: height / 2,
+          size: 100,
+          font: helveticaBoldFont,
+          color: rgb(0.85, 0.85, 0.85),
+          opacity: 0.15,
+        });
+      }
+
+      // Footer - Clinic footer and page number
+      const lastPage = pdfDoc.getPages()[pdfDoc.getPageCount() - 1];
+      const footerY = 30;
+      
+      // Draw footer background if clinic footer has background color
+      if (clinicFooter?.backgroundColor) {
+        const footerBgColor = clinicFooter.backgroundColor;
+        // Parse hex color to RGB
+        const hex = footerBgColor.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16) / 255;
+        const g = parseInt(hex.substring(2, 4), 16) / 255;
+        const b = parseInt(hex.substring(4, 6), 16) / 255;
+        
+        lastPage.drawRectangle({
+          x: 0,
+          y: 0,
+          width: width,
+          height: 50,
+          color: rgb(r, g, b),
+        });
+      }
+      
+      // Footer text from clinic_footers table
+      const footerText = clinicFooter?.footerText || `Pharmacy: ${prescription.pharmacy?.name || "Halo Health"} - ${prescription.pharmacy?.phone || "+44(0)121 827 5531"}`;
+      const footerTextColor = clinicFooter?.textColor || '#000000';
+      const hex = footerTextColor.replace('#', '');
+      const textR = parseInt(hex.substring(0, 2), 16) / 255;
+      const textG = parseInt(hex.substring(2, 4), 16) / 255;
+      const textB = parseInt(hex.substring(4, 6), 16) / 255;
+      
+      const footerTextWidth = helveticaFont.widthOfTextAtSize(footerText, smallFontSize);
+      lastPage.drawText(footerText, {
+        x: (width - footerTextWidth) / 2,
+        y: footerY,
+        size: smallFontSize,
+        font: helveticaFont,
+        color: rgb(textR, textG, textB),
+      });
+
+      // Page number (bottom right)
+      const pageNum = `1/${pdfDoc.getPageCount()}`;
+      lastPage.drawText(pageNum, {
+        x: width - margin - helveticaFont.widthOfTextAtSize(pageNum, smallFontSize),
+        y: footerY,
+        size: smallFontSize,
+        font: helveticaFont,
+        color: rgb(textR, textG, textB),
+      });
+
+      // Save PDF to directory structure: uploads/Prescriptions/{organization_id}/patients/{patient_id}/{user_id}/All_docs_prescriptions/{prescriptionNumber}.pdf
+      const prescriptionsDir = path.resolve(
+        process.cwd(),
+        'uploads',
+        'Prescriptions',
+        String(organizationId),
+        'patients',
+        String(prescription.patientId),
+        String(userId),
+        'All_docs_prescriptions'
+      );
+      await fse.ensureDir(prescriptionsDir);
+
+      const pdfBytes = await pdfDoc.save();
+      // Use prescription number as filename, fallback to prescription-{id} if not available
+      const prescriptionNumber = prescription.prescriptionNumber || `prescription-${prescriptionId}`;
+      // Sanitize filename: remove invalid characters for file system
+      const sanitizedFileName = prescriptionNumber.replace(/[<>:"/\\|?*]/g, '_') + '.pdf';
+      const filePath = path.join(prescriptionsDir, sanitizedFileName);
+      await fse.outputFile(filePath, pdfBytes);
+
+      // Save file path to database
+      const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${prescription.patientId}/${userId}/All_docs_prescriptions/${sanitizedFileName}`;
+      
+      // Update prescription record with saved PDF path
+      try {
+        await db
+          .update(schema.prescriptions)
+          .set({
+            savedPdfPath: relativePath,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.prescriptions.id, prescriptionId),
+              eq(schema.prescriptions.organizationId, organizationId)
+            )
+          );
+        console.log(`[SAVE-PRESCRIPTION-PDF] Updated prescription ${prescriptionId} with saved_pdf_path: ${relativePath}`);
+      } catch (dbError) {
+        console.error(`[SAVE-PRESCRIPTION-PDF] Error updating database:`, dbError);
+        // Continue even if database update fails
+      }
+
+      console.log(`[SAVE-PRESCRIPTION-PDF] PDF saved to: ${filePath}`);
+
+      res.json({
+        success: true,
+        message: "Prescription PDF saved successfully",
+        filePath: relativePath,
+        fileName: sanitizedFileName,
+      });
+
+    } catch (error) {
+      console.error("[SAVE-PRESCRIPTION-PDF] Error:", error);
+      res.status(500).json({ error: "Failed to save prescription PDF" });
+    }
+  });
+
+  // List saved prescription PDFs endpoint
+  app.get("/api/prescriptions/saved-pdfs", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      // Get organization ID from tenant or user's organization
+      let organizationId: number;
+      if (req.tenant && req.tenant.id) {
+        organizationId = req.tenant.id;
+      } else if (req.user.organizationId) {
+        organizationId = req.user.organizationId;
+      } else {
+        console.error("[LIST-PRESCRIPTION-PDFS] No organization ID found");
+        return res.status(400).json({ error: "Organization ID not found" });
+      }
+
+      const userId = req.user.id;
+      const userRole = req.user.role?.toString().toLowerCase() || "";
+      const patientId = req.query.patientId ? parseInt(req.query.patientId as string) : null;
+
+      // For nurse, doctor, admin - only show PDFs saved by this user (matching userId)
+      const filterByUserId = ['nurse', 'doctor', 'admin'].includes(userRole);
+
+      console.log(`[LIST-PRESCRIPTION-PDFS] org: ${organizationId}, user: ${userId}, role: ${userRole}, patient: ${patientId}, filterByUserId: ${filterByUserId}`);
+
+      // First, get all prescriptions from database that have saved_pdf_path and match organization_id and user_id
+      const pdfsFromDb: Array<{
+        fileName: string;
+        filePath: string;
+        prescriptionId: number;
+        prescriptionNumber?: string;
+        patientId: number;
+        userId: number;
+        createdAt: Date;
+        size: number;
+      }> = [];
+
+      try {
+        // Query database for prescriptions with saved_pdf_path matching organization_id and user_id
+        const prescriptionsWithPdf = await db
+          .select({
+            id: schema.prescriptions.id,
+            prescriptionNumber: schema.prescriptions.prescriptionNumber,
+            patientId: schema.prescriptions.patientId,
+            savedPdfPath: schema.prescriptions.savedPdfPath,
+            createdAt: schema.prescriptions.createdAt,
+            updatedAt: schema.prescriptions.updatedAt,
+          })
+          .from(schema.prescriptions)
+          .where(
+            and(
+              eq(schema.prescriptions.organizationId, organizationId),
+              isNotNull(schema.prescriptions.savedPdfPath),
+              patientId ? eq(schema.prescriptions.patientId, patientId) : undefined
+            )
+          );
+
+        // Filter by user_id if needed (check if path contains /{userId}/)
+        for (const prescription of prescriptionsWithPdf) {
+          if (prescription.savedPdfPath) {
+            // Extract userId from path: /uploads/Prescriptions/{orgId}/patients/{patientId}/{userId}/All_docs_prescriptions/...
+            const pathMatch = prescription.savedPdfPath.match(/\/patients\/(\d+)\/(\d+)\/All_docs_prescriptions\//);
+            if (pathMatch) {
+              const pathUserId = parseInt(pathMatch[2]);
+              // For nurse/doctor/admin, only include if userId matches
+              if (filterByUserId && pathUserId !== userId) {
+                continue;
+              }
+              
+              // Check if file exists
+              const fullPath = path.resolve(process.cwd(), prescription.savedPdfPath.replace(/^\//, ''));
+              if (await fse.pathExists(fullPath)) {
+                const stats = await fse.stat(fullPath);
+                const fileName = path.basename(prescription.savedPdfPath);
+                pdfsFromDb.push({
+                  fileName: fileName,
+                  filePath: prescription.savedPdfPath,
+                  prescriptionId: prescription.id,
+                  prescriptionNumber: prescription.prescriptionNumber || undefined,
+                  patientId: prescription.patientId,
+                  userId: pathUserId,
+                  createdAt: stats.birthtime || prescription.createdAt || new Date(),
+                  size: stats.size,
+                });
+                console.log(`[LIST-PRESCRIPTION-PDFS] Added PDF from DB: ${prescription.savedPdfPath}`);
+              }
+            }
+          }
+        }
+      } catch (dbError) {
+        console.error(`[LIST-PRESCRIPTION-PDFS] Error querying database:`, dbError);
+        // Continue with file system search if database query fails
+      }
+
+      const baseDir = path.resolve(
+        process.cwd(),
+        'uploads',
+        'Prescriptions',
+        String(organizationId),
+        'patients'
+      );
+
+      const pdfs: Array<{
+        fileName: string;
+        filePath: string;
+        prescriptionId: number;
+        prescriptionNumber?: string;
+        patientId: number;
+        userId: number;
+        createdAt: Date;
+        size: number;
+      }> = [...pdfsFromDb]; // Start with PDFs from database
+
+      // Also search file system for any PDFs not in database (backward compatibility)
+      // If patientId is specified, only search that patient's directory
+      if (patientId) {
+        // Use directory structure: {user_id}/All_docs_prescriptions
+        const patientDir = path.join(baseDir, String(patientId), String(userId), 'All_docs_prescriptions');
+
+        console.log(`[LIST-PRESCRIPTION-PDFS] Checking patient-specific dir: ${patientDir}`);
+        const dirExists = await fse.pathExists(patientDir);
+        console.log(`[LIST-PRESCRIPTION-PDFS] Patient dir exists: ${dirExists}`);
+        
+        if (dirExists) {
+          try {
+            const files = await fse.readdir(patientDir);
+            console.log(`[LIST-PRESCRIPTION-PDFS] Found ${files.length} files in patient dir`);
+            
+            for (const file of files) {
+              if (file.endsWith('.pdf')) {
+                // Check if this PDF is already in our list from database
+                const alreadyExists = pdfs.some(p => 
+                  p.fileName === file && 
+                  p.patientId === patientId && 
+                  p.userId === userId
+                );
+                if (alreadyExists) {
+                  continue; // Skip if already added from database
+                }
+                
+                const filePath = path.join(patientDir, file);
+                const stats = await fse.stat(filePath);
+                // Extract prescription ID from filename - could be prescription-{id}.pdf or {prescriptionNumber}.pdf
+                let prescriptionId: number | null = null;
+                let prescriptionNumber: string | null = null;
+                const prescriptionIdMatch = file.match(/prescription-(\d+)\.pdf/);
+                if (prescriptionIdMatch) {
+                  prescriptionId = parseInt(prescriptionIdMatch[1]);
+                } else {
+                  // Filename is the prescription number
+                  prescriptionNumber = file.replace('.pdf', '');
+                  try {
+                    const prescriptions = await storage.getPrescriptionsByOrganization(organizationId, 1000);
+                    const matchingPrescription = prescriptions.find((p: any) => p.prescriptionNumber === prescriptionNumber);
+                    if (matchingPrescription) {
+                      prescriptionId = matchingPrescription.id;
+                    }
+                  } catch (error) {
+                    console.error(`[LIST-PRESCRIPTION-PDFS] Error looking up prescription for ${prescriptionNumber}:`, error);
+                  }
+                }
+                
+                if (prescriptionId) {
+                  const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${patientId}/${userId}/All_docs_prescriptions/${file}`;
+                  
+                  pdfs.push({
+                    fileName: file,
+                    filePath: relativePath,
+                    prescriptionId: prescriptionId,
+                    prescriptionNumber: prescriptionNumber || file.replace('.pdf', ''),
+                    patientId: patientId,
+                    userId: userId,
+                    createdAt: stats.birthtime,
+                    size: stats.size,
+                  });
+                  console.log(`[LIST-PRESCRIPTION-PDFS] Added PDF from file system: ${file}`);
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`[LIST-PRESCRIPTION-PDFS] Error reading patient dir:`, error);
+          }
+        }
+      } else {
+        // Search all patients' directories for this user
+        console.log(`[LIST-PRESCRIPTION-PDFS] Checking baseDir: ${baseDir}`);
+        const baseDirExists = await fse.pathExists(baseDir);
+        console.log(`[LIST-PRESCRIPTION-PDFS] Base directory exists: ${baseDirExists}`);
+        
+        if (baseDirExists) {
+          const patientDirs = await fse.readdir(baseDir);
+          console.log(`[LIST-PRESCRIPTION-PDFS] Found ${patientDirs.length} patient directories`);
+          
+          for (const patientDirName of patientDirs) {
+            // Skip if not a directory (like .DS_Store or other files)
+            const patientDirPath = path.join(baseDir, patientDirName);
+            const patientDirStat = await fse.stat(patientDirPath);
+            if (!patientDirStat.isDirectory()) {
+              continue;
+            }
+            
+            // Use directory structure: {user_id}/All_docs_prescriptions
+            const userPrescriptionDir = path.join(baseDir, patientDirName, String(userId), 'All_docs_prescriptions');
+
+            console.log(`[LIST-PRESCRIPTION-PDFS] Checking: ${userPrescriptionDir}`);
+            const userDirExists = await fse.pathExists(userPrescriptionDir);
+            console.log(`[LIST-PRESCRIPTION-PDFS] User prescription dir exists: ${userDirExists}`);
+            
+            if (userDirExists) {
+              try {
+                const files = await fse.readdir(userPrescriptionDir);
+                console.log(`[LIST-PRESCRIPTION-PDFS] Found ${files.length} files in ${userPrescriptionDir}`);
+                
+                for (const file of files) {
+                  if (file.endsWith('.pdf')) {
+                    // Check if this PDF is already in our list from database
+                    const alreadyExists = pdfs.some(p => 
+                      p.fileName === file && 
+                      p.patientId === parseInt(patientDirName) && 
+                      p.userId === userId
+                    );
+                    if (alreadyExists) {
+                      continue; // Skip if already added from database
+                    }
+                    
+                    const filePath = path.join(userPrescriptionDir, file);
+                    const stats = await fse.stat(filePath);
+                    // Extract prescription ID from filename - could be prescription-{id}.pdf or {prescriptionNumber}.pdf
+                    let prescriptionId: number | null = null;
+                    let prescriptionNumber: string | null = null;
+                    const prescriptionIdMatch = file.match(/prescription-(\d+)\.pdf/);
+                    if (prescriptionIdMatch) {
+                      prescriptionId = parseInt(prescriptionIdMatch[1]);
+                    } else {
+                      // Filename is the prescription number
+                      prescriptionNumber = file.replace('.pdf', '');
+                      try {
+                        const prescriptions = await storage.getPrescriptionsByOrganization(organizationId, 1000);
+                        const matchingPrescription = prescriptions.find((p: any) => p.prescriptionNumber === prescriptionNumber);
+                        if (matchingPrescription) {
+                          prescriptionId = matchingPrescription.id;
+                        }
+                      } catch (error) {
+                        console.error(`[LIST-PRESCRIPTION-PDFS] Error looking up prescription for ${prescriptionNumber}:`, error);
+                      }
+                    }
+                    
+                    if (prescriptionId) {
+                      const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${patientDirName}/${userId}/All_docs_prescriptions/${file}`;
+                      
+                      pdfs.push({
+                        fileName: file,
+                        filePath: relativePath,
+                        prescriptionId: prescriptionId,
+                        prescriptionNumber: prescriptionNumber || file.replace('.pdf', ''),
+                        patientId: parseInt(patientDirName),
+                        userId: userId,
+                        createdAt: stats.birthtime,
+                        size: stats.size,
+                      });
+                      console.log(`[LIST-PRESCRIPTION-PDFS] Added PDF from file system: ${file}`);
+                    }
+                  }
+                }
+              } catch (readError) {
+                console.error(`[LIST-PRESCRIPTION-PDFS] Error reading user prescription dir:`, readError);
+              }
+            }
+          }
+        } else {
+          console.log(`[LIST-PRESCRIPTION-PDFS] Base directory does not exist: ${baseDir}`);
+        }
+      }
+      
+      console.log(`[LIST-PRESCRIPTION-PDFS] Total PDFs found: ${pdfs.length}`);
+
+      // Sort by prescription number/name (alphabetically), then by creation date (newest first)
+      pdfs.sort((a, b) => {
+        const nameA = a.prescriptionNumber || a.fileName;
+        const nameB = b.prescriptionNumber || b.fileName;
+        if (nameA !== nameB) {
+          return nameA.localeCompare(nameB);
+        }
+        return b.createdAt.getTime() - a.createdAt.getTime();
+      });
+
+      res.json({
+        success: true,
+        pdfs: pdfs,
+        count: pdfs.length,
+      });
+
+    } catch (error: any) {
+      console.error("[LIST-PRESCRIPTION-PDFS] Error:", error);
+      console.error("[LIST-PRESCRIPTION-PDFS] Error stack:", error?.stack);
+      const errorMessage = error?.message || "Failed to list prescription PDFs";
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Legacy endpoint for backward compatibility - Download/view saved prescription PDF by path components
+  app.get("/api/prescriptions/saved-pdfs/:organizationId/:patientId/:userId/:fileName", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const { organizationId, patientId, userId, fileName } = req.params;
+      const userOrgId = req.tenant!.id;
+
+      // Decode the fileName in case it's URL encoded
+      const decodedFileName = decodeURIComponent(fileName);
+
+      console.log(`[VIEW-PRESCRIPTION-PDF-LEGACY] Request params - org: ${organizationId}, patient: ${patientId}, user: ${userId}, fileName: ${fileName}, decoded: ${decodedFileName}`);
+
+      // Verify organization matches
+      if (parseInt(organizationId) !== userOrgId) {
+        console.error(`[VIEW-PRESCRIPTION-PDF-LEGACY] Organization mismatch: ${parseInt(organizationId)} !== ${userOrgId}`);
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Verify user can access (must be the owner or admin/doctor/nurse)
+      const canAccess = req.user.id === parseInt(userId) || 
+                       ['admin', 'doctor', 'nurse'].includes(req.user.role || '');
+
+      if (!canAccess) {
+        console.error(`[VIEW-PRESCRIPTION-PDF-LEGACY] Access denied - user: ${req.user.id}, userId: ${userId}, role: ${req.user.role}`);
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Use directory structure: patients/{patientId}/{userId}/All_docs_prescriptions/
+      const filePath = path.resolve(
+        process.cwd(),
+        'uploads',
+        'Prescriptions',
+        organizationId,
+        'patients',
+        patientId,
+        String(userId),
+        'All_docs_prescriptions',
+        decodedFileName
+      );
+
+      console.log(`[VIEW-PRESCRIPTION-PDF-LEGACY] Checking path: ${filePath}`);
+      
+      if (!await fse.pathExists(filePath)) {
+        console.error(`[VIEW-PRESCRIPTION-PDF-LEGACY] File not found at: ${filePath}`);
+        return res.status(404).json({ error: "PDF not found" });
+      }
+
+      console.log(`[VIEW-PRESCRIPTION-PDF-LEGACY] File found at: ${filePath}`);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${decodedFileName}"`);
+      const fileBuffer = await fse.readFile(filePath);
+      res.send(fileBuffer);
+
+    } catch (error: any) {
+      console.error("[VIEW-PRESCRIPTION-PDF-LEGACY] Error:", error);
+      console.error("[VIEW-PRESCRIPTION-PDF-LEGACY] Error stack:", error?.stack);
+      console.error("[VIEW-PRESCRIPTION-PDF-LEGACY] Error message:", error?.message);
+      res.status(500).json({ error: "Failed to retrieve PDF", details: error?.message });
     }
   });
 
@@ -22884,7 +25242,7 @@ Cura EMR Team
         return res.status(401).json({ error: "User not authenticated" });
       }
 
-      const { study, reportFormData, imageData, uploadedImageFileNames } = req.body;
+      const { study, reportFormData, imageData, uploadedImageFileNames, radiologyImagePaths } = req.body;
       
       if (!study || !study.patientName) {
         return res.status(400).json({ error: "Study data is required" });
@@ -22892,15 +25250,26 @@ Cura EMR Team
 
       // Get the actual medical image from database to ensure we use the correct image_id and patient_id
       const imageId = parseInt(study.id);
+      console.log(`\n🔍 PDF GENERATION START: study.id=${study.id}, parsed imageId=${imageId}`);
+      
+      // Initialize embeddedCount at the very beginning to ensure it's always in scope
+      let embeddedCount = 0;
+      
       const medicalImage = await storage.getMedicalImage(imageId, req.tenant!.id);
       if (!medicalImage) {
+        console.error(`❌ PDF GENERATION: Medical image not found for id=${imageId}`);
         return res.status(404).json({ error: "Medical image not found" });
       }
+      
+      console.log(`✅ PDF GENERATION: Found medical image - id=${medicalImage.id}, imageId=${medicalImage.imageId}, patientId=${medicalImage.patientId}`);
       
       // Use image_id from database as PDF filename (e.g., IMG1760647135I10NC.pdf)
       const reportId = medicalImage.imageId;
       const patientId = medicalImage.patientId; // Use numeric database patient ID
       const organizationId = req.organizationId || req.tenant!.id;
+      
+      console.log(`🔍 PDF GENERATION: Using imageId=${imageId} (medical_images.id) to query radiology_images table`);
+      console.log(`🔍 PDF GENERATION: Will look for rows where medical_image_id=${imageId}`);
       
       // Save PDF in organizational structure: uploads/Imaging_Reports/organization_id/patients/patient_id/
       const reportsDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Reports', String(organizationId), 'patients', String(patientId));
@@ -22915,7 +25284,7 @@ Cura EMR Team
       
       // Create a new PDF document
       const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595, 842]); // A4 size in points
+      let page = pdfDoc.addPage([595, 842]); // A4 size in points
       const { width, height } = page.getSize();
       
       // Load fonts
@@ -22927,6 +25296,21 @@ Cura EMR Team
       const lightGray = rgb(0.95, 0.95, 0.95); // Light background
       const darkGray = rgb(0.3, 0.3, 0.3);
       const blackColor = rgb(0, 0, 0);
+      
+      // Helper function to add footer to any page
+      const addFooterToPage = (pageToAddFooter: typeof page) => {
+        if (clinicFooter && clinicFooter.footerText) {
+          const footerText = clinicFooter.footerText;
+          const footerTextWidth = font.widthOfTextAtSize(footerText, 8);
+          pageToAddFooter.drawText(footerText, {
+            x: (width - footerTextWidth) / 2, // Center the footer
+            y: 30, // Position at bottom of page with margin
+            size: 8,
+            font,
+            color: darkGray
+          });
+        }
+      };
       
       // Helper function to draw a section box (borders and background removed)
       const drawSectionBox = (x: number, y: number, width: number, height: number) => {
@@ -23063,8 +25447,6 @@ Cura EMR Team
       let leftColumnY = sectionsStartY - 30;
       page.drawText(`Name: ${study.patientName}`, { x: 50, y: leftColumnY, size: 10, font });
       leftColumnY -= 15;
-      page.drawText(`ID: ${study.patientId || 'N/A'}`, { x: 50, y: leftColumnY, size: 10, font });
-      leftColumnY -= 15;
       page.drawText(`DOB: ${study.patientDOB || 'N/A'}`, { x: 50, y: leftColumnY, size: 10, font });
       leftColumnY -= 15;
       page.drawText(`Study Date: ${new Date().toLocaleDateString()}`, { x: 50, y: leftColumnY, size: 10, font });
@@ -23200,6 +25582,7 @@ Cura EMR Team
       
       // Radiologist information
       const radiologistName = reportFormData?.radiologist || study.radiologist || "Dr. Sarah Johnson, MD";
+      
       page.drawText(`Reported by: ${radiologistName}`, { 
         x: 50, 
         y: yPosition - 30, 
@@ -23208,17 +25591,9 @@ Cura EMR Team
         color: blackColor
       });
       
-      page.drawText('Board Certified Diagnostic Radiologist', { 
-        x: 50, 
-        y: yPosition - 45, 
-        size: 10, 
-        font,
-        color: darkGray
-      });
-      
       page.drawText('Medical License: MD-RAD-2024', { 
         x: 50, 
-        y: yPosition - 60, 
+        y: yPosition - 45, 
         size: 10, 
         font,
         color: darkGray
@@ -23250,8 +25625,91 @@ Cura EMR Team
       
       // Digital signature placeholder removed
       
-      // Ensure proper spacing between radiologist report and medical image sections
-      yPosition -= 80; // Increased spacing to prevent overlap
+      // Adjust yPosition for reduced content in RADIOLOGIST REPORT section
+      yPosition -= 60; // Reduced from 95 since we removed specialization and role
+      
+      // Doctor Details Section (using selectedUserId)
+      yPosition -= 20;
+      drawSectionBox(30, yPosition + 10, width - 60, 100);
+      
+      page.drawText('DOCTOR DETAILS', {
+        x: 40,
+        y: yPosition - 5,
+        size: 12,
+        font: boldFont,
+        color: primaryBlue
+      });
+      
+      // Fetch doctor details from database using selectedUserId
+      let doctorName = 'N/A';
+      let doctorSpecialization = 'N/A';
+      let doctorRole = 'N/A';
+      let doctorEmail = 'N/A';
+      let doctorDepartment = 'N/A';
+      
+      try {
+        // Get doctor info from selectedUserId
+        const doctorUserId = medicalImage.selectedUserId;
+        
+        if (doctorUserId) {
+          const doctorUser = await storage.getUser(doctorUserId, organizationId);
+          if (doctorUser) {
+            doctorName = `${doctorUser.firstName || ''} ${doctorUser.lastName || ''}`.trim() || 'N/A';
+            doctorSpecialization = doctorUser.medicalSpecialtyCategory || doctorUser.subSpecialty || 'N/A';
+            doctorRole = doctorUser.role || 'N/A';
+            doctorEmail = doctorUser.email || 'N/A';
+            doctorDepartment = doctorUser.department || 'N/A';
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching doctor details:', error);
+        // Continue with N/A values if fetch fails
+      }
+      
+      let doctorY = yPosition - 30;
+      page.drawText(`Name: ${doctorName}`, { 
+        x: 50, 
+        y: doctorY, 
+        size: 10, 
+        font,
+        color: darkGray
+      });
+      doctorY -= 15;
+      
+      page.drawText(`Specialization: ${doctorSpecialization}`, { 
+        x: 50, 
+        y: doctorY, 
+        size: 10, 
+        font,
+        color: darkGray
+      });
+      doctorY -= 15;
+      
+      page.drawText(`Email: ${doctorEmail}`, { 
+        x: 50, 
+        y: doctorY, 
+        size: 10, 
+        font,
+        color: darkGray
+      });
+      doctorY -= 15;
+      
+      // Only show Department if it's not "N/A"
+      if (doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '') {
+        page.drawText(`Department: ${doctorDepartment}`, { 
+          x: 50, 
+          y: doctorY, 
+          size: 10, 
+          font,
+          color: darkGray
+        });
+        doctorY -= 15;
+      }
+      
+      // Ensure proper spacing between doctor details and signature sections
+      // Adjust spacing based on whether Department was shown
+      const doctorDetailsHeight = doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '' ? 75 : 60;
+      yPosition -= doctorDetailsHeight; // Space for doctor details section
       
       // E-Signature Section (if signature data provided)
       const { signatureData, signatureDate } = req.body;
@@ -23311,9 +25769,10 @@ Cura EMR Team
               height: signatureBoxHeight - 4,
             });
             
-            yPosition -= signatureBoxHeight + 10;
+            // Move yPosition down past the signature box (box height + spacing)
+            yPosition -= signatureBoxHeight + 15; // Increased spacing from 10 to 15
             
-            // Add green timestamp
+            // Add green timestamp - positioned below the signature box with proper spacing
             const signatureDateStr = signatureDate 
               ? new Date(signatureDate).toLocaleDateString('en-US', { 
                   month: 'short',
@@ -23332,15 +25791,17 @@ Cura EMR Team
                   hour12: false
                 });
             
+            // Draw E-Signed text below the signature box (text height is ~9 points, so we need space)
             page.drawText(`[E-Signed] ${signatureDateStr}`, {
               x: 40,
-              y: yPosition,
+              y: yPosition - 5, // Additional 5 points spacing below the box
               size: 9,
               font,
               color: rgb(0, 0.6, 0) // Green color
             });
             
-            yPosition -= 20;
+            // Move yPosition down further to account for the text
+            yPosition -= 20; // Space for the E-Signed text plus margin
           }
         } catch (error) {
           console.error('Error processing signature:', error);
@@ -23351,371 +25812,986 @@ Cura EMR Team
       let imageHeight = 0;
       
       // Check for image data from uploaded image filenames or database fileName and filesystem
-      let imageBuffers: Array<{ buffer: Buffer; mimeType: string }> = [];
+      let imageBuffers: Array<{ buffer: Buffer; mimeType: string; fileName: string }> = [];
       
-      // FIRST PRIORITY: Load images from database image_data column (base64)
-      console.log("📷 SERVER: Checking for images in database image_data column...");
-      console.log("📷 SERVER: Looking for ORDER row with imageId:", reportId);
+      // PRIMARY: Always get images from radiology_images table using medical_image_id matching medical_images.id
+      // This is the main source for images - they are saved to radiology_images table when uploaded
+      let radiologyImagesCount = 0;
       try {
-        const dbImages = await db
+        console.log(`📷 PRIMARY SOURCE: Querying radiology_images table for medical_image_id: ${imageId}, organizationId: ${organizationId}`);
+        
+        const radiologyImages = await db
           .select()
-          .from(schema.medicalImages)
+          .from(schema.radiologyImages)
           .where(
             and(
-              eq(schema.medicalImages.organizationId, organizationId),
-              eq(schema.medicalImages.imageId, reportId), // Use specific imageId from current ORDER row
-              isNotNull(schema.medicalImages.imageData)
+              eq(schema.radiologyImages.medicalImageId, imageId),
+              eq(schema.radiologyImages.organizationId, organizationId)
             )
-          );
+          )
+          .orderBy(schema.radiologyImages.displayOrder);
+
+        radiologyImagesCount = radiologyImages.length;
+        console.log(`📷 PRIMARY SOURCE: Found ${radiologyImagesCount} image(s) in radiology_images table for medical_image_id: ${imageId}`);
         
-        console.log(`📷 SERVER: Found ${dbImages.length} image(s) with base64 data for imageId ${reportId}`);
-        
-        for (const dbImage of dbImages) {
-          if (dbImage.imageData) {
+        // Log all rows found to confirm we're fetching ALL rows
+        if (radiologyImages.length > 0) {
+          console.log(`📷 PRIMARY SOURCE: ALL ROWS FOUND for medical_image_id ${imageId}:`);
+          radiologyImages.forEach((img, idx) => {
+            console.log(`📷   Row ${idx + 1}: id=${img.id}, fileName="${img.fileName}", filePath="${img.filePath || 'N/A'}", displayOrder=${img.displayOrder || 0}`);
+          });
+        } else {
+          console.log(`📷 PRIMARY SOURCE: ⚠️ No rows found in radiology_images table for medical_image_id: ${imageId}`);
+        }
+
+        if (radiologyImages.length > 0) {
+          console.log(`📷 PROCESSING: Starting to process ${radiologyImages.length} image(s) from radiology_images table`);
+          let successfullyLoaded = 0;
+          let failedToLoad = 0;
+          
+          for (let idx = 0; idx < radiologyImages.length; idx++) {
+            const radiologyImage = radiologyImages[idx];
+            console.log(`\n📷 [${idx + 1}/${radiologyImages.length}] Processing image: ID=${radiologyImage.id}, fileName=${radiologyImage.fileName}`);
+            
             try {
-              // Extract base64 data (remove data:image/xxx;base64, prefix if present)
-              const base64Data = dbImage.imageData.includes(',') 
-                ? dbImage.imageData.split(',')[1] 
-                : dbImage.imageData;
+              let imageBuffer: Buffer | null = null;
+              let imageMimeType = radiologyImage.mimeType || 'image/jpeg';
+              let imageFileName = radiologyImage.fileName;
               
-              // Determine MIME type from data URL prefix or default to jpeg
-              let mimeType = 'image/jpeg';
-              let fileExtension = '.jpg';
-              
-              if (dbImage.imageData.includes('image/png')) {
-                mimeType = 'image/png';
-                fileExtension = '.png';
-              } else if (dbImage.imageData.includes('image/webp')) {
-                mimeType = 'image/webp';
-                fileExtension = '.webp'; // Correct extension for WebP
-              } else if (dbImage.imageData.includes('image/jpg') || dbImage.imageData.includes('image/jpeg')) {
-                mimeType = 'image/jpeg';
-                fileExtension = '.jpg';
-              } else if (dbImage.imageData.includes('image/gif')) {
-                mimeType = 'image/gif';
-                fileExtension = '.gif';
-              } else if (dbImage.imageData.includes('image/bmp')) {
-                mimeType = 'image/bmp';
-                fileExtension = '.bmp';
+              // PRIORITY 1: Use base64 imageData if available (fastest, no file I/O needed)
+              if (radiologyImage.imageData) {
+                try {
+                  console.log(`📷 [${idx + 1}] PRIORITY 1: Using base64 imageData from database`);
+                  // Extract base64 data (remove data URL prefix if present)
+                  const base64Data = radiologyImage.imageData.includes(',') 
+                    ? radiologyImage.imageData.split(',')[1] 
+                    : radiologyImage.imageData;
+                  
+                  imageBuffer = Buffer.from(base64Data, 'base64');
+                  console.log(`📷 [${idx + 1}] ✅ PRIORITY 1 SUCCESS: Loaded ${imageBuffer.length} bytes from base64 imageData`);
+                } catch (base64Error) {
+                  console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 1 FAILED: Error decoding base64 imageData:`, base64Error);
+                }
               }
               
-              console.log(`📷 SERVER: Detected image format - MIME: ${mimeType}, Extension: ${fileExtension}`);
+              // PRIORITY 2: Use filePath from database to read file directly from server filesystem
+              if (!imageBuffer && radiologyImage.filePath) {
+                try {
+                  console.log(`📷 [${idx + 1}] PRIORITY 2: Loading image from server filesystem`);
+                  console.log(`📷 [${idx + 1}]    Database filePath: "${radiologyImage.filePath}"`);
+                  
+                  let rawPath = radiologyImage.filePath.trim();
+                  let imagePath: string;
+                  
+                  // Always resolve to absolute path from project root for production safety
+                  if (rawPath.includes('uploads')) {
+                    // Extract relative path starting from "uploads" (handles both Windows and Unix paths)
+                    const uploadsIndex = rawPath.indexOf('uploads');
+                    const relativePath = rawPath.substring(uploadsIndex);
+                    // Normalize path separators (convert backslashes to forward slashes)
+                    const normalizedRelative = relativePath.replace(/\\/g, '/');
+                    // Resolve from process.cwd() to get absolute server path
+                    imagePath = path.resolve(process.cwd(), normalizedRelative);
+                    console.log(`📷 [${idx + 1}]    Extracted relative path: "${normalizedRelative}"`);
+                    console.log(`📷 [${idx + 1}]    Absolute server path: "${imagePath}"`);
+                  } else if (path.isAbsolute(rawPath)) {
+                    // Already absolute - normalize it
+                    imagePath = path.normalize(rawPath);
+                    console.log(`📷 [${idx + 1}]    Using absolute path: "${imagePath}"`);
+                  } else {
+                    // Relative path - resolve from project root
+                    imagePath = path.resolve(process.cwd(), rawPath);
+                    console.log(`📷 [${idx + 1}]    Resolved relative path: "${imagePath}"`);
+                  }
+                  
+                  // Verify file exists using filesystem access
+                  const fileExists = await fse.pathExists(imagePath);
+                  console.log(`📷 [${idx + 1}]    File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+                  
+                  if (fileExists) {
+                    // Read file as binary buffer from filesystem (not URL, not blob)
+                    imageBuffer = await fse.readFile(imagePath);
+                    
+                    // Validate buffer
+                    if (!imageBuffer || imageBuffer.length === 0) {
+                      throw new Error(`File exists but buffer is empty (0 bytes)`);
+                    }
+                    
+                    console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS: Read ${imageBuffer.length} bytes from filesystem`);
+                    console.log(`📷 [${idx + 1}]    Buffer type: ${imageBuffer instanceof Buffer ? 'Buffer' : typeof imageBuffer}`);
+                  } else {
+                    console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 2: File not found at path: "${imagePath}"`);
+                    
+                    // List directory contents to help debug
+                    try {
+                      const dirPath = path.dirname(imagePath);
+                      if (await fse.pathExists(dirPath)) {
+                        const dirContents = await fse.readdir(dirPath);
+                        console.log(`📷 [${idx + 1}]    Directory exists: "${dirPath}"`);
+                        console.log(`📷 [${idx + 1}]    Directory contents (${dirContents.length} files):`, dirContents.slice(0, 10).join(', '));
+                        if (dirContents.length > 10) {
+                          console.log(`📷 [${idx + 1}]    ... and ${dirContents.length - 10} more files`);
+                        }
+                        
+                        // Try to find file by partial name match (in case of filename mismatch)
+                        const fileNameWithoutExt = path.parse(radiologyImage.fileName).name;
+                        const matchingFile = dirContents.find(f => f.includes(fileNameWithoutExt) || fileNameWithoutExt.includes(path.parse(f).name));
+                        if (matchingFile) {
+                          const matchedPath = path.join(dirPath, matchingFile);
+                          console.log(`📷 [${idx + 1}]    Found potential match: "${matchingFile}"`);
+                          console.log(`📷 [${idx + 1}]    Trying matched path: "${matchedPath}"`);
+                          if (await fse.pathExists(matchedPath)) {
+                            imagePath = matchedPath;
+                            imageBuffer = await fse.readFile(imagePath);
+                            if (imageBuffer && imageBuffer.length > 0) {
+                              console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS (matched file): Read ${imageBuffer.length} bytes`);
+                            }
+                          }
+                        }
+                      } else {
+                        console.warn(`📷 [${idx + 1}]    Directory does not exist: "${dirPath}"`);
+                      }
+                    } catch (dirError) {
+                      console.error(`📷 [${idx + 1}]    Error listing directory:`, dirError);
+                    }
+                    
+                    // Fallback: construct path from expected location
+                    if (!imageBuffer) {
+                      const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+                      const constructedPath = path.join(imagesDir, radiologyImage.fileName);
+                      console.log(`📷 [${idx + 1}]    Fallback path: "${constructedPath}"`);
+                      
+                      const constructedExists = await fse.pathExists(constructedPath);
+                      if (constructedExists) {
+                        imagePath = constructedPath;
+                        imageBuffer = await fse.readFile(imagePath);
+                        
+                        if (!imageBuffer || imageBuffer.length === 0) {
+                          throw new Error(`Fallback file exists but buffer is empty`);
+                        }
+                        
+                        console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS (fallback): Read ${imageBuffer.length} bytes`);
+                      } else {
+                        console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 2 FAILED: File not found at fallback path either`);
+                        // List fallback directory contents
+                        try {
+                          if (await fse.pathExists(imagesDir)) {
+                            const fallbackContents = await fse.readdir(imagesDir);
+                            console.log(`📷 [${idx + 1}]    Fallback directory contents (${fallbackContents.length} files):`, fallbackContents.slice(0, 10).join(', '));
+                          }
+                        } catch (e) {
+                          console.error(`📷 [${idx + 1}]    Error listing fallback directory:`, e);
+                        }
+                      }
+                    }
+                  }
+                } catch (fileError) {
+                  console.error(`📷 [${idx + 1}] ❌ PRIORITY 2 FAILED: Error reading from filesystem:`, fileError);
+                  if (fileError instanceof Error) {
+                    console.error(`📷 [${idx + 1}]    Error message: ${fileError.message}`);
+                  }
+                  // Continue to next priority - don't throw
+                }
+              }
               
-              const imageBuffer = Buffer.from(base64Data, 'base64');
+              // PRIORITY 3: Fallback - construct absolute path from fileName if filePath not available
+              if (!imageBuffer && radiologyImage.fileName) {
+                try {
+                  console.log(`📷 [${idx + 1}] PRIORITY 3: Constructing absolute path from fileName: "${radiologyImage.fileName}"`);
+                  
+                  // Construct absolute path from project root
+                  const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+                  const constructedPath = path.resolve(imagesDir, radiologyImage.fileName);
+                  console.log(`📷 [${idx + 1}]    Constructed absolute path: "${constructedPath}"`);
+                  
+                  const fileExists = await fse.pathExists(constructedPath);
+                  console.log(`📷 [${idx + 1}]    File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+                  
+                  if (fileExists) {
+                    // Read file as binary buffer from filesystem
+                    imageBuffer = await fse.readFile(constructedPath);
+                    
+                    if (!imageBuffer || imageBuffer.length === 0) {
+                      throw new Error(`File exists but buffer is empty`);
+                    }
+                    
+                    console.log(`📷 [${idx + 1}] ✅ PRIORITY 3 SUCCESS: Read ${imageBuffer.length} bytes from filesystem`);
+                  } else {
+                    console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 3 FAILED: File not found at constructed path`);
+                    
+                    // List directory to see what files actually exist
+                    try {
+                      if (await fse.pathExists(imagesDir)) {
+                        const dirContents = await fse.readdir(imagesDir);
+                        console.log(`📷 [${idx + 1}]    Directory exists: "${imagesDir}"`);
+                        console.log(`📷 [${idx + 1}]    Directory contents (${dirContents.length} files):`, dirContents.join(', '));
+                        
+                        // Try to find file by partial match
+                        const fileNameWithoutExt = path.parse(radiologyImage.fileName).name;
+                        const matchingFile = dirContents.find(f => {
+                          const fName = path.parse(f).name;
+                          return fName.includes(fileNameWithoutExt) || fileNameWithoutExt.includes(fName) || f.includes(fileNameWithoutExt);
+                        });
+                        
+                        if (matchingFile) {
+                          const matchedPath = path.join(imagesDir, matchingFile);
+                          console.log(`📷 [${idx + 1}]    Found potential match: "${matchingFile}"`);
+                          if (await fse.pathExists(matchedPath)) {
+                            imageBuffer = await fse.readFile(matchedPath);
+                            if (imageBuffer && imageBuffer.length > 0) {
+                              console.log(`📷 [${idx + 1}] ✅ PRIORITY 3 SUCCESS (matched file): Read ${imageBuffer.length} bytes`);
+                            }
+                          }
+                        }
+                      } else {
+                        console.warn(`📷 [${idx + 1}]    Directory does not exist: "${imagesDir}"`);
+                        // Try to create it
+                        try {
+                          await fse.ensureDir(imagesDir);
+                          console.log(`📷 [${idx + 1}]    Created directory: "${imagesDir}"`);
+                        } catch (mkdirError) {
+                          console.error(`📷 [${idx + 1}]    Failed to create directory:`, mkdirError);
+                        }
+                      }
+                    } catch (dirError) {
+                      console.error(`📷 [${idx + 1}]    Error listing directory:`, dirError);
+                    }
+                  }
+                } catch (constructError) {
+                  console.error(`📷 [${idx + 1}] ❌ PRIORITY 3 FAILED: Error with constructed path:`, constructError);
+                  if (constructError instanceof Error) {
+                    console.error(`📷 [${idx + 1}]    Error message: ${constructError.message}`);
+                  }
+                }
+              }
               
-              // Convert to supported format if needed (WebP, GIF, BMP → JPEG)
-              const { buffer: convertedBuffer, mimeType: convertedMimeType } = await convertImageToSupportedFormat(imageBuffer, fileExtension);
-              
-              imageBuffers.push({ buffer: convertedBuffer, mimeType: convertedMimeType });
-              console.log(`📷 SERVER: Successfully loaded image from database (ID: ${dbImage.id}), mimeType: ${convertedMimeType}`);
+              // If we successfully loaded an image buffer, validate and process it
+              if (imageBuffer) {
+                try {
+                  // Validate buffer is actually a Buffer instance
+                  if (!(imageBuffer instanceof Buffer)) {
+                    throw new Error(`Image buffer is not a Buffer instance (type: ${typeof imageBuffer})`);
+                  }
+                  
+                  // Validate buffer has content
+                  if (imageBuffer.length === 0) {
+                    throw new Error(`Image buffer is empty (0 bytes)`);
+                  }
+                  
+                  // Validate buffer size is reasonable (not corrupted)
+                  if (imageBuffer.length < 100) {
+                    console.warn(`📷 [${idx + 1}] ⚠️ WARNING: Image buffer is very small (${imageBuffer.length} bytes), may be corrupted`);
+                  }
+                  
+                  const fileExtension = path.extname(imageFileName || '').toLowerCase();
+                  console.log(`📷 [${idx + 1}] Processing image: ${imageBuffer.length} bytes, extension: ${fileExtension || 'unknown'}`);
+                  
+                  // Convert to supported format (PNG or JPEG) if needed
+                  const converted = await convertImageToSupportedFormat(imageBuffer, fileExtension);
+                  
+                  // Validate converted buffer
+                  if (!converted.buffer || !(converted.buffer instanceof Buffer) || converted.buffer.length === 0) {
+                    throw new Error(`Converted image buffer is invalid or empty`);
+                  }
+                  
+                  // Ensure mimeType is set correctly
+                  if (!converted.mimeType || (converted.mimeType !== 'image/png' && converted.mimeType !== 'image/jpeg')) {
+                    console.warn(`📷 [${idx + 1}] ⚠️ WARNING: Unexpected mimeType "${converted.mimeType}", defaulting to image/jpeg`);
+                    converted.mimeType = 'image/jpeg';
+                  }
+                  
+                  imageBuffers.push({
+                    buffer: converted.buffer,
+                    mimeType: converted.mimeType,
+                    fileName: imageFileName || 'image'
+                  });
+                  
+                  successfullyLoaded++;
+                  console.log(`📷 [${idx + 1}] ✅ FINAL SUCCESS: Image added to PDF buffer`);
+                  console.log(`📷 [${idx + 1}]    - Buffer size: ${converted.buffer.length} bytes`);
+                  console.log(`📷 [${idx + 1}]    - MIME type: ${converted.mimeType}`);
+                  console.log(`📷 [${idx + 1}]    - Total loaded: ${successfullyLoaded}/${radiologyImages.length}`);
+                } catch (convertError) {
+                  failedToLoad++;
+                  console.error(`📷 [${idx + 1}] ❌ ERROR processing image:`, convertError);
+                  if (convertError instanceof Error) {
+                    console.error(`📷 [${idx + 1}]    Error message: ${convertError.message}`);
+                  }
+                  // Continue to next image - don't throw
+                }
+              } else {
+                failedToLoad++;
+                console.warn(`📷 [${idx + 1}] ⚠️ ALL PRIORITIES FAILED: Could not load image from any source`);
+                console.warn(`📷 [${idx + 1}]    - Priority 1 (base64 imageData): ${radiologyImage.imageData ? 'Available but failed' : 'Not available'}`);
+                console.warn(`📷 [${idx + 1}]    - Priority 2 (filePath from DB): ${radiologyImage.filePath || 'Not available'}`);
+                console.warn(`📷 [${idx + 1}]    - Priority 3 (constructed path): Tried but file not found`);
+                console.warn(`📷 [${idx + 1}]    - Skipping this image and continuing with next...`);
+              }
             } catch (error) {
-              console.error(`📷 SERVER: Error processing database image (ID: ${dbImage.id}):`, error);
+              failedToLoad++;
+              console.error(`📷 [${idx + 1}] ❌ FATAL ERROR loading radiology image:`, error);
+              if (error instanceof Error) {
+                console.error(`📷 [${idx + 1}]    Error message: ${error.message}`);
+                console.error(`📷 [${idx + 1}]    Error stack: ${error.stack}`);
+              }
             }
+          }
+          
+          console.log(`\n📷 SUMMARY: Processed ${radiologyImages.length} image(s) from radiology_images table for medical_image_id: ${imageId}`);
+          console.log(`📷 SUMMARY: ✅ Successfully loaded: ${successfullyLoaded} out of ${radiologyImages.length} rows`);
+          console.log(`📷 SUMMARY: ❌ Failed to load: ${failedToLoad} out of ${radiologyImages.length} rows`);
+          console.log(`📷 SUMMARY: 📦 Total images ready for PDF embedding: ${imageBuffers.length}`);
+          
+          // Log all successfully loaded image paths to confirm ALL rows are processed
+          if (imageBuffers.length > 0) {
+            console.log(`📷 SUMMARY: ✅ ALL IMAGES TO BE EMBEDDED IN PDF (not just first row):`);
+            imageBuffers.forEach((img, idx) => {
+              console.log(`📷   Image ${idx + 1}/${imageBuffers.length}: "${img.fileName}" (${img.buffer.length} bytes, ${img.mimeType})`);
+            });
+          } else {
+            console.log(`📷 SUMMARY: ⚠️ WARNING - No images were successfully loaded for medical_image_id: ${imageId}`);
+            console.log(`📷 SUMMARY: This means NONE of the ${radiologyImages.length} rows in radiology_images table could be loaded`);
+          }
+        } else {
+          console.log(`📷 No images found in radiology_images table for medical_image_id: ${imageId}`);
+          
+          // Final fallback: Check if directory exists and list all files
+          const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+          console.log(`📷 FINAL FALLBACK: Checking directory for any image files: "${imagesDir}"`);
+          
+          try {
+            if (await fse.pathExists(imagesDir)) {
+              const allFiles = await fse.readdir(imagesDir);
+              console.log(`📷 FINAL FALLBACK: Directory exists with ${allFiles.length} file(s):`, allFiles.join(', '));
+              
+              // Try to load any image files found in the directory
+              const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
+              for (const file of allFiles) {
+                const fileExt = path.extname(file).toLowerCase();
+                if (imageExtensions.includes(fileExt)) {
+                  try {
+                    const filePath = path.join(imagesDir, file);
+                    console.log(`📷 FINAL FALLBACK: Attempting to load image file: "${file}"`);
+                    const fileBuffer = await fse.readFile(filePath);
+                    
+                    if (fileBuffer && fileBuffer.length > 0) {
+                      const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
+                      imageBuffers.push({
+                        buffer: converted.buffer,
+                        mimeType: converted.mimeType,
+                        fileName: file
+                      });
+                      console.log(`📷 FINAL FALLBACK: ✅ Successfully loaded image: "${file}" (${fileBuffer.length} bytes)`);
+                    }
+                  } catch (loadError) {
+                    console.error(`📷 FINAL FALLBACK: ❌ Failed to load "${file}":`, loadError);
+                  }
+                }
+              }
+              
+              if (imageBuffers.length > 0) {
+                console.log(`📷 FINAL FALLBACK: ✅ Loaded ${imageBuffers.length} image(s) from directory scan`);
+              }
+            } else {
+              console.warn(`📷 FINAL FALLBACK: Directory does not exist: "${imagesDir}"`);
+            }
+          } catch (dirError) {
+            console.error(`📷 FINAL FALLBACK: Error checking directory:`, dirError);
           }
         }
       } catch (error) {
-        console.error("📷 SERVER: Error querying database for images:", error);
+        console.error('Error fetching radiology images from database:', error);
       }
       
-      console.log(`📷 SERVER: Total images loaded from database: ${imageBuffers.length}`);
-      
-      // Embed all images in the PDF
-      if (imageBuffers.length > 0) {
-        console.log(`📷 SERVER: Embedding ${imageBuffers.length} image(s) in PDF`);
+      // SECONDARY: Also try to use radiologyImagePaths provided from frontend (additional images)
+      if (radiologyImagePaths && Array.isArray(radiologyImagePaths) && radiologyImagePaths.length > 0) {
+        console.log(`📷 Also processing ${radiologyImagePaths.length} image paths provided from frontend`);
         
-        for (let imgIndex = 0; imgIndex < imageBuffers.length; imgIndex++) {
-          const { buffer: currentBuffer, mimeType: currentMimeType } = imageBuffers[imgIndex];
+        for (const imagePath of radiologyImagePaths) {
+          try {
+            // Skip if already loaded
+            const fileName = path.basename(imagePath);
+            if (imageBuffers.some(img => img.fileName === fileName)) {
+              console.log(`📷 Skipping duplicate image: ${fileName}`);
+              continue;
+            }
+            
+            // Resolve the path - it might be relative or absolute
+            let fullPath: string;
+            if (path.isAbsolute(imagePath)) {
+              fullPath = imagePath;
+            } else {
+              // If relative, resolve from process.cwd()
+              fullPath = path.resolve(process.cwd(), imagePath);
+            }
+            
+            if (await fse.pathExists(fullPath)) {
+              const imageBuffer = await fse.readFile(fullPath);
+              const fileExtension = path.extname(fullPath).toLowerCase();
+              const converted = await convertImageToSupportedFormat(imageBuffer, fileExtension);
+              imageBuffers.push({
+                ...converted,
+                fileName: fileName
+              });
+              console.log(`✅ Loaded additional radiology image from frontend path: ${fullPath}`);
+            } else {
+              console.warn(`⚠️ Additional image file not found at path: ${fullPath}`);
+            }
+          } catch (error) {
+            console.error(`Error loading additional radiology image from path ${imagePath}:`, error);
+          }
+        }
+      }
+      
+      // Process uploaded image filenames if provided (fallback or additional images)
+      if (uploadedImageFileNames && Array.isArray(uploadedImageFileNames) && uploadedImageFileNames.length > 0) {
+        const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), String(patientId));
+        
+        for (const fileName of uploadedImageFileNames) {
+          // Skip if already loaded from radiology_images
+          if (imageBuffers.some(img => img.fileName === fileName)) {
+            continue;
+          }
           
           try {
-            console.log(`📷 SERVER: Processing image ${imgIndex + 1}/${imageBuffers.length} for PDF, mimeType:`, currentMimeType);
-            
-            // Embed image based on MIME type with robust error handling
-            let image;
-            let embedSuccess = false;
-            let primaryError: any = null;
-            
-            // Try primary format first
-            try {
-              if (currentMimeType.includes('jpeg') || currentMimeType.includes('jpg')) {
-                image = await pdfDoc.embedJpg(currentBuffer);
-                embedSuccess = true;
-                console.log("📷 SERVER: Successfully embedded as JPEG");
-              } else if (currentMimeType.includes('png')) {
-                image = await pdfDoc.embedPng(currentBuffer);
-                embedSuccess = true;
-                console.log("📷 SERVER: Successfully embedded as PNG");
-              }
-            } catch (error) {
-              primaryError = error;
-              console.log("📷 SERVER: Primary embedding failed, trying fallback:", error.message);
+            const imagePath = path.join(imagesDir, fileName);
+            if (await fse.pathExists(imagePath)) {
+              const imageBuffer = await fse.readFile(imagePath);
+              const fileExtension = path.extname(fileName).toLowerCase();
+              const converted = await convertImageToSupportedFormat(imageBuffer, fileExtension);
+              imageBuffers.push({
+                ...converted,
+                fileName: fileName
+              });
             }
-            
-            // If primary failed, try fallback format
-            if (!embedSuccess) {
-              try {
-                if (currentMimeType.includes('png')) {
-                  // Try JPEG if PNG failed
-                  image = await pdfDoc.embedJpg(currentBuffer);
-                  embedSuccess = true;
-                  console.log("📷 SERVER: ✅ Successfully embedded PNG file as JPEG (fallback)");
-                } else {
-                  // Try PNG if JPEG failed  
-                  image = await pdfDoc.embedPng(currentBuffer);
-                  embedSuccess = true;
-                  console.log("📷 SERVER: ✅ Successfully embedded JPEG file as PNG (fallback)");
-                }
-              } catch (fallbackError) {
-                console.error("📷 SERVER: ❌ Both embedding methods failed - PNG and JPEG");
-                console.error("📷 SERVER: Primary error:", primaryError?.message);
-                console.error("📷 SERVER: Fallback error:", fallbackError.message);
-              }
-            }
-            
-            if (image) {
-              // Calculate image dimensions to fit nicely in the PDF
-              const maxImageWidth = 200;
-              const maxImageHeight = 150;
-              const imageAspectRatio = image.width / image.height;
-              
-              let drawWidth = maxImageWidth;
-              let drawHeight = maxImageWidth / imageAspectRatio;
-              
-              if (drawHeight > maxImageHeight) {
-                drawHeight = maxImageHeight;
-                drawWidth = maxImageHeight * imageAspectRatio;
-              }
-              
-              imageHeight = drawHeight + 60;
-              
-              // Image Section with border
-              drawSectionBox(30, yPosition + 10, width - 60, imageHeight);
-              const imageTitle = imageBuffers.length > 1 ? `MEDICAL IMAGE ${imgIndex + 1}/${imageBuffers.length}` : 'MEDICAL IMAGE';
-              page.drawText(imageTitle, {
+          } catch (error) {
+            console.error(`Error loading image ${fileName}:`, error);
+          }
+        }
+      }
+      
+      // If no images found yet, try to load from medical image fileName (fallback)
+      if (imageBuffers.length === 0 && medicalImage.fileName) {
+        try {
+          const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), String(patientId));
+          const imagePath = path.join(imagesDir, medicalImage.fileName);
+          if (await fse.pathExists(imagePath)) {
+            const imageBuffer = await fse.readFile(imagePath);
+            const fileExtension = path.extname(medicalImage.fileName).toLowerCase();
+            const converted = await convertImageToSupportedFormat(imageBuffer, fileExtension);
+            imageBuffers.push({
+              ...converted,
+              fileName: medicalImage.fileName
+            });
+          }
+        } catch (error) {
+          console.error('Error loading image from fileName:', error);
+        }
+      }
+      
+      // Embed images into PDF if available - ALL images, properly spaced
+      console.log(`\n📄 PDF EMBEDDING: ========== STARTING PDF EMBEDDING PROCESS ==========`);
+      console.log(`📄 PDF EMBEDDING: medical_image_id: ${imageId}`);
+      console.log(`📄 PDF EMBEDDING: Total images in buffer to embed: ${imageBuffers.length}`);
+      console.log(`📄 PDF EMBEDDING: imageBuffers array type: ${Array.isArray(imageBuffers) ? 'Array' : typeof imageBuffers}`);
+      
+      // embeddedCount is already declared at the top of the function, reset it to 0 for this embedding session
+      embeddedCount = 0;
+      
+      if (imageBuffers.length === 0) {
+        console.error(`\n❌❌❌ CRITICAL ERROR: imageBuffers array is EMPTY!`);
+        console.error(`❌ PDF EMBEDDING: No images were loaded into the buffer.`);
+        console.error(`❌ PDF EMBEDDING: This means either:`);
+        console.error(`❌   1. No rows found in radiology_images table for medical_image_id: ${imageId}`);
+        console.error(`❌   2. Files were not found at the expected paths`);
+        console.error(`❌   3. Files could not be read from the server filesystem`);
+        console.error(`❌ PDF EMBEDDING: Check the logs above for "📷" entries to see what happened.`);
+      }
+      
+      if (imageBuffers.length > 0) {
+        console.log(`📄 PDF EMBEDDING: ✅ Will embed ALL ${imageBuffers.length} image(s) into PDF report (not just the first one)`);
+        console.log(`📄 PDF EMBEDDING: Complete image list to embed:`);
+        imageBuffers.forEach((img, idx) => {
+          console.log(`📄   ${idx + 1}/${imageBuffers.length}. "${img.fileName}" (${img.mimeType}, ${img.buffer.length} bytes)`);
+        });
+        // Add images section title after signature
+        yPosition -= 20;
+        page.drawText('REPRESENTATIVE IMAGES', {
+          x: 40,
+          y: yPosition,
+          size: 12,
+          font: boldFont,
+          color: primaryBlue
+        });
+        yPosition -= 25;
+        
+        // Fixed image size: 200px * 200px (convert to points: 200 * 0.75 = 150 points)
+        const fixedImageSize = 150; // 200px in points (72 DPI = 0.75 conversion factor)
+        const pageMargin = 40;
+        const imageSpacing = 10; // Minimal spacing between images
+        const rowSpacing = 10; // Minimal spacing between rows
+        
+        // Calculate how many images fit per row (2 or 3 depending on page width)
+        const availableWidth = width - (pageMargin * 2);
+        const imagesPerRow = Math.floor((availableWidth + imageSpacing) / (fixedImageSize + imageSpacing));
+        
+        let currentRow = 0;
+        let currentCol = 0;
+        let rowStartY = yPosition; // Track where the current row started
+        
+        // embeddedCount is already declared above, reset it to 0 for this embedding session
+        embeddedCount = 0;
+        console.log(`\n📄 PDF EMBEDDING: Starting loop to embed ${imageBuffers.length} image(s)`);
+        console.log(`📄 PDF EMBEDDING: Fixed image size: ${fixedImageSize} points (200px x 200px)`);
+        console.log(`📄 PDF EMBEDDING: Images per row: ${imagesPerRow}`);
+        console.log(`📄 PDF EMBEDDING: imageBuffers array:`, JSON.stringify(imageBuffers.map(img => ({ fileName: img.fileName, bufferLength: img.buffer.length })), null, 2));
+        
+        for (let i = 0; i < imageBuffers.length; i++) {
+          const imageBuffer = imageBuffers[i];
+          console.log(`\n📄 PDF EMBEDDING [${i + 1}/${imageBuffers.length}]: Starting to embed image "${imageBuffer.fileName}"`);
+          console.log(`📄 PDF EMBEDDING [${i + 1}]: Image buffer size: ${imageBuffer.buffer.length} bytes, mimeType: ${imageBuffer.mimeType}`);
+          
+          // Check if we need a new page (before starting a new row)
+          if (currentCol === 0) {
+            const estimatedRowHeight = fixedImageSize + rowSpacing;
+            if (yPosition - estimatedRowHeight < 50) {
+              console.log(`📄 PDF EMBEDDING [${i + 1}]: Creating new page for image`);
+              // Create new page
+              page = pdfDoc.addPage([595, 842]);
+              // Add footer to the new page
+              addFooterToPage(page);
+              yPosition = height - 40;
+              page.drawText('REPRESENTATIVE IMAGES (continued)', {
                 x: 40,
-                y: yPosition - 5,
+                y: yPosition,
                 size: 12,
                 font: boldFont,
                 color: primaryBlue
               });
-              
-              // Draw the medical image on the right side
-              page.drawImage(image, {
-                x: width - drawWidth - 40, // Right-aligned with 40pt margin
-                y: yPosition - drawHeight - 40,
-                width: drawWidth,
-                height: drawHeight
-              });
-              
-              // Image Series information
-              const fileSize = study.images && study.images[0] && study.images[0].fileSize ? (study.images[0].fileSize / (1024 * 1024)).toFixed(2) : '0.00';
-              const imageSeries = `${study.modality || 'X-Ray'} • ${fileSize} MB • ${currentMimeType.includes('jpeg') ? 'JPEG' : 'PNG'}`;
-              
-              page.drawText(`Image Info: ${imageSeries}`, {
-                x: 50,
-                y: yPosition - imageHeight + 25,
-                size: 9,
-                font,
-                color: darkGray
-              });
-              
-              page.drawText(`Series: ${study.images && study.images[0] ? (study.images[0].seriesDescription || study.studyType || 'N/A') : study.studyType || 'N/A'}`, {
-                x: 50,
-                y: yPosition - imageHeight + 10,
-                size: 9,
-                font,
-                color: darkGray
-              });
-              
-              yPosition -= imageHeight + 10; // Add spacing between images
+              yPosition -= 25;
+              currentRow = 0;
+              currentCol = 0;
+              rowStartY = yPosition;
             }
-          } catch (imageError) {
-            console.error(`📷 SERVER: ❌ Failed to add image ${imgIndex + 1} to PDF after all attempts:`, imageError.message);
-            // Continue with next image if there's an error
+          }
+          
+          try {
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: Attempting to embed ${imageBuffer.mimeType} image (${imageBuffer.buffer.length} bytes)`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: Buffer validation - is Buffer: ${imageBuffer.buffer instanceof Buffer}, length: ${imageBuffer.buffer.length}`);
+            
+            if (!imageBuffer.buffer || imageBuffer.buffer.length === 0) {
+              console.error(`❌ PDF EMBEDDING [${i + 1}]: ERROR - Image buffer is empty or invalid!`);
+              throw new Error(`Image buffer is empty for ${imageBuffer.fileName}`);
+            }
+            
+            // Embed image into PDF document using native PDF library methods
+            let pdfImage;
+            try {
+              // Validate buffer before embedding
+              if (!imageBuffer.buffer || !(imageBuffer.buffer instanceof Buffer)) {
+                throw new Error(`Image buffer is not a valid Buffer instance`);
+              }
+              
+              if (imageBuffer.buffer.length === 0) {
+                throw new Error(`Image buffer is empty (0 bytes)`);
+              }
+              
+              // Embed based on MIME type (PNG or JPEG only)
+              if (imageBuffer.mimeType === 'image/png') {
+                console.log(`📄 PDF EMBEDDING [${i + 1}]: Embedding PNG image (${imageBuffer.buffer.length} bytes)...`);
+                pdfImage = await pdfDoc.embedPng(imageBuffer.buffer);
+                console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅ PNG image embedded successfully`);
+              } else if (imageBuffer.mimeType === 'image/jpeg' || imageBuffer.mimeType === 'image/jpg') {
+                console.log(`📄 PDF EMBEDDING [${i + 1}]: Embedding JPEG image (${imageBuffer.buffer.length} bytes)...`);
+                pdfImage = await pdfDoc.embedJpg(imageBuffer.buffer);
+                console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅ JPEG image embedded successfully`);
+              } else {
+                throw new Error(`Unsupported MIME type: ${imageBuffer.mimeType}. Only PNG and JPEG are supported.`);
+              }
+            } catch (embedError) {
+              console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ FATAL ERROR embedding image:`, embedError);
+              if (embedError instanceof Error) {
+                console.error(`📄 PDF EMBEDDING [${i + 1}]:    Error message: ${embedError.message}`);
+                console.error(`📄 PDF EMBEDDING [${i + 1}]:    File: ${imageBuffer.fileName}`);
+                console.error(`📄 PDF EMBEDDING [${i + 1}]:    MIME type: ${imageBuffer.mimeType}`);
+                console.error(`📄 PDF EMBEDDING [${i + 1}]:    Buffer size: ${imageBuffer.buffer?.length || 0} bytes`);
+              }
+              // Skip this image and continue with next
+              continue;
+            }
+            
+            // Get original image dimensions from embedded PDF image
+            const originalDims = pdfImage.scale(1);
+            const originalWidth = originalDims.width;
+            const originalHeight = originalDims.height;
+            
+            // Validate dimensions
+            if (originalWidth <= 0 || originalHeight <= 0 || !isFinite(originalWidth) || !isFinite(originalHeight)) {
+              console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ Invalid image dimensions: ${originalWidth}x${originalHeight}`);
+              continue; // Skip this image
+            }
+            
+            // Calculate scale to fit within 200x200px box while maintaining aspect ratio (no stretching)
+            const scaleX = fixedImageSize / originalWidth;
+            const scaleY = fixedImageSize / originalHeight;
+            const scale = Math.min(scaleX, scaleY); // Use smaller scale to fit within box
+            
+            // Calculate final dimensions (maintain aspect ratio, no stretching)
+            // Explicitly define width and height as required
+            const finalWidth = originalWidth * scale;
+            const finalHeight = originalHeight * scale;
+            
+            // Validate final dimensions
+            if (finalWidth <= 0 || finalHeight <= 0 || !isFinite(finalWidth) || !isFinite(finalHeight)) {
+              console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ Invalid calculated dimensions: ${finalWidth}x${finalHeight}`);
+              continue; // Skip this image
+            }
+            
+            // Center the image within the 200x200px box
+            const offsetX = (fixedImageSize - finalWidth) / 2;
+            const offsetY = (fixedImageSize - finalHeight) / 2;
+            
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: Image dimensions:`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]:    Original: ${originalWidth.toFixed(2)} x ${originalHeight.toFixed(2)} points`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]:    Final (scaled): ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)} points`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]:    Scale factor: ${scale.toFixed(3)}`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]:    Centering offsets: ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)}`);
+            
+            // Calculate position - ensure no overlap
+            const xPos = pageMargin + currentCol * (fixedImageSize + imageSpacing) + offsetX;
+            let yPos = rowStartY - fixedImageSize + offsetY; // Top of the 200x200 box
+            
+            // Validate yPosition is within page bounds (must be positive and not too low)
+            if (yPos < 50) {
+              console.warn(`📄 PDF EMBEDDING [${i + 1}]: ⚠️ yPosition (${yPos.toFixed(2)}) is too low, creating new page`);
+              // Create new page if position is too low
+              page = pdfDoc.addPage([595, 842]);
+              // Add footer to the new page
+              addFooterToPage(page);
+              yPosition = height - 40;
+              page.drawText('REPRESENTATIVE IMAGES (continued)', {
+                x: 40,
+                y: yPosition,
+                size: 12,
+                font: boldFont,
+                color: primaryBlue
+              });
+              yPosition -= 25;
+              currentRow = 0;
+              currentCol = 0;
+              rowStartY = yPosition;
+              yPos = rowStartY - fixedImageSize + offsetY; // Recalculate for new page
+            }
+            
+            // Ensure xPos is within page bounds
+            if (xPos < 0 || xPos + finalWidth > width) {
+              console.warn(`📄 PDF EMBEDDING [${i + 1}]: ⚠️ xPosition (${xPos.toFixed(2)}) is out of bounds, adjusting`);
+              // Adjust xPos to fit within page
+              const adjustedXPos = Math.max(pageMargin, Math.min(xPos, width - finalWidth - pageMargin));
+              console.log(`📄 PDF EMBEDDING [${i + 1}]: Adjusted xPosition from ${xPos.toFixed(2)} to ${adjustedXPos.toFixed(2)}`);
+            }
+            
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: Drawing image at position (${xPos.toFixed(2)}, ${yPos.toFixed(2)})`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: Page dimensions: ${width} x ${height}, Image will be at (${xPos.toFixed(2)}, ${yPos.toFixed(2)}) with size ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)}`);
+            
+            // Draw image with explicitly defined width and height (required)
+            try {
+              page.drawImage(pdfImage, {
+                x: xPos,
+                y: yPos,
+                width: finalWidth,   // Explicit width
+                height: finalHeight, // Explicit height
+              });
+              console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅ Image drawn successfully on PDF page`);
+              console.log(`📄 PDF EMBEDDING [${i + 1}]:    Position: (${xPos.toFixed(2)}, ${yPos.toFixed(2)})`);
+              console.log(`📄 PDF EMBEDDING [${i + 1}]:    Size: ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)} points`);
+            } catch (drawError) {
+              console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ FATAL ERROR drawing image on PDF page:`, drawError);
+              if (drawError instanceof Error) {
+                console.error(`📄 PDF EMBEDDING [${i + 1}]:    Error message: ${drawError.message}`);
+                console.error(`📄 PDF EMBEDDING [${i + 1}]:    Error stack: ${drawError.stack}`);
+              }
+              // Skip this image and continue with next
+              continue;
+            }
+            
+            embeddedCount++;
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅✅✅ COMPLETE SUCCESS - Image "${imageBuffer.fileName}" embedded and drawn on PDF`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: Progress: ${embeddedCount}/${imageBuffers.length} images embedded so far`);
+            console.log(`📄 PDF EMBEDDING [${i + 1}]: ========== COMPLETED IMAGE ${i + 1} ==========`);
+            
+            // Move to next column
+            currentCol++;
+            
+            // Move to next row if needed
+            if (currentCol >= imagesPerRow) {
+              currentCol = 0;
+              currentRow++;
+              // Move yPosition down by fixed image size plus spacing (no extra space)
+              yPosition = rowStartY - (fixedImageSize + rowSpacing);
+              rowStartY = yPosition; // Update row start position for next row
+            }
+            
+            if (i === 0) {
+              imageHeight = fixedImageSize + 40;
+            }
+          } catch (error) {
+            console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ ERROR embedding image "${imageBuffer.fileName}":`, error);
+            if (error instanceof Error) {
+              console.error(`📄 PDF EMBEDDING [${i + 1}]:    Error message: ${error.message}`);
+              console.error(`📄 PDF EMBEDDING [${i + 1}]:    Error stack: ${error.stack}`);
+            }
           }
         }
-      }
-      
-      // Professional Footer using clinic_footers data
-      const footerY = 60;
-      drawSectionBox(30, footerY + 5, width - 60, 40);
-      
-      if (clinicFooter?.footerText) {
-        // Use footer text from clinic_footers
-        const footerText = clinicFooter.footerText;
-        const footerTextWidth = font.widthOfTextAtSize(footerText, 9);
-        page.drawText(footerText, {
-          x: width / 2 - footerTextWidth / 2,
-          y: footerY - 15,
-          size: 9,
-          font,
-          color: darkGray
-        });
+        
+        console.log(`\n📄 PDF EMBEDDING SUMMARY: Successfully embedded ${embeddedCount} out of ${imageBuffers.length} image(s) into PDF`);
+        
+        // Adjust yPosition for remaining images in the last row (no extra space)
+        if (currentCol > 0) {
+          yPosition = rowStartY - (fixedImageSize + rowSpacing);
+        } else if (currentRow > 0) {
+          // If we completed a full row, position is already correct
+          yPosition = rowStartY;
+        }
+        
+        console.log(`\n✅ PDF REPORT FINAL SUMMARY for medical_image_id: ${imageId}:`);
+        console.log(`✅ PDF REPORT: Successfully embedded ${embeddedCount} image(s) into PDF report`);
+        console.log(`📷 PDF REPORT: Images were loaded from radiology_images table using file_path column`);
+        console.log(`📦 PDF REPORT: Total images in buffer: ${imageBuffers.length}`);
+        console.log(`📄 PDF REPORT: Total images embedded in PDF: ${embeddedCount}`);
+        console.log(`📊 PDF REPORT: Database rows found: ${radiologyImagesCount}, Images loaded: ${imageBuffers.length}, Images embedded: ${embeddedCount}`);
+        
+        if (embeddedCount < imageBuffers.length) {
+          console.warn(`⚠️ PDF REPORT: WARNING - Some images in buffer were not embedded (${imageBuffers.length - embeddedCount} skipped)`);
+        }
+        
+        if (radiologyImagesCount > embeddedCount) {
+          console.warn(`⚠️ PDF REPORT: WARNING - Not all database rows were embedded (${radiologyImagesCount} rows found, ${embeddedCount} embedded)`);
+        } else if (radiologyImagesCount === embeddedCount && embeddedCount > 0) {
+          console.log(`✅ PDF REPORT: SUCCESS - All ${radiologyImagesCount} row(s) from radiology_images table were successfully embedded into PDF`);
+        }
       } else {
-        // Fallback footer
-        page.drawText('CURA MEDICAL CENTER - DEPARTMENT OF RADIOLOGY', {
-          x: width / 2 - 120,
-          y: footerY - 8,
-          size: 10,
+        console.warn(`⚠️ PDF REPORT: No images found to embed in PDF report. Checked:`);
+        console.warn(`   - PRIMARY: radiology_images table (medical_image_id: ${imageId}) - ${radiologyImagesCount} records found`);
+        console.warn(`   - SECONDARY: radiologyImagePaths from frontend: ${radiologyImagePaths?.length || 0} paths`);
+        console.warn(`   - FALLBACK: uploadedImageFileNames: ${uploadedImageFileNames?.length || 0} files`);
+        console.warn(`   - FALLBACK: medicalImage.fileName: ${medicalImage.fileName || 'N/A'}`);
+        
+        // Add a message in the PDF indicating no images were found
+        yPosition -= 20;
+        page.drawText('REPRESENTATIVE IMAGES', {
+          x: 40,
+          y: yPosition,
+          size: 12,
           font: boldFont,
           color: primaryBlue
         });
-        
-        page.drawText('Tel: +44-123-456-7890  |  Email: radiology@curamedical.com  |  Web: www.curamedical.com', {
-          x: width / 2 - 140,
-          y: footerY - 22,
-          size: 8,
+        yPosition -= 25;
+        page.drawText('No images available for this study.', {
+          x: 50,
+          y: yPosition,
+          size: 10,
           font,
-          color: darkGray
+          color: rgb(0.5, 0.5, 0.5) // Gray color
         });
       }
       
-      // Confidentiality notice
-      page.drawText('WARNING: CONFIDENTIAL MEDICAL REPORT - Authorized Personnel Only', {
-        x: width / 2 - 130,
-        y: 15,
-        size: 8,
-        font: boldFont,
-        color: rgb(0.8, 0, 0)
-      });
-      
-      // Generate PDF bytes
-      let pdfBytes = await pdfDoc.save();
-      
-      // Save PDF to disk
-      const outputPath = path.join(reportsDir, `${reportId}.pdf`);
-      await fse.outputFile(outputPath, pdfBytes);
-      
-      console.log(`PDF report generated and saved: ${outputPath}`);
-      
-      // Save report file information to database
-      const reportFileName = `${reportId}.pdf`;
-      const reportFilePath = outputPath;
-      
-      if (req.organizationId && study.id) {
-        try {
-          await storage.updateMedicalImageReport(study.id, req.tenant!.id, {
-            reportFileName,
-            reportFilePath,
-            findings: reportFormData?.findings || null,
-            impression: reportFormData?.impression || null,
-            radiologist: reportFormData?.radiologist || null,
-            scheduledAt: reportFormData?.scheduledAt || null,
-            performedAt: reportFormData?.performedAt || null
-          });
-          console.log(`Report file information saved to database for study ID: ${study.id}`);
-        } catch (dbError) {
-          console.error("Failed to save report info to database:", dbError);
-          // Continue without failing the response since PDF was generated successfully
+      // Add footer to all pages if available
+      if (clinicFooter) {
+        const pageCount = pdfDoc.getPageCount();
+        for (let i = 0; i < pageCount; i++) {
+          const currentPage = pdfDoc.getPage(i);
+          addFooterToPage(currentPage);
         }
       }
       
+      // Save PDF to file
+      console.log(`\n💾 PDF SAVE: Starting to save PDF document...`);
+      console.log(`💾 PDF SAVE: PDF document has ${pdfDoc.getPageCount()} page(s)`);
+      console.log(`💾 PDF SAVE: Total images embedded: ${embeddedCount}`);
+      const pdfBytes = await pdfDoc.save();
+      console.log(`💾 PDF SAVE: PDF document saved to bytes, size: ${pdfBytes.length} bytes`);
+      const timestamp = Date.now();
+      const pdfFileName = `${reportId}_${timestamp}.pdf`;
+      const pdfFilePath = path.join(reportsDir, pdfFileName);
+      
+      console.log(`💾 PDF SAVE: Writing PDF file to: "${pdfFilePath}"`);
+      console.log(`💾 PDF SAVE: File will contain ${embeddedCount} embedded image(s)`);
+      await fse.outputFile(pdfFilePath, pdfBytes);
+      
+      // Verify file was written
+      const fileExists = await fse.pathExists(pdfFilePath);
+      if (fileExists) {
+        try {
+          const stats = await stat(pdfFilePath);
+          console.log(`✅ PDF SAVE: PDF report successfully saved to: ${pdfFilePath}`);
+          console.log(`✅ PDF SAVE: File size: ${stats.size} bytes`);
+          console.log(`✅ PDF SAVE: File contains ${embeddedCount} embedded image(s) from radiology_images table`);
+        } catch (statError) {
+          console.error(`❌ PDF SAVE: Error getting file stats:`, statError);
+          console.log(`✅ PDF SAVE: PDF report saved to: ${pdfFilePath} (could not get file stats)`);
+        }
+      } else {
+        console.error(`❌ PDF SAVE: ERROR - File was not written successfully! Path: ${pdfFilePath}`);
+      }
+      
+      // Update database with report filename and path
+      const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${pdfFileName}`;
+      await storage.updateMedicalImageReport(imageId, organizationId, {
+        reportFileName: pdfFileName,
+        reportFilePath: relativePath,
+        findings: reportFormData?.findings || medicalImage.findings || null,
+        impression: reportFormData?.impression || medicalImage.impression || null,
+        radiologist: reportFormData?.radiologist || medicalImage.radiologist || null,
+        scheduledAt: reportFormData?.scheduledAt || medicalImage.scheduledAt?.toISOString() || null,
+        performedAt: reportFormData?.performedAt || medicalImage.performedAt?.toISOString() || null,
+      });
+      
+      // Return success response
       res.json({
         success: true,
-        reportId: reportId,
-        fileName: reportFileName,
-        filePath: reportFilePath,
+        reportId,
+        fileName: pdfFileName,
+        filePath: pdfFilePath,
         message: "PDF report generated successfully"
       });
-
     } catch (error) {
-      console.error("PDF generation error:", error);
-      res.status(500).json({ error: "Failed to generate PDF report" });
+      console.error("Error generating PDF report:", error);
+      res.status(500).json({ 
+        error: "Failed to generate PDF report",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
   // Generate Image Prescription PDF Endpoint
   app.post("/api/imaging/generate-image-prescription", authMiddleware, requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
-      console.log("IMAGE PRESCRIPTION: Starting generation...");
-      
       if (!req.user) {
-        console.log("IMAGE PRESCRIPTION: User not authenticated");
         return res.status(401).json({ error: "User not authenticated" });
       }
 
       const { imageId } = req.body;
-      console.log("IMAGE PRESCRIPTION: Received imageId:", imageId);
       
       if (!imageId) {
-        console.log("IMAGE PRESCRIPTION: Image ID is required");
-        return res.status(400).json({ error: "Image ID is required" });
+        return res.status(400).json({ error: "imageId is required" });
       }
 
-      const organizationId = req.organizationId || req.tenant!.id;
-      console.log("IMAGE PRESCRIPTION: Organization ID:", organizationId);
-
-      // Fetch medical image data by imageId
-      console.log("IMAGE PRESCRIPTION: Fetching medical images...");
-      const medicalImages = await storage.getMedicalImagesByOrganization(req.tenant!.id);
-      console.log("IMAGE PRESCRIPTION: Found medical images:", medicalImages.length);
-      
-      const medicalImage = medicalImages.find(img => img.imageId === imageId);
-      console.log("IMAGE PRESCRIPTION: Found medical image:", medicalImage ? "YES" : "NO");
-      console.log("IMAGE PRESCRIPTION: Has signature from DB:", !!(medicalImage?.signatureData));
-      if (medicalImage?.signatureData) {
-        console.log("IMAGE PRESCRIPTION: Signature data length:", medicalImage.signatureData.length);
-        console.log("IMAGE PRESCRIPTION: Signature data preview:", medicalImage.signatureData.substring(0, 50) + "...");
+      // Parse imageId - it should be a numeric database ID
+      const imageIdNum = parseInt(String(imageId), 10);
+      if (isNaN(imageIdNum)) {
+        return res.status(400).json({ error: "Invalid imageId. Expected a numeric ID." });
       }
-      
+
+      // Get the medical image from database
+      const medicalImage = await storage.getMedicalImage(imageIdNum, req.tenant!.id);
       if (!medicalImage) {
-        console.log("IMAGE PRESCRIPTION: Medical image not found for imageId:", imageId);
-        console.log("Available imageIds:", medicalImages.map(img => img.imageId));
         return res.status(404).json({ error: "Medical image not found" });
       }
 
-      // Fetch clinic headers
-      const clinicHeaders = await db
-        .select()
-        .from(schema.clinicHeaders)
-        .where(eq(schema.clinicHeaders.organizationId, organizationId))
-        .limit(1);
-      
-      const headerData = clinicHeaders[0] || null;
-
-      // Fetch clinic footers
-      const clinicFooters = await db
-        .select()
-        .from(schema.clinicFooters)
-        .where(eq(schema.clinicFooters.organizationId, organizationId))
-        .limit(1);
-      
-      const footerData = clinicFooters[0] || null;
-
-      // Fetch patient data
+      // Get patient information
       const patient = await storage.getPatient(medicalImage.patientId, req.tenant!.id);
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
 
+      const organizationId = req.organizationId || req.tenant!.id;
+      
       // Save PDF in organizational structure: uploads/Image_Prescriptions/organization_id/patients/patient_id/
       const prescriptionsDir = path.resolve(process.cwd(), 'uploads', 'Image_Prescriptions', String(organizationId), 'patients', String(medicalImage.patientId));
       await fse.ensureDir(prescriptionsDir);
       
+      // Fetch clinic headers and footers from database
+      const clinicHeader = await storage.getActiveClinicHeader(organizationId);
+      const clinicFooter = await storage.getActiveClinicFooter(organizationId);
+      
+      // Get organization information
+      const organization = await storage.getOrganization(organizationId);
+      
+      // Helper function to safely format values (prevent [object Object])
+      const safeFormat = (value: any): string => {
+        if (value === null || value === undefined || value === '') {
+          return 'N/A';
+        }
+        if (typeof value === 'object') {
+          // If it's an object, try to extract meaningful data
+          if (value.toString && value.toString() !== '[object Object]') {
+            return value.toString();
+          }
+          // If it has common properties, try those
+          if (value.name) return String(value.name);
+          if (value.value) return String(value.value);
+          if (value.text) return String(value.text);
+          return 'N/A';
+        }
+        return String(value);
+      };
+      
+      // Calculate patient age from DOB
+      const calculateAge = (dob: Date | string | null): string => {
+        if (!dob) return 'N/A';
+        try {
+          const birthDate = new Date(dob);
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          return String(age);
+        } catch {
+          return 'N/A';
+        }
+      };
+      
+      // Format date for display
+      const formatDate = (date: Date | string | null): string => {
+        if (!date) return 'N/A';
+        try {
+          const d = new Date(date);
+          const day = d.getDate().toString().padStart(2, '0');
+          const month = (d.getMonth() + 1).toString().padStart(2, '0');
+          const year = d.getFullYear();
+          return `${day}/${month}/${year}`;
+        } catch {
+          return 'N/A';
+        }
+      };
+      
+      // Format date with time
+      const formatDateTime = (date: Date | string | null): string => {
+        if (!date) {
+          const now = new Date();
+          const day = now.getDate().toString().padStart(2, '0');
+          const month = (now.getMonth() + 1).toString().padStart(2, '0');
+          const year = now.getFullYear();
+          const hours = now.getHours().toString().padStart(2, '0');
+          const minutes = now.getMinutes().toString().padStart(2, '0');
+          const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
+          const displayHours = now.getHours() % 12 || 12;
+          return `${day}/${month}/${year}, ${displayHours}:${minutes} ${ampm}`;
+        }
+        try {
+          const d = new Date(date);
+          const day = d.getDate().toString().padStart(2, '0');
+          const month = (d.getMonth() + 1).toString().padStart(2, '0');
+          const year = d.getFullYear();
+          const hours = d.getHours().toString().padStart(2, '0');
+          const minutes = d.getMinutes().toString().padStart(2, '0');
+          const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+          const displayHours = d.getHours() % 12 || 12;
+          return `${day}/${month}/${year}, ${displayHours}:${minutes} ${ampm}`;
+        } catch {
+          return 'N/A';
+        }
+      };
+      
       // Import pdf-lib dynamically
       const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
       
-      // Helper function to sanitize text for WinAnsi encoding (PDF standard fonts)
-      const sanitizeText = (text: string | null | undefined): string => {
-        if (!text) return '';
-        return text
-          .replace(/\u2011/g, '-')  // Non-breaking hyphen to regular hyphen
-          .replace(/\u2010/g, '-')  // Hyphen to regular hyphen
-          .replace(/\u2012/g, '-')  // Figure dash to hyphen
-          .replace(/\u2013/g, '-')  // En dash to hyphen
-          .replace(/\u2014/g, '-')  // Em dash to hyphen
-          .replace(/\u2015/g, '-')  // Horizontal bar to hyphen
-          .replace(/\u2018/g, "'")  // Left single quote
-          .replace(/\u2019/g, "'")  // Right single quote
-          .replace(/\u201C/g, '"')  // Left double quote
-          .replace(/\u201D/g, '"')  // Right double quote
-          .replace(/\u2026/g, '...') // Ellipsis
-          .replace(/\u00A0/g, ' ')  // Non-breaking space
-          .replace(/[^\x00-\xFF]/g, ''); // Remove any other non-Latin1 chars
-      };
-      
       // Create a new PDF document
       const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595, 842]); // A4 size in points
+      let page = pdfDoc.addPage([595, 842]); // A4 size in points
       const { width, height } = page.getSize();
       
       // Load fonts
@@ -23723,614 +26799,567 @@ Cura EMR Team
       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
       
       // Colors
-      const primaryBlue = rgb(0.27, 0.51, 0.71); // #4583B6
-      const darkText = rgb(0.2, 0.2, 0.2);
-      const lightGray = rgb(0.9, 0.9, 0.9);
-      const yellowBg = rgb(1, 0.98, 0.8); // Light yellow for clinical notes
-      const redBg = rgb(1, 0.95, 0.95); // Light red for critical alert
-      const greenText = rgb(0.2, 0.6, 0.2); // Green for COMPLETED
-      const redText = rgb(0.8, 0.2, 0.2); // Red for ABNORMAL
-      const orangeText = rgb(1, 0.5, 0); // Orange for warnings
+      const primaryBlue = rgb(0.12, 0.23, 0.54); // #1e3a8a
+      const darkGray = rgb(0.3, 0.3, 0.3);
+      const blackColor = rgb(0, 0, 0);
+      const greenColor = rgb(0, 0.6, 0);
       
       // Position tracker
       let yPosition = height - 40;
       
-      // TOP ROW: Date/Time | Logo (center) | ACTIVE
-      const currentDate = new Date();
+      // Generate prescription ID
+      const prescriptionId = `RX-${medicalImage.imageId}ORDERORDER`;
+      const currentDateTime = formatDateTime(null); // Current date/time
       
-      // TOP LEFT: Date and time
-      page.drawText(`${currentDate.toLocaleDateString()}, ${currentDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`, {
+      // Top header row: Date/Time (left), Prescription ID (center), ACTIVE (right)
+      page.drawText(currentDateTime, {
         x: 40,
         y: yPosition,
-        size: 8,
+        size: 10,
         font,
-        color: darkText
+        color: blackColor
       });
       
-      // Prescription number moved to center
-      page.drawText(`Prescription #: RX-${medicalImage.imageId}ORDER`, {
-        x: width / 2 - 60,
+      // Prescription ID in center
+      const prescriptionIdWidth = boldFont.widthOfTextAtSize(prescriptionId, 10);
+      page.drawText(prescriptionId, {
+        x: width / 2 - prescriptionIdWidth / 2,
         y: yPosition,
-        size: 7,
-        font,
-        color: darkText
+        size: 10,
+        font: boldFont,
+        color: blackColor
       });
       
-      // TOP RIGHT: ACTIVE status
+      // ACTIVE status on right
+      const activeWidth = boldFont.widthOfTextAtSize('ACTIVE', 10);
       page.drawText('ACTIVE', {
-        x: width - 80,
+        x: width - 40 - activeWidth,
         y: yPosition,
-        size: 9,
+        size: 10,
         font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 70;
-      
-      // CURA HEALTH EMR header (left side, below logo row)
-      page.drawText('CURA HEALTH EMR', {
-        x: 40,
-        y: yPosition,
-        size: 11,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 12;
-      
-      page.drawText(`Prescription #: RX-${medicalImage.imageId}ORDER`, {
-        x: 40,
-        y: yPosition,
-        size: 8,
-        font,
-        color: rgb(0.5, 0.5, 0.5)
+        color: greenColor
       });
       
       yPosition -= 30;
       
-      // TWO COLUMNS: Left column (logo), Right column (clinic info)
-      const leftColX = 50;
-      const rightColX = 180;
-      let leftColY = yPosition;
-      let rightColY = yPosition;
+      // Main title: CURA HEALTH EMR (centered)
+      const titleWidth = boldFont.widthOfTextAtSize('CURA HEALTH EMR', 18);
+      page.drawText('CURA HEALTH EMR', {
+        x: width / 2 - titleWidth / 2,
+        y: yPosition,
+        size: 18,
+        font: boldFont,
+        color: blackColor
+      });
       
-      // Calculate header section height first to match logo
-      const headerHeight = 16 + 14 + 10 + 10 + 10; // clinic name + address + phone + email + website spacing
+      yPosition -= 25;
       
-      // LEFT COLUMN: Small Logo (sized to match header height)
-      if (headerData?.logoBase64) {
+      // Prescription ID repeated below title (centered)
+      const prescriptionIdText = `Prescription #: ${prescriptionId}`;
+      const prescriptionIdWidth2 = font.widthOfTextAtSize(prescriptionIdText, 10);
+      page.drawText(prescriptionIdText, {
+        x: width / 2 - prescriptionIdWidth2 / 2,
+        y: yPosition,
+        size: 10,
+        font,
+        color: blackColor
+      });
+      
+      yPosition -= 50;
+      
+      // Header section with logo/icon on left and clinic details on right - centered on page
+      const headerStartY = yPosition;
+      let headerY = headerStartY;
+      
+      // Logo/Icon dimensions
+      const logoSize = 60; // Logo size in points
+      const logoSpacing = 15; // Space between logo and text
+      
+      // Calculate header content width (logo + spacing + text)
+      const headerContentWidth = logoSize + logoSpacing + 200; // Approximate text width
+      const headerStartX = width / 2 - headerContentWidth / 2; // Center the entire header block
+      
+      // Draw logo/icon on the left side if available
+      let logoX = headerStartX;
+      if (clinicHeader?.logoBase64) {
         try {
-          const logoData = headerData.logoBase64.replace(/^data:image\/\w+;base64,/, '');
-          const logoBytes = Buffer.from(logoData, 'base64');
+          // Remove data URL prefix if present
+          const base64Data = clinicHeader.logoBase64.includes(',') 
+            ? clinicHeader.logoBase64.split(',')[1] 
+            : clinicHeader.logoBase64;
+          const logoBuffer = Buffer.from(base64Data, 'base64');
           
+          // Try to embed logo as PNG first, then JPEG
           let logoImage;
-          if (headerData.logoBase64.includes('image/png')) {
-            logoImage = await pdfDoc.embedPng(logoBytes);
-          } else {
-            logoImage = await pdfDoc.embedJpg(logoBytes);
+          try {
+            logoImage = await pdfDoc.embedPng(logoBuffer);
+          } catch {
+            try {
+              logoImage = await pdfDoc.embedJpg(logoBuffer);
+            } catch (error) {
+              console.error('Failed to embed logo:', error);
+            }
           }
           
-          // Scale logo to match header height (approximately 60 points)
-          const targetLogoHeight = 60;
-          const logoAspectRatio = logoImage.width / logoImage.height;
-          const logoWidth = targetLogoHeight * logoAspectRatio;
-          
-          leftColY = yPosition - targetLogoHeight;
-          
-          page.drawImage(logoImage, {
-            x: leftColX,
-            y: leftColY,
-            width: logoWidth,
-            height: targetLogoHeight
-          });
-        } catch (logoError) {
-          console.error('Failed to embed logo:', logoError);
+          if (logoImage) {
+            const logoDims = logoImage.scale(1);
+            const logoScale = Math.min(logoSize / logoDims.width, logoSize / logoDims.height);
+            const logoWidth = logoDims.width * logoScale;
+            const logoHeight = logoDims.height * logoScale;
+            
+            // Draw logo - adjust Y position to align with text
+            const logoY = headerY - logoHeight;
+            page.drawImage(logoImage, {
+              x: logoX,
+              y: logoY,
+              width: logoWidth,
+              height: logoHeight,
+            });
+          }
+        } catch (error) {
+          console.error('Error processing logo:', error);
         }
       }
       
-      // RIGHT COLUMN: Clinic Information
-      const clinicName = sanitizeText(headerData?.clinicName) || 'Clinical Care Hospital';
-      page.drawText(clinicName, {
-        x: rightColX,
-        y: rightColY,
-        size: 16,
+      // Clinic details on the right side of logo
+      const clinicDetailsX = logoX + logoSize + logoSpacing;
+      let clinicDetailsY = headerY;
+      
+      const orgName = safeFormat(clinicHeader?.clinicName || organization?.name || organization?.brandName || 'CURA HEALTH EMR');
+      page.drawText(orgName, {
+        x: clinicDetailsX,
+        y: clinicDetailsY,
+        size: 12,
         font: boldFont,
-        color: darkText
+        color: blackColor
       });
+      clinicDetailsY -= 15;
       
-      rightColY -= 14;
+      const orgAddress = safeFormat(clinicHeader?.address || '');
+      if (orgAddress !== 'N/A') {
+        page.drawText(orgAddress, {
+          x: clinicDetailsX,
+          y: clinicDetailsY,
+          size: 9,
+          font,
+          color: blackColor
+        });
+        clinicDetailsY -= 12;
+      }
       
-      const clinicAddress = sanitizeText(headerData?.address) || 'house 33';
-      page.drawText(clinicAddress, {
-        x: rightColX,
-        y: rightColY,
-        size: 8,
-        font,
-        color: darkText
-      });
+      const orgPhone = safeFormat(clinicHeader?.phone || '');
+      if (orgPhone !== 'N/A') {
+        page.drawText(orgPhone, {
+          x: clinicDetailsX,
+          y: clinicDetailsY,
+          size: 9,
+          font,
+          color: blackColor
+        });
+        clinicDetailsY -= 12;
+      }
       
-      rightColY -= 10;
+      const orgEmail = safeFormat(clinicHeader?.email || '');
+      if (orgEmail !== 'N/A') {
+        page.drawText(orgEmail, {
+          x: clinicDetailsX,
+          y: clinicDetailsY,
+          size: 9,
+          font,
+          color: blackColor
+        });
+        clinicDetailsY -= 12;
+      }
       
-      const clinicPhone = sanitizeText(headerData?.phone) || '+923213213213';
-      page.drawText(clinicPhone, {
-        x: rightColX,
-        y: rightColY,
-        size: 8,
-        font,
-        color: darkText
-      });
+      const orgWebsite = safeFormat(clinicHeader?.website || '');
+      if (orgWebsite !== 'N/A') {
+        page.drawText(orgWebsite, {
+          x: clinicDetailsX,
+          y: clinicDetailsY,
+          size: 9,
+          font,
+          color: blackColor
+        });
+        clinicDetailsY -= 12;
+      }
       
-      rightColY -= 10;
+      // Update yPosition to be below the header section
+      yPosition = Math.min(clinicDetailsY, headerY - logoSize) - 30;
       
-      const clinicEmail = sanitizeText(headerData?.email) || 'averox71@gmail.com';
-      page.drawText(clinicEmail, {
-        x: rightColX,
-        y: rightColY,
-        size: 8,
-        font,
-        color: darkText
-      });
+      // Patient Information in two columns
+      const leftColumnX = 40;
+      const rightColumnX = width / 2 + 20;
+      const sectionsStartY = yPosition;
       
-      rightColY -= 10;
+      // Left column: Name, Address, Gender, Weight
+      let leftY = sectionsStartY;
+      const patientName = safeFormat(`${patient.firstName || ''} ${patient.lastName || ''}`.trim() || 'N/A');
+      page.drawText(`Name: ${patientName}`, { x: leftColumnX, y: leftY, size: 10, font });
+      leftY -= 15;
       
-      const clinicWebsite = sanitizeText(headerData?.website) || 'website: www.clinicalcare.com';
-      page.drawText(clinicWebsite, {
-        x: rightColX,
-        y: rightColY,
-        size: 8,
-        font,
-        color: darkText
-      });
+      const patientAddress = safeFormat(patient.address || patient.streetAddress || '');
+      page.drawText(`Address: ${patientAddress}`, { x: leftColumnX, y: leftY, size: 10, font });
+      leftY -= 15;
       
-      // Use the lower of left column (logo) or right column (clinic info) bottom to ensure no overlap
-      yPosition = Math.min(leftColY, rightColY) - 30;
+      const patientGender = safeFormat(patient.gender || patient.sex || '');
+      page.drawText(`Gender: ${patientGender}`, { x: leftColumnX, y: leftY, size: 10, font });
+      leftY -= 15;
       
-      // PATIENT INFORMATION SECTION (TWO COLUMNS)
-      const leftColumnX = 60;
-      const rightColumnX = 310;
+      const patientWeight = safeFormat(patient.weight || '');
+      const weightDisplay = (patientWeight === '-' || patientWeight === '' || patientWeight === 'N/A') ? 'N/A' : patientWeight;
+      page.drawText(`Weight: ${weightDisplay}`, { x: leftColumnX, y: leftY, size: 10, font });
       
-      // Left Column
-      page.drawText(`Name: ${sanitizeText(patient.firstName)} ${sanitizeText(patient.lastName)}`, {
-        x: leftColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
+      // Right column: DOB, Age, Sex, Date
+      let rightY = sectionsStartY;
+      const dob = formatDate(patient.dateOfBirth);
+      page.drawText(`DOB: ${dob}`, { x: rightColumnX, y: rightY, size: 10, font });
+      rightY -= 15;
       
-      // Right Column
-      const age = patient.dateOfBirth 
-        ? Math.floor((new Date().getTime() - new Date(patient.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365))
-        : 0;
+      const age = calculateAge(patient.dateOfBirth);
+      page.drawText(`Age: ${age}`, { x: rightColumnX, y: rightY, size: 10, font });
+      rightY -= 15;
       
-      page.drawText(`DOB: ${patient.dateOfBirth ? new Date(patient.dateOfBirth).toLocaleDateString() : '11th Sept 2015'}`, {
-        x: rightColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
+      const sexValue = safeFormat(patient.sex || patient.gender || '');
+      // Fix "No: N/A" issue - if it contains "No:", remove it
+      const sex = sexValue.includes('No:') ? 'N/A' : sexValue;
+      page.drawText(`Sex: ${sex}`, { x: rightColumnX, y: rightY, size: 10, font });
+      rightY -= 15;
       
-      yPosition -= 14;
+      const reportDate = formatDate(medicalImage.performedAt || medicalImage.scheduledAt || medicalImage.createdAt || new Date());
+      page.drawText(`Date: ${reportDate}`, { x: rightColumnX, y: rightY, size: 10, font });
       
-      // Address on left
-      page.drawText(sanitizeText(`Address: ${patient.address || 'House 33, Birmingham, West Midlands, B33 8TH, United Kingdom'}`).substring(0, 50), {
-        x: leftColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
+      // Calculate the lowest point of the two columns
+      const lowestY = Math.min(leftY, rightY);
+      yPosition = lowestY - 30; // Add spacing after patient info
       
-      // Age on right
-      page.drawText(`Age: ${age}`, {
-        x: rightColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
+      // Provider Information
+      yPosition -= 10;
+      const providerName = safeFormat(medicalImage.radiologist || '');
+      if (medicalImage.uploadedBy && !medicalImage.radiologist) {
+        try {
+          const uploadedByUser = await storage.getUser(medicalImage.uploadedBy, organizationId);
+          if (uploadedByUser) {
+            const provider = `${uploadedByUser.firstName} ${uploadedByUser.lastName}`;
+            page.drawText(`Provider: ${provider}`, { 
+              x: leftColumnX, 
+              y: yPosition, 
+              size: 10, 
+              font,
+              color: blackColor
+            });
+          } else {
+            page.drawText(`Provider: N/A`, { 
+              x: leftColumnX, 
+              y: yPosition, 
+              size: 10, 
+              font,
+              color: blackColor
+            });
+          }
+        } catch (error) {
+          page.drawText(`Provider: N/A`, { 
+            x: leftColumnX, 
+            y: yPosition, 
+            size: 10, 
+            font,
+            color: blackColor
+          });
+        }
+      } else if (providerName !== 'N/A') {
+        page.drawText(`Provider: ${providerName}`, { 
+          x: leftColumnX, 
+          y: yPosition, 
+          size: 10, 
+          font,
+          color: blackColor
+        });
+      } else {
+        page.drawText(`Provider: N/A`, { 
+          x: leftColumnX, 
+          y: yPosition, 
+          size: 10, 
+          font,
+          color: blackColor
+        });
+      }
       
-      yPosition -= 14;
+      yPosition -= 25; // Add spacing after Provider
       
-      // Gender on left
-      page.drawText(`Gender: ${sanitizeText(patient.gender) || 'N/A'}`, {
-        x: leftColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      // Sex on right
-      page.drawText(`Sex: No: ${sanitizeText(patient.nhsNumber) || 'N/A'}`, {
-        x: rightColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 14;
-      
-      // Weight on left
-      page.drawText(`Weight: ${sanitizeText(patient.weight) || '-'}`, {
-        x: leftColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      // Date on right
-      page.drawText(`Date: ${currentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, ' ')}`, {
-        x: rightColumnX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 35;
-      
-      // PROVIDER SECTION (Blue left border)
-      page.drawLine({
-        start: { x: 60, y: yPosition + 5 },
-        end: { x: 60, y: yPosition - 20 },
-        thickness: 3,
-        color: primaryBlue
-      });
-      
-      page.drawText('Provider: N/A', {
-        x: 70,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 40;
-      
-      // IMAGING STUDY DETAILS SECTION
+      // IMAGING STUDY DETAILS Section
       page.drawText('IMAGING STUDY DETAILS', {
-        x: 60,
+        x: leftColumnX,
         y: yPosition,
         size: 12,
         font: boldFont,
-        color: darkText
+        color: blackColor
       });
       
-      yPosition -= 20;
+      yPosition -= 25; // Add spacing after section title
       
-      // Study Type
-      page.drawText(`Study Type: ${sanitizeText(medicalImage.studyType) || 'N/A'}`, {
-        x: 60,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 14;
-      
-      // Modality
-      page.drawText(`Modality: ${sanitizeText(medicalImage.modality) || 'N/A'}`, {
-        x: 60,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 14;
-      
-      // Body Part
-      page.drawText(`Body Part: ${sanitizeText(medicalImage.bodyPart) || 'N/A'}`, {
-        x: 60,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 14;
-      
-      // Image ID
-      page.drawText(`Image ID: ${sanitizeText(medicalImage.imageId) || 'N/A'}`, {
-        x: 60,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 14;
-      
-      // Status
-      page.drawText(`Status: ${sanitizeText(medicalImage.status)?.toUpperCase() || 'PENDING'}`, {
-        x: 60,
-        y: yPosition,
-        size: 9,
-        font,
-        color: medicalImage.status?.toLowerCase() === 'completed' ? greenText : darkText
-      });
-      
-      yPosition -= 20;
-      
-      // Clinical Indication
-      if (medicalImage.indication) {
-        page.drawText('Clinical Indication:', {
-          x: 60,
-          y: yPosition,
-          size: 9,
-          font: boldFont,
-          color: darkText
-        });
-        
-        yPosition -= 14;
-        
-        const indicationLines = sanitizeText(medicalImage.indication).substring(0, 150).match(/.{1,80}/g) || [];
-        indicationLines.forEach((line: string) => {
-          page.drawText(line, {
-            x: 60,
-            y: yPosition,
-            size: 9,
-            font,
-            color: darkText
-          });
-          yPosition -= 12;
-        });
-        
-        yPosition -= 8;
-      }
-      
-      // Findings
-      if (medicalImage.findings) {
-        page.drawText('Findings:', {
-          x: 60,
-          y: yPosition,
-          size: 9,
-          font: boldFont,
-          color: darkText
-        });
-        
-        yPosition -= 14;
-        
-        const findingsLines = sanitizeText(medicalImage.findings).substring(0, 150).match(/.{1,80}/g) || [];
-        findingsLines.forEach((line: string) => {
-          page.drawText(line, {
-            x: 60,
-            y: yPosition,
-            size: 9,
-            font,
-            color: darkText
-          });
-          yPosition -= 12;
-        });
-        
-        yPosition -= 8;
-      }
-      
+      const studyType = safeFormat(medicalImage.studyType || '');
+      page.drawText(`Study Type: ${studyType}`, { x: leftColumnX, y: yPosition, size: 10, font });
       yPosition -= 15;
       
-      // Resident Physician (Signature) section
+      const modality = safeFormat(medicalImage.modality || '');
+      page.drawText(`Modality: ${modality}`, { x: leftColumnX, y: yPosition, size: 10, font });
+      yPosition -= 15;
+      
+      const bodyPart = safeFormat(medicalImage.bodyPart || '');
+      page.drawText(`Body Part: ${bodyPart}`, { x: leftColumnX, y: yPosition, size: 10, font });
+      yPosition -= 15;
+      
+      const displayImageId = safeFormat(medicalImage.imageId || '');
+      page.drawText(`Image ID: ${displayImageId}`, { x: leftColumnX, y: yPosition, size: 10, font });
+      yPosition -= 15;
+      
+      const status = safeFormat(medicalImage.status || 'ORDERED');
+      page.drawText(`Status: ${status}`, { x: leftColumnX, y: yPosition, size: 10, font });
+      
+      // Signature block right after Status: ORDERED
+      yPosition -= 25; // Add spacing after Status
+      
+      // Signature section title
       page.drawText('Resident Physician', {
-        x: 60,
+        x: leftColumnX,
         y: yPosition,
-        size: 8,
+        size: 10,
         font,
-        color: darkText
+        color: blackColor
       });
       
-      yPosition -= 10;
+      yPosition -= 15;
       
       page.drawText('(Signature)', {
-        x: 60,
+        x: leftColumnX,
         y: yPosition,
-        size: 8,
+        size: 9,
         font,
-        color: darkText
+        color: blackColor
       });
       
-      yPosition -= 15;
+      yPosition -= 20;
       
-      // Add e-signature image if available (from database)
+      // E-Signature Section (if signature data provided)
       if (medicalImage.signatureData) {
         try {
-          console.log("IMAGE PRESCRIPTION: Adding e-signature to PDF...");
-          // Extract base64 data from data URL (format: data:image/png;base64,...)
-          const base64Data = medicalImage.signatureData.replace(/^data:image\/\w+;base64,/, '');
+          // Remove data URL prefix if present
+          const base64Data = medicalImage.signatureData.includes(',') 
+            ? medicalImage.signatureData.split(',')[1] 
+            : medicalImage.signatureData;
           const signatureBuffer = Buffer.from(base64Data, 'base64');
           
-          // Embed PNG image
-          const signatureImage = await pdfDoc.embedPng(signatureBuffer);
-          
-          // Calculate dimensions (keep signature reasonably sized)
-          const maxWidth = 160;
-          const maxHeight = 60;
-          const aspectRatio = signatureImage.width / signatureImage.height;
-          
-          let imgWidth = maxWidth;
-          let imgHeight = maxWidth / aspectRatio;
-          
-          if (imgHeight > maxHeight) {
-            imgHeight = maxHeight;
-            imgWidth = maxHeight * aspectRatio;
+          // Try to embed signature as PNG first, then JPEG
+          let signatureImage;
+          try {
+            signatureImage = await pdfDoc.embedPng(signatureBuffer);
+          } catch {
+            try {
+              signatureImage = await pdfDoc.embedJpg(signatureBuffer);
+            } catch (error) {
+              console.error('Failed to embed signature:', error);
+            }
           }
           
-          // Define signature box dimensions (compact size like UI)
-          const boxWidth = 170;
-          const boxHeight = 70;
-          const boxX = 60;
-          const boxY = yPosition - boxHeight;
-          
-          // Draw signature box border
+          if (signatureImage) {
+            // Draw signature box
+            const signatureBoxWidth = 120;
+            const signatureBoxHeight = 50;
+            
+            // Draw border
+            page.drawRectangle({
+              x: leftColumnX,
+              y: yPosition - signatureBoxHeight,
+              width: signatureBoxWidth,
+              height: signatureBoxHeight,
+              borderColor: rgb(0.7, 0.7, 0.7),
+              borderWidth: 1,
+            });
+            
+            // Draw signature image inside the box
+            page.drawImage(signatureImage, {
+              x: leftColumnX + 2,
+              y: yPosition - signatureBoxHeight + 2,
+              width: signatureBoxWidth - 4,
+              height: signatureBoxHeight - 4,
+            });
+            
+            yPosition -= signatureBoxHeight + 15; // Update position after signature box
+          } else {
+            // If signature image couldn't be embedded, still draw empty box
+            const signatureBoxWidth = 120;
+            const signatureBoxHeight = 50;
+            page.drawRectangle({
+              x: leftColumnX,
+              y: yPosition - signatureBoxHeight,
+              width: signatureBoxWidth,
+              height: signatureBoxHeight,
+              borderColor: rgb(0.7, 0.7, 0.7),
+              borderWidth: 1,
+            });
+            yPosition -= signatureBoxHeight + 15;
+          }
+        } catch (error) {
+          console.error('Error processing signature:', error);
+          // Draw empty signature box on error
+          const signatureBoxWidth = 120;
+          const signatureBoxHeight = 50;
           page.drawRectangle({
-            x: boxX,
-            y: boxY,
-            width: boxWidth,
-            height: boxHeight,
-            borderColor: rgb(0.3, 0.3, 0.3),
+            x: leftColumnX,
+            y: yPosition - signatureBoxHeight,
+            width: signatureBoxWidth,
+            height: signatureBoxHeight,
+            borderColor: rgb(0.7, 0.7, 0.7),
             borderWidth: 1,
           });
-          
-          // Draw signature image centered inside the box with padding
-          const paddingX = (boxWidth - imgWidth) / 2;
-          const paddingY = (boxHeight - imgHeight) / 2;
-          
-          page.drawImage(signatureImage, {
-            x: boxX + paddingX,
-            y: boxY + paddingY,
-            width: imgWidth,
-            height: imgHeight,
-          });
-          
-          // Add timestamp below signature box if signatureDate exists
-          if (medicalImage.signatureDate) {
-            const signDate = new Date(medicalImage.signatureDate);
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const formattedDate = `${months[signDate.getMonth()]} ${signDate.getDate()}, ${signDate.getFullYear()} ${signDate.getHours().toString().padStart(2, '0')}:${signDate.getMinutes().toString().padStart(2, '0')}`;
-            const timestampText = `[E-Signed] ${formattedDate}`;
-            
-            // Draw timestamp in green below the signature box
-            page.drawText(timestampText, {
-              x: boxX,
-              y: boxY - 15,
-              size: 8,
-              font,
-              color: rgb(0, 0.5, 0), // Green color
-            });
-          }
-          
-          console.log("IMAGE PRESCRIPTION: E-signature added successfully");
-          yPosition -= (boxHeight + 20); // Adjust position after signature box and timestamp
-        } catch (signatureError) {
-          console.error("IMAGE PRESCRIPTION: Error adding e-signature:", signatureError);
-          // Continue without signature if there's an error
+          yPosition -= signatureBoxHeight + 15;
         }
       } else {
-        yPosition -= 20;
-      }
-      
-      if (req.user?.firstName && req.user?.lastName) {
-        page.drawText(`${req.user.firstName} ${req.user.lastName}`, {
-          x: width - 180,
-          y: yPosition + 35,
-          size: 8,
-          font,
-          color: darkText
+        // If no signature, draw empty signature box
+        const signatureBoxWidth = 120;
+        const signatureBoxHeight = 50;
+        page.drawRectangle({
+          x: leftColumnX,
+          y: yPosition - signatureBoxHeight,
+          width: signatureBoxWidth,
+          height: signatureBoxHeight,
+          borderColor: rgb(0.7, 0.7, 0.7),
+          borderWidth: 1,
         });
+        yPosition -= signatureBoxHeight + 15;
       }
       
-      // FOOTER SECTION
-      const footerY = 30;
+      // Footer
+      let footerBgColor = rgb(0.29, 0.49, 1.0); // Default #4A7DFF
+      if (clinicFooter?.backgroundColor) {
+        try {
+          const bgColor = clinicFooter.backgroundColor.startsWith('#') 
+            ? clinicFooter.backgroundColor.slice(1) 
+            : clinicFooter.backgroundColor;
+          if (bgColor.length === 6) {
+            footerBgColor = rgb(
+              parseInt(bgColor.slice(0, 2), 16) / 255,
+              parseInt(bgColor.slice(2, 4), 16) / 255,
+              parseInt(bgColor.slice(4, 6), 16) / 255
+            );
+          }
+        } catch (error) {
+          console.error('Error parsing footer background color:', error);
+        }
+      }
       
-      // Bottom center: Copyright notice
-      const copyrightText = `© 2025 ${headerData?.clinicName || 'CuraCare Hospital'} — All Rights Reserved`;
-      const copyrightWidth = copyrightText.length * 3.5;
-      page.drawText(copyrightText, {
-        x: width / 2 - copyrightWidth / 2,
+      const footerHeight = 40;
+      const footerY = 40;
+      page.drawRectangle({
+        x: 0,
         y: footerY,
-        size: 7,
-        font,
-        color: rgb(0.4, 0.4, 0.4)
+        width: width,
+        height: footerHeight,
+        color: footerBgColor
       });
       
-      // Bottom left: about:blank
-      page.drawText('about:blank', {
-        x: 40,
-        y: 15,
-        size: 7,
+      const footerText = clinicFooter?.footerText || 'Generated by Cura EMR Platform';
+      let footerTextColor = rgb(1, 1, 1); // Default white
+      if (clinicFooter?.textColor) {
+        try {
+          const textColor = clinicFooter.textColor.startsWith('#') 
+            ? clinicFooter.textColor.slice(1) 
+            : clinicFooter.textColor;
+          if (textColor.length === 6) {
+            footerTextColor = rgb(
+              parseInt(textColor.slice(0, 2), 16) / 255,
+              parseInt(textColor.slice(2, 4), 16) / 255,
+              parseInt(textColor.slice(4, 6), 16) / 255
+            );
+          }
+        } catch (error) {
+          console.error('Error parsing footer text color:', error);
+        }
+      }
+      
+      page.drawText(footerText, {
+        x: width / 2 - (footerText.length * 3),
+        y: footerY + 15,
+        size: 10,
         font,
-        color: rgb(0.4, 0.4, 0.4)
+        color: footerTextColor
       });
       
-      // Bottom right: Page number
-      page.drawText('1/2', {
-        x: width - 60,
-        y: 15,
-        size: 7,
-        font,
-        color: rgb(0.4, 0.4, 0.4)
-      });
+      // Save PDF
+      const fileName = `PRESCRIPTION_${medicalImage.imageId}_${Date.now()}.pdf`;
+      const pdfFilePath = path.join(prescriptionsDir, fileName);
+      const pdfBytes = await pdfDoc.save();
+      // Ensure directory exists, then write file
+      await fse.ensureDir(prescriptionsDir);
+      await fs.promises.writeFile(pdfFilePath, pdfBytes);
       
-      // Generate PDF bytes
-      let pdfBytes = await pdfDoc.save();
+      // Update medical image with prescription path
+      const relativePath = `uploads/Image_Prescriptions/${organizationId}/patients/${medicalImage.patientId}/${fileName}`;
+      await storage.updateMedicalImage(medicalImage.id, req.tenant!.id, {
+        prescriptionFilePath: relativePath,
+        prescriptionFileName: fileName
+      } as any);
       
-      // Save PDF to disk
-      const fileName = `prescription-${imageId}.pdf`;
-      const outputPath = path.join(prescriptionsDir, fileName);
-      await fse.outputFile(outputPath, pdfBytes);
-      
-      console.log(`Image prescription PDF generated and saved: ${outputPath}`);
-      
-      // Update the medical_images table with prescription file path and mark as ready to generate
-      const prescriptionPath = `/uploads/Image_Prescriptions/${organizationId}/patients/${medicalImage.patientId}/${fileName}`;
-      console.log(`DATABASE UPDATE: Setting prescriptionFilePath to: ${prescriptionPath}`);
-      console.log(`DATABASE UPDATE: Setting orderStudyReadyToGenerate to: true`);
-      console.log(`DATABASE UPDATE: Setting status to: in_progress`);
-      console.log(`DATABASE UPDATE: For medical image ID: ${medicalImage.id}`);
-      
-      await db
-        .update(schema.medicalImages)
-        .set({
-          prescriptionFilePath: prescriptionPath,
-          orderStudyReadyToGenerate: true,
-          status: 'in_progress'
-        })
-        .where(eq(schema.medicalImages.id, medicalImage.id));
-      
-      console.log(`DATABASE UPDATE: Successfully updated medical_images table for ID ${medicalImage.id}`);
-      
-      // Generate signed token for secure access
+      // Generate signed URL (7 days validity)
       const fileSecret = process.env.FILE_SECRET;
       if (!fileSecret) {
         console.error("FILE_SECRET not configured");
         return res.status(500).json({ error: "Server configuration error" });
       }
-      
-      const accessToken = jwt.sign(
-        {
+
+      const token = jwt.sign(
+        { 
+          imageId: medicalImage.id,
           organizationId: organizationId,
           patientId: medicalImage.patientId,
-          fileName: fileName,
-          type: 'prescription'
-        },
-        fileSecret,
-        { expiresIn: '7d' }
+          fileName: fileName
+        }, 
+        fileSecret, 
+        { expiresIn: "7d" }
       );
+
+      // Get base URL
+      let baseUrl;
+      const origin = req.get('origin');
+      const referer = req.get('referer');
       
-      // Create view URL for the prescription with token
-      const viewUrl = `/api/imaging/view-prescription/${organizationId}/${medicalImage.patientId}/${fileName}?token=${accessToken}`;
+      if (origin) {
+        baseUrl = origin;
+      } else if (referer) {
+        const url = new URL(referer);
+        baseUrl = `${url.protocol}//${url.host}`;
+      } else {
+        const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+        let host = req.get('x-forwarded-host') || req.get('host') || req.headers.host;
+        if (typeof host === 'string' && host.includes(':5000')) {
+          host = host.replace(':5000', '');
+        }
+        baseUrl = `${protocol}://${host}`;
+      }
+      
+      const viewUrl = `${baseUrl}/api/imaging/view-prescription/${organizationId}/${medicalImage.patientId}/${fileName}?token=${token}`;
       
       res.json({
         success: true,
-        fileName: fileName,
-        viewUrl: viewUrl,
-        message: "Image prescription generated successfully"
+        fileName,
+        viewUrl,
+        message: "Prescription generated successfully"
       });
-
     } catch (error) {
-      console.error("IMAGE PRESCRIPTION ERROR:", error);
-      console.error("Error details:", {
-        name: (error as Error).name,
-        message: (error as Error).message,
-        stack: (error as Error).stack
-      });
+      console.error("Error generating image prescription:", error);
       res.status(500).json({ 
-        error: "Failed to generate image prescription",
-        details: (error as Error).message 
+        error: "Failed to generate prescription",
+        details: error instanceof Error ? error.message : String(error)
       });
     }
   });
 
-  // Generate Prescription Token Endpoint
-  app.post("/api/imaging/generate-prescription-token", authMiddleware, requireRole(["doctor", "nurse", "patient", "admin"]), async (req: TenantRequest, res) => {
+  // Generate prescription token for viewing saved prescriptions
+  app.post("/api/imaging/generate-prescription-token", authMiddleware, requireRole(["doctor", "nurse", "patient", "admin"]), tenantMiddleware, async (req, res) => {
     try {
       const { organizationId, patientId, fileName } = req.body;
-      
+
       if (!organizationId || !patientId || !fileName) {
-        return res.status(400).json({ error: "Missing required parameters" });
+        return res.status(400).json({ error: "Missing required parameters: organizationId, patientId, fileName" });
       }
 
       const fileSecret = process.env.FILE_SECRET;
@@ -24338,35 +27367,33 @@ Cura EMR Team
         console.error("FILE_SECRET not configured");
         return res.status(500).json({ error: "Server configuration error" });
       }
-      
-      // Generate signed token for secure access
-      const accessToken = jwt.sign(
+
+      // Generate JWT token valid for 7 days
+      const token = jwt.sign(
         {
-          organizationId: organizationId,
-          patientId: patientId,
+          organizationId: parseInt(organizationId),
+          patientId: parseInt(patientId),
           fileName: fileName,
-          type: 'prescription'
         },
         fileSecret,
-        { expiresIn: '7d' }
+        { expiresIn: "7d" }
       );
-      
+
       res.json({
         success: true,
-        token: accessToken
+        token: token
       });
-
     } catch (error) {
-      console.error("PRESCRIPTION TOKEN ERROR:", error);
-      res.status(500).json({ 
+      console.error("Error generating prescription token:", error);
+      res.status(500).json({
         error: "Failed to generate prescription token",
-        details: (error as Error).message 
+        details: error instanceof Error ? error.message : String(error)
       });
     }
   });
 
-  // View Image Prescription PDF using temporary signed URL (no authentication required - token validated)
-  app.get("/api/imaging/view-prescription/:organizationId/:patientId/:fileName", async (req: Request, res: Response) => {
+  // View prescription PDF using temporary signed URL (no authentication required - token validated)
+  app.get("/api/imaging/view-prescription/:organizationId/:patientId/:fileName", async (req, res) => {
     try {
       const { token } = req.query;
       if (!token || typeof token !== 'string') {
@@ -24385,10 +27412,16 @@ Cura EMR Team
         payload = jwt.verify(token, fileSecret);
       } catch (err) {
         console.log("[PRESCRIPTION-VIEW] Token verification failed:", err);
-        return res.status(403).json({ error: "Invalid or expired token" });
+        return res.status(403).json({ error: "Invalid or expired link" });
       }
 
-      const { organizationId, patientId, fileName } = payload;
+      const { organizationId: tokenOrgId, patientId: tokenPatientId, fileName: tokenFileName } = payload;
+      const { organizationId, patientId, fileName } = req.params;
+      
+      // Verify token matches URL parameters
+      if (tokenOrgId !== parseInt(organizationId) || tokenPatientId !== parseInt(patientId) || tokenFileName !== fileName) {
+        return res.status(403).json({ error: "Token does not match request parameters" });
+      }
       
       // Construct file path
       const relativePath = `uploads/Image_Prescriptions/${organizationId}/patients/${patientId}/${fileName}`;
@@ -24398,7 +27431,7 @@ Cura EMR Team
       const fileExists = await fse.pathExists(fullPath);
       if (!fileExists) {
         console.log(`[PRESCRIPTION-VIEW] File not found: ${fullPath}`);
-        return res.status(404).json({ error: "Prescription not found" });
+        return res.status(404).json({ error: "File not found" });
       }
 
       console.log(`[PRESCRIPTION-VIEW] Serving file: ${fullPath}`);
@@ -24411,3246 +27444,10 @@ Cura EMR Team
       res.sendFile(fullPath);
 
     } catch (error) {
-      console.error("[PRESCRIPTION-VIEW] Error viewing prescription:", error);
+      console.error("Error viewing prescription:", error);
       res.status(500).json({ error: "Failed to view prescription" });
     }
   });
 
-  // Save Lab Result Prescription Endpoint
-  app.post("/api/imaging/save-prescription", authMiddleware, requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
-    try {
-      console.log("SAVE PRESCRIPTION: Starting...");
-      
-      if (!req.user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { studyId, prescriptionData } = req.body;
-      console.log("SAVE PRESCRIPTION: Study ID:", studyId);
-      
-      if (!studyId || !prescriptionData) {
-        return res.status(400).json({ error: "Study ID and prescription data are required" });
-      }
-
-      const organizationId = req.tenant!.id;
-      console.log("SAVE PRESCRIPTION: Organization ID:", organizationId);
-
-      // Fetch the study
-      const study = await storage.getMedicalImage(studyId, req.tenant!.id);
-      if (!study) {
-        return res.status(404).json({ error: "Study not found" });
-      }
-
-      // Save PDF in: uploads/Image_Prescriptions/
-      const prescriptionsDir = path.resolve(process.cwd(), 'uploads', 'Image_Prescriptions');
-      await fse.ensureDir(prescriptionsDir);
-      
-      // Import pdf-lib dynamically
-      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
-      
-      // Create a new PDF document
-      const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595, 842]); // A4 size
-      const { width, height } = page.getSize();
-      
-      // Load fonts
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      
-      // Colors
-      const primaryBlue = rgb(0.29, 0.49, 1); // #4A7DFF
-      const darkText = rgb(0.2, 0.2, 0.2);
-      const lightBlueBg = rgb(0.93, 0.95, 1); // Light blue background
-      const yellowBg = rgb(1, 0.98, 0.8);
-      const redBg = rgb(1, 0.95, 0.95);
-      const greenText = rgb(0.2, 0.6, 0.2);
-      const grayText = rgb(0.4, 0.4, 0.4);
-      
-      let yPosition = height - 50;
-      
-      // Red Cross Logo (circular)
-      page.drawCircle({
-        x: width / 2,
-        y: yPosition - 10,
-        size: 20,
-        color: rgb(0.93, 0.11, 0.14),
-        borderWidth: 0
-      });
-      
-      // White cross inside
-      const crossSize = 12;
-      const centerX = width / 2;
-      const centerY = yPosition - 10;
-      
-      // Horizontal bar
-      page.drawRectangle({
-        x: centerX - crossSize / 2,
-        y: centerY - 2,
-        width: crossSize,
-        height: 4,
-        color: rgb(1, 1, 1)
-      });
-      
-      // Vertical bar
-      page.drawRectangle({
-        x: centerX - 2,
-        y: centerY - crossSize / 2,
-        width: 4,
-        height: crossSize,
-        color: rgb(1, 1, 1)
-      });
-      
-      yPosition -= 45;
-      
-      // Hospital Name
-      page.drawText(prescriptionData.hospitalName || 'Clinical Care Hospital', {
-        x: width / 2 - 85,
-        y: yPosition,
-        size: 18,
-        font: boldFont,
-        color: primaryBlue
-      });
-      
-      yPosition -= 18;
-      
-      // Laboratory Test Prescription
-      page.drawText('Laboratory Test Prescription', {
-        x: width / 2 - 75,
-        y: yPosition,
-        size: 10,
-        font,
-        color: grayText
-      });
-      
-      yPosition -= 12;
-      
-      // Hospital details
-      const hospitalDetails = [
-        prescriptionData.hospitalAddress || 'house 33',
-        prescriptionData.hospitalPhone || '+923213213213',
-        prescriptionData.hospitalEmail || 'averox71@gmail.com',
-        prescriptionData.hospitalWebsite || 'www.clinicalcare.com'
-      ];
-      
-      for (const detail of hospitalDetails) {
-        page.drawText(detail, {
-          x: width / 2 - (detail.length * 2.5),
-          y: yPosition,
-          size: 8,
-          font,
-          color: grayText
-        });
-        yPosition -= 12;
-      }
-      
-      yPosition -= 10;
-      
-      // Horizontal line
-      page.drawLine({
-        start: { x: 40, y: yPosition },
-        end: { x: width - 40, y: yPosition },
-        thickness: 1,
-        color: grayText
-      });
-      
-      yPosition -= 25;
-      
-      // Physician and Patient Information (two columns)
-      const leftColX = 50;
-      const rightColX = width / 2 + 20;
-      
-      // Physician Information
-      page.drawText('Physician Information', {
-        x: leftColX,
-        y: yPosition,
-        size: 11,
-        font: boldFont,
-        color: darkText
-      });
-      
-      // Patient Information
-      page.drawText('Patient Information', {
-        x: rightColX,
-        y: yPosition,
-        size: 11,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 18;
-      
-      // Physician details
-      page.drawText(`Name: ${prescriptionData.physicianName}`, {
-        x: leftColX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      // Patient details
-      page.drawText(`Name: ${prescriptionData.patientName}`, {
-        x: rightColX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 15;
-      
-      page.drawText(`Priority: ${prescriptionData.priority}`, {
-        x: leftColX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      page.drawText(`Patient ID: ${prescriptionData.patientId}`, {
-        x: rightColX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 15;
-      
-      page.drawText(`Date: ${prescriptionData.date}`, {
-        x: rightColX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 15;
-      
-      page.drawText(`Time: ${prescriptionData.time}`, {
-        x: rightColX,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 30;
-      
-      // Laboratory Test Prescription Section
-      page.drawRectangle({
-        x: 40,
-        y: yPosition - 150,
-        width: width - 80,
-        height: 165,
-        color: lightBlueBg,
-        borderColor: grayText,
-        borderWidth: 1
-      });
-      
-      page.drawText('IMAGING STUDY PRESCRIPTION', {
-        x: 50,
-        y: yPosition,
-        size: 11,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 25;
-      
-      // Test details grid (2x2)
-      const boxWidth = (width - 120) / 2;
-      const boxHeight = 35;
-      const boxStartY = yPosition;
-      
-      // Row 1
-      // Test ID box
-      page.drawRectangle({
-        x: 50,
-        y: boxStartY - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
-        color: rgb(1, 1, 1),
-        borderColor: grayText,
-        borderWidth: 0.5
-      });
-      
-      page.drawText('Test ID:', {
-        x: 60,
-        y: boxStartY - 15,
-        size: 8,
-        font,
-        color: grayText
-      });
-      
-      page.drawText(prescriptionData.testId, {
-        x: 60,
-        y: boxStartY - 28,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      // Test Type box
-      page.drawRectangle({
-        x: 60 + boxWidth,
-        y: boxStartY - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
-        color: rgb(1, 1, 1),
-        borderColor: grayText,
-        borderWidth: 0.5
-      });
-      
-      page.drawText('Test Type:', {
-        x: 70 + boxWidth,
-        y: boxStartY - 15,
-        size: 8,
-        font,
-        color: grayText
-      });
-      
-      page.drawText(prescriptionData.testType, {
-        x: 70 + boxWidth,
-        y: boxStartY - 28,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= boxHeight;
-      
-      // Row 2
-      // Ordered Date box
-      page.drawRectangle({
-        x: 50,
-        y: yPosition - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
-        color: rgb(1, 1, 1),
-        borderColor: grayText,
-        borderWidth: 0.5
-      });
-      
-      page.drawText('Ordered Date:', {
-        x: 60,
-        y: yPosition - 15,
-        size: 8,
-        font,
-        color: grayText
-      });
-      
-      page.drawText(prescriptionData.orderedDate, {
-        x: 60,
-        y: yPosition - 28,
-        size: 8,
-        font: boldFont,
-        color: darkText
-      });
-      
-      // Status box
-      page.drawRectangle({
-        x: 60 + boxWidth,
-        y: yPosition - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
-        color: rgb(1, 1, 1),
-        borderColor: grayText,
-        borderWidth: 0.5
-      });
-      
-      page.drawText('Status:', {
-        x: 70 + boxWidth,
-        y: yPosition - 15,
-        size: 8,
-        font,
-        color: grayText
-      });
-      
-      const statusColor = prescriptionData.status === 'COMPLETED' ? greenText : rgb(0.8, 0.6, 0);
-      page.drawText(prescriptionData.status, {
-        x: 70 + boxWidth,
-        y: yPosition - 28,
-        size: 9,
-        font: boldFont,
-        color: statusColor
-      });
-      
-      yPosition -= boxHeight + 10;
-      
-      // Test Results section
-      page.drawRectangle({
-        x: 50,
-        y: yPosition - 50,
-        width: width - 100,
-        height: 55,
-        color: rgb(1, 1, 1),
-        borderColor: grayText,
-        borderWidth: 0.5
-      });
-      
-      page.drawText('Test Results:', {
-        x: 60,
-        y: yPosition - 12,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 25;
-      
-      page.drawText(prescriptionData.testType, {
-        x: 60,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 12;
-      
-      page.drawText(`Modality: ${prescriptionData.modality}`, {
-        x: 60,
-        y: yPosition,
-        size: 8,
-        font,
-        color: grayText
-      });
-      
-      yPosition -= 12;
-      
-      page.drawText(`Body Part: ${prescriptionData.bodyPart}`, {
-        x: 60,
-        y: yPosition,
-        size: 8,
-        font,
-        color: grayText
-      });
-      
-      if (prescriptionData.priority === 'urgent' || prescriptionData.priority === 'stat') {
-        page.drawText('Flag: HIGH', {
-          x: width - 150,
-          y: yPosition + 12,
-          size: 9,
-          font: boldFont,
-          color: rgb(0.8, 0.2, 0.2)
-        });
-      }
-      
-      yPosition -= 25;
-      
-      // Clinical Notes
-      page.drawRectangle({
-        x: 50,
-        y: yPosition - 40,
-        width: width - 100,
-        height: 45,
-        color: yellowBg,
-        borderColor: grayText,
-        borderWidth: 0.5
-      });
-      
-      page.drawText('Clinical Notes:', {
-        x: 60,
-        y: yPosition - 12,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 25;
-      
-      const clinicalNotes = prescriptionData.clinicalNotes;
-      const maxWidth = width - 120;
-      const words = clinicalNotes.split(' ');
-      let line = '';
-      let lineY = yPosition;
-      
-      for (const word of words) {
-        const testLine = line + word + ' ';
-        const testWidth = testLine.length * 4.5;
-        
-        if (testWidth > maxWidth && line !== '') {
-          page.drawText(line.trim(), {
-            x: 60,
-            y: lineY,
-            size: 8,
-            font,
-            color: darkText
-          });
-          line = word + ' ';
-          lineY -= 12;
-        } else {
-          line = testLine;
-        }
-      }
-      
-      if (line.trim() !== '') {
-        page.drawText(line.trim(), {
-          x: 60,
-          y: lineY,
-          size: 8,
-          font,
-          color: darkText
-        });
-      }
-      
-      yPosition -= 50;
-      
-      // Critical Values Alert
-      if (prescriptionData.priority === 'stat' || prescriptionData.priority === 'urgent') {
-        page.drawRectangle({
-          x: 40,
-          y: yPosition - 35,
-          width: width - 80,
-          height: 40,
-          color: redBg,
-          borderColor: rgb(0.8, 0.2, 0.2),
-          borderWidth: 1
-        });
-        
-        page.drawText('!', {
-          x: 50,
-          y: yPosition - 15,
-          size: 14,
-          font: boldFont,
-          color: rgb(0.8, 0.2, 0.2)
-        });
-        
-        page.drawText('CRITICAL VALUES DETECTED', {
-          x: 65,
-          y: yPosition - 12,
-          size: 10,
-          font: boldFont,
-          color: rgb(0.6, 0.1, 0.1)
-        });
-        
-        page.drawText(`This ${prescriptionData.priority === 'stat' ? 'STAT' : 'urgent'} study requires immediate attention.`, {
-          x: 70,
-          y: yPosition - 25,
-          size: 8,
-          font,
-          color: rgb(0.6, 0.1, 0.1)
-        });
-        
-        yPosition -= 45;
-      }
-      
-      // Footer
-      yPosition = 60;
-      
-      page.drawLine({
-        start: { x: 40, y: yPosition },
-        end: { x: width - 40, y: yPosition },
-        thickness: 0.5,
-        color: grayText
-      });
-      
-      yPosition -= 15;
-      
-      page.drawText('Generated by Cura EMR System', {
-        x: 40,
-        y: yPosition,
-        size: 7,
-        font,
-        color: grayText
-      });
-      
-      const footerDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-      page.drawText(`Date: ${footerDate}`, {
-        x: width - 150,
-        y: yPosition,
-        size: 7,
-        font,
-        color: grayText
-      });
-      
-      // Save the PDF
-      let pdfBytes = await pdfDoc.save();
-      const fileName = `${study.imageId}.pdf`;
-      const filePath = path.join(prescriptionsDir, fileName);
-      
-      await fse.outputFile(filePath, pdfBytes);
-      console.log(`SAVE PRESCRIPTION: PDF saved to ${filePath}`);
-      
-      // Update the medical_images table with prescription file path and mark as ready to generate
-      const prescriptionPath = `/uploads/Image_Prescriptions/${fileName}`;
-      await db
-        .update(schema.medicalImages)
-        .set({ 
-          prescriptionFilePath: prescriptionPath,
-          orderStudyReadyToGenerate: true,
-          updatedAt: new Date()
-        })
-        .where(eq(schema.medicalImages.id, studyId));
-      
-      console.log(`SAVE PRESCRIPTION: Database updated with prescription path: ${prescriptionPath}`);
-      
-      res.json({
-        success: true,
-        fileName: fileName,
-        filePath: filePath,
-        message: "Prescription saved successfully"
-      });
-
-    } catch (error) {
-      console.error("SAVE PRESCRIPTION ERROR:", error);
-      res.status(500).json({ error: "Failed to save prescription" });
-    }
-  });
-
-  // Save Uploaded Images to Imaging_Images Folder and Database (as base64)
-  app.post("/api/imaging/save-uploaded-images", authMiddleware, requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
-    try {
-      console.log("SAVE UPLOADED IMAGES: Starting...");
-      
-      if (!req.user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { organizationId, patientId, imageUrls } = req.body;
-      console.log("SAVE UPLOADED IMAGES: Organization ID:", organizationId, "Patient ID:", patientId);
-      
-      if (!organizationId || !patientId || !imageUrls || !Array.isArray(imageUrls)) {
-        return res.status(400).json({ error: "Organization ID, patient ID, and image URLs are required" });
-      }
-
-      // Create directory structure: /uploads/Imaging_Images/{organizationId}/patients/{patientId}/
-      const imagingImagesDir = path.resolve(
-        process.cwd(), 
-        'uploads', 
-        'Imaging_Images', 
-        String(organizationId), 
-        'patients', 
-        String(patientId)
-      );
-      await fse.ensureDir(imagingImagesDir);
-      console.log("SAVE UPLOADED IMAGES: Directory created:", imagingImagesDir);
-
-      let savedCount = 0;
-      const savedFiles: string[] = [];
-
-      // Process each image URL
-      for (const imageUrl of imageUrls) {
-        try {
-          // Extract filename from URL or generate one
-          const urlParts = imageUrl.split('/');
-          const originalFileName = urlParts[urlParts.length - 1] || `image_${Date.now()}_${savedCount}.jpg`;
-          
-          // Generate unique filename with timestamp
-          const timestamp = Date.now();
-          const fileExtension = originalFileName.split('.').pop() || 'jpg';
-          const uniqueFileName = `IMG_${timestamp}_${savedCount}.${fileExtension}`;
-          
-          // Determine source path - images are typically in /uploads/medical_images/
-          let sourcePath: string;
-          if (imageUrl.startsWith('/api/medical-images/')) {
-            // Extract the filename from the API URL
-            const apiFileName = imageUrl.replace('/api/medical-images/', '');
-            sourcePath = path.resolve(process.cwd(), 'uploads', 'medical_images', apiFileName);
-          } else if (imageUrl.startsWith('/uploads/')) {
-            // Direct file path
-            sourcePath = path.resolve(process.cwd(), imageUrl.substring(1));
-          } else {
-            console.log(`SAVE UPLOADED IMAGES: Skipping unsupported URL format: ${imageUrl}`);
-            continue;
-          }
-
-          // Check if source file exists
-          if (await fse.pathExists(sourcePath)) {
-            const destPath = path.join(imagingImagesDir, uniqueFileName);
-            
-            // Copy file to Imaging_Images folder
-            await fse.copy(sourcePath, destPath);
-            
-            // Read image file and convert to base64
-            const imageBuffer = await readFile(sourcePath);
-            const base64Image = imageBuffer.toString('base64');
-            const mimeType = `image/${fileExtension}`;
-            const base64WithPrefix = `data:${mimeType};base64,${base64Image}`;
-            
-            // Find all medical_images records for this patient and organization that need updating
-            const medicalImages = await db
-              .select()
-              .from(schema.medicalImages)
-              .where(
-                and(
-                  eq(schema.medicalImages.organizationId, organizationId),
-                  eq(schema.medicalImages.patientId, patientId),
-                  isNull(schema.medicalImages.imageData) // Only update records without imageData
-                )
-              );
-            
-            // Update the first available record with base64 image data
-            if (medicalImages.length > 0) {
-              const recordToUpdate = medicalImages[0];
-              await db
-                .update(schema.medicalImages)
-                .set({
-                  imageData: base64WithPrefix,
-                  updatedAt: new Date()
-                })
-                .where(eq(schema.medicalImages.id, recordToUpdate.id));
-              
-              console.log(`SAVE UPLOADED IMAGES: Saved ${uniqueFileName} and updated image_data for medical_images ID: ${recordToUpdate.id}`);
-            } else {
-              console.log(`SAVE UPLOADED IMAGES: Saved ${uniqueFileName} to filesystem (no available medical_images record to update)`);
-            }
-            
-            savedFiles.push(uniqueFileName);
-            savedCount++;
-          } else {
-            console.log(`SAVE UPLOADED IMAGES: Source file not found: ${sourcePath}`);
-          }
-        } catch (imageError) {
-          console.error(`SAVE UPLOADED IMAGES: Error processing image ${imageUrl}:`, imageError);
-        }
-      }
-
-      console.log(`SAVE UPLOADED IMAGES: Successfully saved ${savedCount} images`);
-      
-      res.json({
-        success: true,
-        savedCount,
-        savedFiles,
-        directory: imagingImagesDir,
-        message: `Successfully saved ${savedCount} image(s) to Imaging_Images folder and database`
-      });
-
-    } catch (error) {
-      console.error("SAVE UPLOADED IMAGES ERROR:", error);
-      res.status(500).json({ error: "Failed to save uploaded images" });
-    }
-  });
-
-  // Share Imaging Study via Email
-  app.post("/api/imaging/share-study", authMiddleware, async (req: TenantRequest, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { studyId, recipientEmail, customMessage, shareSource = 'report' } = req.body;
-
-      if (!studyId || !recipientEmail) {
-        return res.status(400).json({ error: "Study ID and recipient email are required" });
-      }
-
-      // Get the study details from the database
-      const study = await storage.getMedicalImage(studyId, req.tenant!.id);
-      if (!study) {
-        return res.status(404).json({ error: "Study not found" });
-      }
-
-      // Get patient details for the study
-      const patient = await storage.getPatient(study.patientId, req.tenant!.id);
-      if (!patient) {
-        return res.status(404).json({ error: "Patient not found" });
-      }
-
-      const organizationId = req.tenant!.id;
-      const imageId = study.imageId;
-
-      // Determine the file path based on shareSource
-      let reportPath: string;
-      let actualDocType = shareSource; // Track what we're actually sharing
-      
-      if (shareSource === 'prescription') {
-        // For prescriptions, use the stored prescriptionFilePath if available
-        if (study.prescriptionFilePath) {
-          // Paths starting with /uploads are relative to working directory, not absolute system paths
-          if (study.prescriptionFilePath.startsWith('/uploads/') || study.prescriptionFilePath.startsWith('uploads/')) {
-            // Convert to absolute path from working directory
-            reportPath = path.resolve(process.cwd(), study.prescriptionFilePath.replace(/^\//, ''));
-          } else if (path.isAbsolute(study.prescriptionFilePath)) {
-            // True absolute system paths (like /home/runner/...)
-            reportPath = study.prescriptionFilePath;
-          } else {
-            // Relative paths
-            reportPath = path.resolve(process.cwd(), study.prescriptionFilePath);
-          }
-          console.log(`[EMAIL-SHARE] Using stored prescriptionFilePath: ${study.prescriptionFilePath}`);
-          console.log(`[EMAIL-SHARE] Final path to share prescription from: ${reportPath}`);
-        } else {
-          // Fallback: Try both filename formats (with and without 'prescription-' prefix)
-          const reportsDir = path.resolve(process.cwd(), 'uploads', 'Image_Prescriptions', String(organizationId), 'patients', String(study.patientId));
-          
-          // First try with 'prescription-' prefix (new format)
-          let fileName = `prescription-${imageId}.pdf`;
-          reportPath = path.join(reportsDir, fileName);
-          console.log(`[EMAIL-SHARE] No stored path found, trying with prefix: ${reportPath}`);
-          
-          // If not found, try without prefix (old format)
-          if (!await fse.pathExists(reportPath)) {
-            fileName = `${imageId}.pdf`;
-            reportPath = path.join(reportsDir, fileName);
-            console.log(`[EMAIL-SHARE] File not found with prefix, trying without prefix: ${reportPath}`);
-          }
-        }
-      } else {
-        // For reports, use the stored reportFilePath if available
-        if (study.reportFilePath) {
-          // Paths starting with /uploads are relative to working directory, not absolute system paths
-          if (study.reportFilePath.startsWith('/uploads/') || study.reportFilePath.startsWith('uploads/')) {
-            // Convert to absolute path from working directory
-            reportPath = path.resolve(process.cwd(), study.reportFilePath.replace(/^\//, ''));
-          } else if (path.isAbsolute(study.reportFilePath)) {
-            // True absolute system paths (like /home/runner/...)
-            reportPath = study.reportFilePath;
-          } else {
-            // Relative paths
-            reportPath = path.resolve(process.cwd(), study.reportFilePath);
-          }
-          console.log(`[EMAIL-SHARE] Using stored reportFilePath: ${study.reportFilePath}`);
-          console.log(`[EMAIL-SHARE] Final path to share report from: ${reportPath}`);
-        } else {
-          // Fallback: Try to find the imaging report
-          const reportsDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Reports', String(organizationId), 'patients', String(study.patientId));
-          const fileName = `${imageId}.pdf`;
-          reportPath = path.join(reportsDir, fileName);
-          console.log(`[EMAIL-SHARE] No stored report path, trying constructed path: ${reportPath}`);
-        }
-      }
-      
-      // Check if the PDF exists
-      if (!await fse.pathExists(reportPath)) {
-        const docType = shareSource === 'prescription' ? 'Image prescription' : 'Imaging report';
-        console.error(`[EMAIL-SHARE] ${docType} PDF not found:`, reportPath);
-        console.error(`[EMAIL-SHARE] Study details:`, { 
-          imageId: study.imageId, 
-          prescriptionFilePath: study.prescriptionFilePath,
-          reportFilePath: study.reportFilePath,
-          shareSource 
-        });
-        return res.status(404).json({ 
-          error: shareSource === 'prescription' 
-            ? 'No image prescription found. Please generate one first.' 
-            : 'No imaging report found. Please generate one first.'
-        });
-      }
-
-      console.log('[EMAIL-SHARE] Loading imaging report PDF:', reportPath);
-      const buffer = await fs.promises.readFile(reportPath);
-      let pdfBytes = new Uint8Array(buffer);
-      
-      // Extract filename from path for email attachment
-      const fileName = path.basename(reportPath);
-      
-      // Skip the old prescription PDF generation code
-      if (false) {
-        console.log('[EMAIL-SHARE] Old code - removed');
-        
-        // Import pdf-lib dynamically
-        const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
-      
-      // Fetch clinic footer data
-      const clinicFooterRecords = await db
-        .select()
-        .from(clinicFooters)
-        .where(eq(clinicFooters.organizationId, organizationId))
-        .limit(1);
-      
-      const footerData = clinicFooterRecords[0] || null;
-      
-      // Create PDF with two-column layout matching lab result prescription format
-      const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595, 842]); // A4 size
-      const { width, height } = page.getSize();
-      
-      // Load fonts
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      
-      // Color definitions
-      const darkText = rgb(0.2, 0.2, 0.2);
-      const lightGray = rgb(0.95, 0.95, 0.95);
-      const borderGray = rgb(0.85, 0.85, 0.85);
-      const greenText = rgb(0, 0.6, 0);
-      const yellowBg = rgb(1, 0.98, 0.85);
-      const redBg = rgb(1, 0.93, 0.93);
-      
-      // HEADER - Purple gradient effect
-      page.drawRectangle({
-        x: 0,
-        y: height - 120,
-        width,
-        height: 120,
-        color: rgb(0.31, 0.27, 0.9)
-      });
-      
-      // Organization Name - CURA EMR SYSTEM
-      page.drawText(footerData?.organizationName || 'CURA EMR SYSTEM', {
-        x: 40,
-        y: height - 50,
-        size: 22,
-        font: boldFont,
-        color: rgb(1, 1, 1)
-      });
-      
-      page.drawText('MEDICAL IMAGING PRESCRIPTION', {
-        x: 40,
-        y: height - 75,
-        size: 12,
-        font: boldFont,
-        color: rgb(1, 1, 1)
-      });
-      
-      // Patient Details Section (Gray Background)
-      let yPosition = height - 150;
-      
-      page.drawRectangle({
-        x: 30,
-        y: yPosition - 70,
-        width: width - 60,
-        height: 75,
-        color: lightGray,
-        borderColor: borderGray,
-        borderWidth: 1
-      });
-      
-      page.drawText('Patient Information', {
-        x: 40,
-        y: yPosition,
-        size: 11,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 25;
-      
-      const col1X = 50;
-      const col2X = 310;
-      
-      page.drawText(`Patient Name:`, {
-        x: col1X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      page.drawText(`${patient.firstName} ${patient.lastName}`, {
-        x: col1X + 85,
-        y: yPosition,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      page.drawText(`Patient ID:`, {
-        x: col2X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      page.drawText(String(patient.patientId), {
-        x: col2X + 70,
-        y: yPosition,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 18;
-      
-      page.drawText(`DOB:`, {
-        x: col1X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      page.drawText(patient.dateOfBirth ? new Date(patient.dateOfBirth).toLocaleDateString() : 'N/A', {
-        x: col1X + 85,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      page.drawText(`Gender:`, {
-        x: col2X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      page.drawText(patient.gender || 'N/A', {
-        x: col2X + 70,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      yPosition -= 35;
-      
-      // Imaging Study Section
-      page.drawText('Imaging Study Prescription', {
-        x: 40,
-        y: yPosition,
-        size: 11,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 25;
-      
-      page.drawText(`Image ID:`, {
-        x: col1X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      page.drawText(imageId, {
-        x: col1X + 70,
-        y: yPosition,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      page.drawText(`Study Type:`, {
-        x: col2X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      page.drawText(study.studyType, {
-        x: col2X + 70,
-        y: yPosition,
-        size: 9,
-        font: boldFont,
-        color: darkText
-      });
-      
-      yPosition -= 18;
-      
-      page.drawText(`Modality: ${study.modality}`, {
-        x: col1X,
-        y: yPosition,
-        size: 9,
-        font,
-        color: darkText
-      });
-      
-      if (study.bodyPart) {
-        page.drawText(`Body Part: ${study.bodyPart}`, {
-          x: col2X,
-          y: yPosition,
-          size: 9,
-          font,
-          color: darkText
-        });
-      }
-      
-      yPosition -= 30;
-      
-      // Clinical Notes Section
-      if (study.indication || study.findings) {
-        page.drawRectangle({
-          x: 30,
-          y: yPosition - 50,
-          width: width - 60,
-          height: 55,
-          color: yellowBg,
-          borderColor: rgb(0.9, 0.85, 0.3),
-          borderWidth: 1
-        });
-        
-        page.drawText('Clinical Notes:', {
-          x: 40,
-          y: yPosition,
-          size: 10,
-          font: boldFont,
-          color: darkText
-        });
-        
-        yPosition -= 20;
-        
-        const notesText = study.indication || study.findings || 'No clinical notes available';
-        page.drawText(notesText.substring(0, 120), {
-          x: 40,
-          y: yPosition,
-          size: 9,
-          font,
-          color: darkText
-        });
-        
-        yPosition -= 40;
-      }
-      
-      // Footer
-      const footerY = 50;
-      page.drawText(footerData?.address || 'Medical Center, Healthcare District', {
-        x: 40,
-        y: footerY + 40,
-        size: 8,
-        font,
-        color: darkText
-      });
-      
-      page.drawText(
-        req.user?.firstName && req.user?.lastName 
-          ? `${req.user.firstName} ${req.user.lastName}` 
-          : 'Authorized Medical Staff', {
-        x: width - 180,
-        y: footerY + 30,
-        size: 8,
-        font,
-        color: darkText
-      });
-      
-        // Generate and save PDF
-        pdfBytes = await pdfDoc.save();
-        await fse.outputFile(outputPath, pdfBytes);
-        
-        console.log(`[EMAIL-SHARE] Image prescription PDF generated: ${outputPath}`);
-      }
-      
-      // Send the email with PDF attachment
-      const patientName = `${patient.firstName} ${patient.lastName}`;
-      const studyType = study.studyDescription || study.studyType || 'Medical Imaging Study';
-      const sharedBy = req.user.email;
-      
-      // Customize email content based on shareSource
-      const isPrescription = shareSource === 'prescription';
-      const emailTitle = isPrescription ? 'Image Prescription' : 'Diagnostic Radiology Report';
-      const emailDescription = isPrescription ? 'imaging prescription' : 'diagnostic imaging report';
-
-      const emailSent = await emailService.sendEmail({
-        to: recipientEmail,
-        subject: `${isPrescription ? 'Image Prescription' : 'Imaging Report'} - ${patientName} - ${studyType}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); color: white; padding: 30px; text-align: center;">
-              <h1 style="margin: 0;">${emailTitle}</h1>
-            </div>
-            
-            <div style="padding: 30px; background-color: #f8fafc;">
-              <p>Dear Colleague,</p>
-              
-              <p>A ${emailDescription} has been shared with you by <strong>${sharedBy}</strong>:</p>
-              
-              <div style="background-color: white; padding: 20px; border-left: 4px solid #4F46E5; margin: 20px 0;">
-                <p><strong>Patient:</strong> ${patientName}</p>
-                <p><strong>Study Type:</strong> ${studyType}</p>
-                <p><strong>Image ID:</strong> ${imageId}</p>
-                <p><strong>Shared by:</strong> ${sharedBy}</p>
-                <p><strong>Date Shared:</strong> ${new Date().toLocaleDateString()}</p>
-              </div>
-              
-              ${customMessage ? `
-              <div style="background-color: #fffbeb; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0;">
-                <p><strong>Message from ${sharedBy}:</strong></p>
-                <p style="font-style: italic;">${customMessage}</p>
-              </div>
-              ` : ''}
-              
-              <p>The ${emailDescription} is attached to this email as a PDF document.</p>
-              
-              <p style="color: #dc2626; font-weight: bold;">⚠️ CONFIDENTIAL MEDICAL INFORMATION</p>
-              <p style="font-size: 12px; color: #666;">This ${isPrescription ? 'prescription' : 'study'} has been shared for medical consultation purposes. Please ensure appropriate patient confidentiality is maintained.</p>
-              
-              <p>Best regards,<br>Cura EMR Team</p>
-            </div>
-            
-            <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center; font-size: 12px;">
-              <p>© 2025 Cura EMR by Halo Group. All rights reserved.</p>
-            </div>
-          </div>
-        `,
-        text: `
-Dear Colleague,
-
-A ${emailDescription} has been shared with you by ${sharedBy}:
-
-Patient: ${patientName}
-Study Type: ${studyType}
-Image ID: ${imageId}
-Shared by: ${sharedBy}
-Date Shared: ${new Date().toLocaleDateString()}
-
-${customMessage ? `Message from ${sharedBy}: ${customMessage}\n` : ''}
-
-The ${emailDescription} is attached to this email.
-
-This ${isPrescription ? 'prescription' : 'study'} has been shared for medical consultation purposes. Please ensure appropriate patient confidentiality is maintained.
-
-Best regards,
-Cura EMR Team
-        `,
-        attachments: [
-          {
-            filename: fileName,
-            content: Buffer.from(pdfBytes),
-            contentType: 'application/pdf'
-          }
-        ]
-      });
-
-      if (emailSent) {
-        // Update orderStudyShared flag to true
-        try {
-          await storage.updateMedicalImage(studyId, req.tenant!.id, { orderStudyShared: true });
-          console.log(`[EMAIL-SHARE] Updated orderStudyShared flag for study ${studyId}`);
-        } catch (dbError) {
-          console.error(`[EMAIL-SHARE] Failed to update orderStudyShared flag:`, dbError);
-        }
-        
-        const docType = isPrescription ? 'image prescription' : 'imaging report';
-        console.log(`[EMAIL-SHARE] Successfully shared ${docType} ${studyId} with ${recipientEmail}`);
-        res.json({
-          success: true,
-          message: `${isPrescription ? 'Image prescription' : 'Imaging report'} shared successfully with ${recipientEmail}`,
-          studyId,
-          recipientEmail,
-          patientName
-        });
-      } else {
-        const docType = isPrescription ? 'image prescription' : 'imaging report';
-        console.error(`[EMAIL-SHARE] Failed to share ${docType} ${studyId} with ${recipientEmail}`);
-        res.status(500).json({
-          error: "Failed to send email. Please try again or contact support.",
-          studyId,
-          recipientEmail
-        });
-      }
-
-    } catch (error) {
-      console.error("[EMAIL-SHARE] Share imaging study error:", error);
-      res.status(500).json({ error: "Failed to share imaging study" });
-    }
-  });
-
-  // Check if PDF Report exists
-  app.head("/api/imaging/reports/:reportId", authMiddleware, async (req: TenantRequest, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { reportId } = req.params;
-      
-      // Find the study by imageId to get organizationId and patientId
-      const studies = await storage.getMedicalImagesByOrganization(req.tenant!.id);
-      const study = studies.find(s => s.imageId === reportId);
-      
-      if (!study) {
-        return res.status(404).send();
-      }
-      
-      const organizationId = study.organizationId;
-      const patientId = study.patientId;
-      
-      // PDF files are stored in uploads/Imaging_Reports/{organizationId}/patients/{patientId}/{imageId}.pdf
-      const filePath = path.resolve(
-        process.cwd(), 
-        'uploads', 
-        'Imaging_Reports', 
-        String(organizationId), 
-        'patients', 
-        String(patientId), 
-        `${reportId}.pdf`
-      );
-      
-      // Check if file exists
-      if (!(await fse.pathExists(filePath))) {
-        return res.status(404).send();
-      }
-      
-      res.status(200).send();
-
-    } catch (error) {
-      console.error("PDF check error:", error);
-      res.status(500).send();
-    }
-  });
-
-  // Serve PDF Reports (supports both header and query param authentication for iframe compatibility)
-  app.get("/api/imaging/reports/:reportId", async (req: TenantRequest, res) => {
-    try {
-      // Support both Authorization header and query parameter token for iframe compatibility
-      let token = req.headers.authorization?.replace('Bearer ', '');
-      if (!token && req.query.token) {
-        token = req.query.token as string;
-      }
-
-      console.log('📄 PDF ROUTE: Token check:', { 
-        hasAuthHeader: !!req.headers.authorization, 
-        hasQueryToken: !!req.query.token,
-        tokenLength: token?.length 
-      });
-
-      if (!token) {
-        console.log('📄 PDF ROUTE: No token found');
-        return res.status(401).json({ error: "Authentication required" });
-      }
-
-      // Verify the token using authService
-      const payload = authService.verifyToken(token);
-      
-      if (!payload) {
-        console.log('📄 PDF ROUTE: Token verification failed - invalid token');
-        return res.status(401).json({ error: "Invalid or expired token" });
-      }
-      
-      req.user = { 
-        id: payload.userId, 
-        email: payload.email, 
-        role: payload.role,
-        organizationId: payload.organizationId 
-      };
-      console.log('📄 PDF ROUTE: Token verified successfully for user:', req.user.email);
-
-      if (!req.user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { reportId } = req.params;
-      
-      // Use organizationId from the decoded token if tenant is not set
-      const orgId = req.tenant?.id || req.user.organizationId;
-      console.log('📄 PDF ROUTE: Using organizationId:', orgId);
-      
-      // Find the study by imageId to get organizationId and patientId
-      const studies = await storage.getMedicalImagesByOrganization(orgId);
-      const study = studies.find(s => s.imageId === reportId);
-      
-      if (!study) {
-        return res.status(404).json({ error: "Study not found" });
-      }
-      
-      const organizationId = study.organizationId;
-      const patientId = study.patientId;
-      
-      // PDF files are stored in uploads/Imaging_Reports/{organizationId}/patients/{patientId}/{imageId}.pdf
-      const filePath = path.resolve(
-        process.cwd(), 
-        'uploads', 
-        'Imaging_Reports', 
-        String(organizationId), 
-        'patients', 
-        String(patientId), 
-        `${reportId}.pdf`
-      );
-      
-      console.log('📄 PDF ROUTE: Serving file from:', filePath);
-      
-      // Check if file exists
-      if (!(await fse.pathExists(filePath))) {
-        return res.status(404).json({ error: "Report not found" });
-      }
-      
-      // Generate a meaningful filename for download (reportId is the image/study ID)
-      const downloadFilename = `radiology-report-${reportId}.pdf`;
-      
-      // Check if this is a download request vs view request
-      const isDownload = req.query.download === 'true';
-      
-      // Serve the PDF file
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${downloadFilename}"`);
-      res.sendFile(filePath);
-
-    } catch (error) {
-      console.error("PDF serving error:", error);
-      res.status(500).json({ error: "Failed to serve PDF report" });
-    }
-  });
-
-  // Delete PDF Report
-  app.delete("/api/imaging/reports/:reportId", authMiddleware, requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { reportId } = req.params;
-      
-      // Find the study by imageId to get organizationId and patientId
-      console.log(`📝 DELETE: Finding study by imageId: ${reportId}`);
-      const studies = await storage.getMedicalImagesByOrganization(req.tenant!.id);
-      const study = studies.find(s => s.imageId === reportId);
-      
-      if (!study) {
-        return res.status(404).json({ error: "Study not found" });
-      }
-      
-      const organizationId = study.organizationId;
-      const patientId = study.patientId;
-      
-      // PDF files are stored in uploads/Imaging_Reports/{organizationId}/patients/{patientId}/{imageId}.pdf
-      const filename = `${reportId}.pdf`;
-      const filePath = path.resolve(
-        process.cwd(), 
-        'uploads', 
-        'Imaging_Reports', 
-        String(organizationId), 
-        'patients', 
-        String(patientId), 
-        filename
-      );
-
-      // Check if file exists
-      if (!(await fse.pathExists(filePath))) {
-        return res.status(404).json({ error: "Report file not found" });
-      }
-
-      // Delete the file from the filesystem
-      await fse.remove(filePath);
-
-      // Clear the reportFileName and reportFilePath from the database
-      try {
-        if (study && study.id) {
-          // Update the database to clear both report fields (use null, not undefined, to actually set DB to NULL)
-          console.log(`📝 DELETE: Updating database for studyId: ${study.id}, imageId: ${reportId}, organizationId: ${req.tenant!.id}`);
-          await storage.updateMedicalImageReport(
-            study.id,
-            req.tenant!.id,
-            { 
-              reportFileName: null as any, 
-              reportFilePath: null as any 
-            }
-          );
-          console.log(`📝 DELETE: Database updated - set reportFileName and reportFilePath to NULL for studyId: ${study.id}`);
-        }
-      } catch (dbError) {
-        console.error(`⚠️ DELETE: Database update error:`, dbError);
-      }
-
-      console.log(`✅ PDF report deleted successfully: ${filename}`);
-      res.json({ 
-        success: true, 
-        message: "Report deleted successfully",
-        reportId: reportId
-      });
-
-    } catch (error) {
-      console.error("Error deleting PDF report:", error);
-      res.status(500).json({ error: "Failed to delete report" });
-    }
-  });
-
-  // Update Individual Report Field
-  app.patch("/api/imaging/studies/:studyId/report-field", authMiddleware, requireRole(["doctor", "nurse"]), async (req: TenantRequest, res) => {
-    try {
-      if (!req.user || !req.organizationId) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const { studyId } = req.params;
-      const { fieldName, value } = req.body;
-
-      // Validate request body
-      const validation = updateMedicalImageReportFieldSchema.safeParse({ fieldName, value });
-      if (!validation.success) {
-        return res.status(400).json({ error: "Invalid field data", details: validation.error.issues });
-      }
-
-      // Update the specific field
-      const updatedStudy = await storage.updateMedicalImageReportField(
-        parseInt(studyId),
-        req.organizationId,
-        fieldName,
-        value
-      );
-
-      if (!updatedStudy) {
-        return res.status(404).json({ error: "Study not found" });
-      }
-
-      res.json({
-        success: true,
-        studyId: updatedStudy.id,
-        updated: {
-          [fieldName]: value
-        }
-      });
-
-    } catch (error) {
-      console.error("Error updating report field:", error);
-      res.status(500).json({ error: "Failed to update report field" });
-    }
-  });
-
-  // ========================================
-  // QuickBooks Integration API Routes
-  // ========================================
-
-  // Get all QuickBooks connections for organization
-  app.get("/api/quickbooks/connections", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connections = await storage.getQuickBooksConnections(organizationId);
-      res.json(connections);
-    } catch (error) {
-      console.error("Error fetching QuickBooks connections:", error);
-      res.status(500).json({ error: "Failed to fetch connections" });
-    }
-  });
-
-  // Get active QuickBooks connection
-  app.get("/api/quickbooks/connection/active", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connection = await storage.getActiveQuickBooksConnection(organizationId);
-      if (!connection) {
-        return res.status(404).json({ error: "No active QuickBooks connection found" });
-      }
-      res.json(connection);
-    } catch (error) {
-      console.error("Error fetching active QuickBooks connection:", error);
-      res.status(500).json({ error: "Failed to fetch active connection" });
-    }
-  });
-
-  // Disconnect active QuickBooks connection
-  app.delete("/api/quickbooks/connection/active", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      
-      // Find and deactivate the active connection
-      const activeConnection = await db.select()
-        .from(quickbooksConnections)
-        .where(and(
-          eq(quickbooksConnections.organizationId, organizationId),
-          eq(quickbooksConnections.isActive, true)
-        ))
-        .limit(1);
-
-      if (activeConnection.length === 0) {
-        return res.status(404).json({ error: "No active QuickBooks connection found" });
-      }
-
-      // Deactivate the connection
-      await db.update(quickbooksConnections)
-        .set({ 
-          isActive: false,
-          updatedAt: new Date()
-        })
-        .where(eq(quickbooksConnections.id, activeConnection[0].id));
-
-      res.json({ success: true, message: "QuickBooks connection disconnected" });
-    } catch (error) {
-      console.error("Error disconnecting QuickBooks:", error);
-      res.status(500).json({ error: "Failed to disconnect QuickBooks" });
-    }
-  });
-
-  // Create QuickBooks connection (OAuth callback handler)
-  app.post("/api/quickbooks/connections", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      
-      const connectionSchema = z.object({
-        companyId: z.string(),
-        companyName: z.string(),
-        accessToken: z.string(),
-        refreshToken: z.string(),
-        tokenExpiry: z.string().transform((val) => new Date(val)),
-        realmId: z.string(),
-        baseUrl: z.string(),
-        syncSettings: z.object({
-          autoSync: z.boolean().optional(),
-          syncIntervalHours: z.number().optional(),
-          syncCustomers: z.boolean().optional(),
-          syncInvoices: z.boolean().optional(),
-          syncPayments: z.boolean().optional(),
-          syncItems: z.boolean().optional(),
-          syncAccounts: z.boolean().optional(),
-        }).optional(),
-      });
-
-      const validatedData = connectionSchema.parse(req.body);
-      
-      // Deactivate existing connections
-      const existingConnections = await storage.getQuickBooksConnections(organizationId);
-      for (const existing of existingConnections) {
-        if (existing.isActive) {
-          await storage.updateQuickBooksConnection(existing.id, organizationId, { isActive: false });
-        }
-      }
-
-      const connection = await storage.createQuickBooksConnection({
-        ...validatedData,
-        organizationId,
-        isActive: true,
-      });
-
-      res.status(201).json(connection);
-    } catch (error) {
-      console.error("Error creating QuickBooks connection:", error);
-      res.status(500).json({ error: "Failed to create connection" });
-    }
-  });
-
-  // Update QuickBooks connection
-  app.patch("/api/quickbooks/connections/:id", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = parseInt(req.params.id);
-
-      const updateSchema = z.object({
-        accessToken: z.string().optional(),
-        refreshToken: z.string().optional(),
-        tokenExpiry: z.string().transform((val) => new Date(val)).optional(),
-        isActive: z.boolean().optional(),
-        syncSettings: z.object({
-          autoSync: z.boolean().optional(),
-          syncIntervalHours: z.number().optional(),
-          syncCustomers: z.boolean().optional(),
-          syncInvoices: z.boolean().optional(),
-          syncPayments: z.boolean().optional(),
-          syncItems: z.boolean().optional(),
-          syncAccounts: z.boolean().optional(),
-        }).optional(),
-      });
-
-      const validatedData = updateSchema.parse(req.body);
-      const updatedConnection = await storage.updateQuickBooksConnection(connectionId, organizationId, validatedData);
-
-      if (!updatedConnection) {
-        return res.status(404).json({ error: "Connection not found" });
-      }
-
-      res.json(updatedConnection);
-    } catch (error) {
-      console.error("Error updating QuickBooks connection:", error);
-      res.status(500).json({ error: "Failed to update connection" });
-    }
-  });
-
-  // Delete QuickBooks connection
-  app.delete("/api/quickbooks/connections/:id", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = parseInt(req.params.id);
-
-      const success = await storage.deleteQuickBooksConnection(connectionId, organizationId);
-      if (!success) {
-        return res.status(404).json({ error: "Connection not found" });
-      }
-
-      res.json({ message: "Connection deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting QuickBooks connection:", error);
-      res.status(500).json({ error: "Failed to delete connection" });
-    }
-  });
-
-  // Get QuickBooks sync logs
-  app.get("/api/quickbooks/sync-logs", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-      const syncType = req.query.syncType as string | undefined;
-
-      const logs = await storage.getQuickBooksSyncLogs(organizationId, connectionId, syncType);
-      res.json(logs);
-    } catch (error) {
-      console.error("Error fetching QuickBooks sync logs:", error);
-      res.status(500).json({ error: "Failed to fetch sync logs" });
-    }
-  });
-
-  // Create QuickBooks sync log
-  app.post("/api/quickbooks/sync-logs", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-
-      const logSchema = z.object({
-        connectionId: z.number(),
-        syncType: z.string(),
-        operation: z.string(),
-        status: z.string().default("pending"),
-        recordsProcessed: z.number().default(0),
-        recordsSuccessful: z.number().default(0),
-        recordsFailed: z.number().default(0),
-        startTime: z.string().transform((val) => new Date(val)),
-        endTime: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        errorDetails: z.any().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = logSchema.parse(req.body);
-      const log = await storage.createQuickBooksSyncLog({
-        ...validatedData,
-        organizationId,
-      });
-
-      res.status(201).json(log);
-    } catch (error) {
-      console.error("Error creating QuickBooks sync log:", error);
-      res.status(500).json({ error: "Failed to create sync log" });
-    }
-  });
-
-  // Update QuickBooks sync log
-  app.patch("/api/quickbooks/sync-logs/:id", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const logId = parseInt(req.params.id);
-
-      const updateSchema = z.object({
-        status: z.string().optional(),
-        recordsProcessed: z.number().optional(),
-        recordsSuccessful: z.number().optional(),
-        recordsFailed: z.number().optional(),
-        endTime: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        errorDetails: z.any().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = updateSchema.parse(req.body);
-      const updatedLog = await storage.updateQuickBooksSyncLog(logId, validatedData);
-
-      if (!updatedLog) {
-        return res.status(404).json({ error: "Sync log not found" });
-      }
-
-      res.json(updatedLog);
-    } catch (error) {
-      console.error("Error updating QuickBooks sync log:", error);
-      res.status(500).json({ error: "Failed to update sync log" });
-    }
-  });
-
-  // Get QuickBooks customer mappings
-  app.get("/api/quickbooks/customer-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-
-      const mappings = await storage.getQuickBooksCustomerMappings(organizationId, connectionId);
-      res.json(mappings);
-    } catch (error) {
-      console.error("Error fetching QuickBooks customer mappings:", error);
-      res.status(500).json({ error: "Failed to fetch customer mappings" });
-    }
-  });
-
-  // Create QuickBooks customer mapping
-  app.post("/api/quickbooks/customer-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-
-      const mappingSchema = z.object({
-        connectionId: z.number(),
-        patientId: z.number(),
-        quickbooksCustomerId: z.string(),
-        quickbooksDisplayName: z.string().optional(),
-        syncStatus: z.string().default("synced"),
-        lastSyncAt: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = mappingSchema.parse(req.body);
-      const mapping = await storage.createQuickBooksCustomerMapping({
-        ...validatedData,
-        organizationId,
-      });
-
-      res.status(201).json(mapping);
-    } catch (error) {
-      console.error("Error creating QuickBooks customer mapping:", error);
-      res.status(500).json({ error: "Failed to create customer mapping" });
-    }
-  });
-
-  // Get QuickBooks invoice mappings
-  app.get("/api/quickbooks/invoice-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-
-      const mappings = await storage.getQuickBooksInvoiceMappings(organizationId, connectionId);
-      res.json(mappings);
-    } catch (error) {
-      console.error("Error fetching QuickBooks invoice mappings:", error);
-      res.status(500).json({ error: "Failed to fetch invoice mappings" });
-    }
-  });
-
-  // Create QuickBooks invoice mapping
-  app.post("/api/quickbooks/invoice-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-
-      const mappingSchema = z.object({
-        connectionId: z.number(),
-        emrInvoiceId: z.string(),
-        quickbooksInvoiceId: z.string(),
-        quickbooksInvoiceNumber: z.string().optional(),
-        patientId: z.number(),
-        customerId: z.number().optional(),
-        amount: z.string(),
-        status: z.string(),
-        syncStatus: z.string().default("synced"),
-        lastSyncAt: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = mappingSchema.parse(req.body);
-      const mapping = await storage.createQuickBooksInvoiceMapping({
-        ...validatedData,
-        organizationId,
-      });
-
-      res.status(201).json(mapping);
-    } catch (error) {
-      console.error("Error creating QuickBooks invoice mapping:", error);
-      res.status(500).json({ error: "Failed to create invoice mapping" });
-    }
-  });
-
-  // Get QuickBooks payment mappings
-  app.get("/api/quickbooks/payment-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-
-      const mappings = await storage.getQuickBooksPaymentMappings(organizationId, connectionId);
-      res.json(mappings);
-    } catch (error) {
-      console.error("Error fetching QuickBooks payment mappings:", error);
-      res.status(500).json({ error: "Failed to fetch payment mappings" });
-    }
-  });
-
-  // Create QuickBooks payment mapping
-  app.post("/api/quickbooks/payment-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-
-      const mappingSchema = z.object({
-        connectionId: z.number(),
-        emrPaymentId: z.string(),
-        quickbooksPaymentId: z.string(),
-        invoiceMappingId: z.number().optional(),
-        amount: z.string(),
-        paymentMethod: z.string(),
-        paymentDate: z.string().transform((val) => new Date(val)),
-        syncStatus: z.string().default("synced"),
-        lastSyncAt: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = mappingSchema.parse(req.body);
-      const mapping = await storage.createQuickBooksPaymentMapping({
-        ...validatedData,
-        organizationId,
-      });
-
-      res.status(201).json(mapping);
-    } catch (error) {
-      console.error("Error creating QuickBooks payment mapping:", error);
-      res.status(500).json({ error: "Failed to create payment mapping" });
-    }
-  });
-
-  // Get QuickBooks account mappings
-  app.get("/api/quickbooks/account-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-
-      const mappings = await storage.getQuickBooksAccountMappings(organizationId, connectionId);
-      res.json(mappings);
-    } catch (error) {
-      console.error("Error fetching QuickBooks account mappings:", error);
-      res.status(500).json({ error: "Failed to fetch account mappings" });
-    }
-  });
-
-  // Create QuickBooks account mapping
-  app.post("/api/quickbooks/account-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-
-      const mappingSchema = z.object({
-        connectionId: z.number(),
-        emrAccountType: z.string(),
-        emrAccountName: z.string(),
-        quickbooksAccountId: z.string(),
-        quickbooksAccountName: z.string(),
-        accountType: z.string(),
-        accountSubType: z.string().optional(),
-        isActive: z.boolean().default(true),
-        syncStatus: z.string().default("synced"),
-        lastSyncAt: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = mappingSchema.parse(req.body);
-      const mapping = await storage.createQuickBooksAccountMapping({
-        ...validatedData,
-        organizationId,
-      });
-
-      res.status(201).json(mapping);
-    } catch (error) {
-      console.error("Error creating QuickBooks account mapping:", error);
-      res.status(500).json({ error: "Failed to create account mapping" });
-    }
-  });
-
-  // Get QuickBooks item mappings
-  app.get("/api/quickbooks/item-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-
-      const mappings = await storage.getQuickBooksItemMappings(organizationId, connectionId);
-      res.json(mappings);
-    } catch (error) {
-      console.error("Error fetching QuickBooks item mappings:", error);
-      res.status(500).json({ error: "Failed to fetch item mappings" });
-    }
-  });
-
-  // Create QuickBooks item mapping
-  app.post("/api/quickbooks/item-mappings", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-
-      const mappingSchema = z.object({
-        connectionId: z.number(),
-        emrItemType: z.string(),
-        emrItemId: z.string(),
-        emrItemName: z.string(),
-        quickbooksItemId: z.string(),
-        quickbooksItemName: z.string(),
-        itemType: z.string(),
-        unitPrice: z.string().optional(),
-        description: z.string().optional(),
-        incomeAccountId: z.string().optional(),
-        expenseAccountId: z.string().optional(),
-        isActive: z.boolean().default(true),
-        syncStatus: z.string().default("synced"),
-        lastSyncAt: z.string().transform((val) => new Date(val)).optional(),
-        errorMessage: z.string().optional(),
-        metadata: z.any().optional(),
-      });
-
-      const validatedData = mappingSchema.parse(req.body);
-      const mapping = await storage.createQuickBooksItemMapping({
-        ...validatedData,
-        organizationId,
-      });
-
-      res.status(201).json(mapping);
-    } catch (error) {
-      console.error("Error creating QuickBooks item mapping:", error);
-      res.status(500).json({ error: "Failed to create item mapping" });
-    }
-  });
-
-  // Get QuickBooks sync configurations
-  app.get("/api/quickbooks/sync-configs", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connectionId = req.query.connectionId ? parseInt(req.query.connectionId as string) : undefined;
-
-      const configs = await storage.getQuickBooksSyncConfigs(organizationId, connectionId);
-      res.json(configs);
-    } catch (error) {
-      console.error("Error fetching QuickBooks sync configurations:", error);
-      res.status(500).json({ error: "Failed to fetch sync configurations" });
-    }
-  });
-
-  // Create QuickBooks sync configuration
-  app.post("/api/quickbooks/sync-configs", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const userId = req.user?.id;
-
-      if (!userId) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const configSchema = z.object({
-        connectionId: z.number(),
-        configType: z.string(),
-        configName: z.string(),
-        configValue: z.any(),
-        isActive: z.boolean().default(true),
-        description: z.string().optional(),
-      });
-
-      const validatedData = configSchema.parse(req.body);
-      const config = await storage.createQuickBooksSyncConfig({
-        ...validatedData,
-        organizationId,
-        createdBy: userId,
-      });
-
-      res.status(201).json(config);
-    } catch (error) {
-      console.error("Error creating QuickBooks sync configuration:", error);
-      res.status(500).json({ error: "Failed to create sync configuration" });
-    }
-  });
-
-  // Manual sync trigger endpoints
-  app.post("/api/quickbooks/sync/customers", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connection = await storage.getActiveQuickBooksConnection(organizationId);
-      
-      if (!connection) {
-        return res.status(400).json({ error: "No active QuickBooks connection found" });
-      }
-
-      // Create sync log entry
-      const syncLog = await storage.createQuickBooksSyncLog({
-        organizationId,
-        connectionId: connection.id,
-        syncType: "customers",
-        operation: "sync",
-        status: "pending",
-        startTime: new Date(),
-        recordsProcessed: 0,
-        recordsSuccessful: 0,
-        recordsFailed: 0,
-      });
-
-      // In a real implementation, this would trigger actual QuickBooks API calls
-      // For now, we'll just update the log as successful
-      await storage.updateQuickBooksSyncLog(syncLog.id, {
-        status: "success",
-        endTime: new Date(),
-        recordsProcessed: 0,
-        recordsSuccessful: 0,
-        recordsFailed: 0,
-      });
-
-      res.json({ message: "Customer sync initiated", syncLogId: syncLog.id });
-    } catch (error) {
-      console.error("Error initiating customer sync:", error);
-      res.status(500).json({ error: "Failed to initiate customer sync" });
-    }
-  });
-
-  app.post("/api/quickbooks/sync/invoices", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connection = await storage.getActiveQuickBooksConnection(organizationId);
-      
-      if (!connection) {
-        return res.status(400).json({ error: "No active QuickBooks connection found" });
-      }
-
-      // Create sync log entry
-      const syncLog = await storage.createQuickBooksSyncLog({
-        organizationId,
-        connectionId: connection.id,
-        syncType: "invoices",
-        operation: "sync",
-        status: "pending",
-        startTime: new Date(),
-        recordsProcessed: 0,
-        recordsSuccessful: 0,
-        recordsFailed: 0,
-      });
-
-      // In a real implementation, this would trigger actual QuickBooks API calls
-      await storage.updateQuickBooksSyncLog(syncLog.id, {
-        status: "success",
-        endTime: new Date(),
-        recordsProcessed: 0,
-        recordsSuccessful: 0,
-        recordsFailed: 0,
-      });
-
-      res.json({ message: "Invoice sync initiated", syncLogId: syncLog.id });
-    } catch (error) {
-      console.error("Error initiating invoice sync:", error);
-      res.status(500).json({ error: "Failed to initiate invoice sync" });
-    }
-  });
-
-  app.post("/api/quickbooks/sync/payments", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const connection = await storage.getActiveQuickBooksConnection(organizationId);
-      
-      if (!connection) {
-        return res.status(400).json({ error: "No active QuickBooks connection found" });
-      }
-
-      // Create sync log entry
-      const syncLog = await storage.createQuickBooksSyncLog({
-        organizationId,
-        connectionId: connection.id,
-        syncType: "payments",
-        operation: "sync",
-        status: "pending",
-        startTime: new Date(),
-        recordsProcessed: 0,
-        recordsSuccessful: 0,
-        recordsFailed: 0,
-      });
-
-      // In a real implementation, this would trigger actual QuickBooks API calls
-      await storage.updateQuickBooksSyncLog(syncLog.id, {
-        status: "success",
-        endTime: new Date(),
-        recordsProcessed: 0,
-        recordsSuccessful: 0,
-        recordsFailed: 0,
-      });
-
-      res.json({ message: "Payment sync initiated", syncLogId: syncLog.id });
-    } catch (error) {
-      console.error("Error initiating payment sync:", error);
-      res.status(500).json({ error: "Failed to initiate payment sync" });
-    }
-  });
-
-  // QuickBooks OAuth authentication endpoints
-  app.get("/api/quickbooks/auth/url", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      console.log("[QUICKBOOKS] OAuth URL endpoint reached!");
-      const clientId = process.env.QUICKBOOKS_CLIENT_ID;
-      console.log("[QUICKBOOKS] Client ID exists:", !!clientId);
-      const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5000'}/api/quickbooks/auth/callback`;
-      console.log("[QUICKBOOKS] Redirect URI:", redirectUri);
-      
-      if (!clientId) {
-        console.log("[QUICKBOOKS] ERROR: Client ID is missing!");
-        return res.status(500).json({ error: "QuickBooks Client ID not configured" });
-      }
-      
-      // Include organization ID in state to preserve tenant context through OAuth flow
-      const organizationId = req.tenant?.id;
-      const stateData = JSON.stringify({ orgId: organizationId, token: 'security_token' });
-      const state = Buffer.from(stateData).toString('base64');
-      console.log("[QUICKBOOKS] State with orgId:", organizationId);
-      
-      const oauthUrl = `https://appcenter.intuit.com/connect/oauth2?client_id=${clientId}&scope=com.intuit.quickbooks.accounting&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=${encodeURIComponent(state)}&access_type=offline`;
-      console.log("[QUICKBOOKS] Generated OAuth URL, sending response...");
-      res.json({ url: oauthUrl });
-      console.log("[QUICKBOOKS] Response sent successfully");
-    } catch (error) {
-      console.error("[QUICKBOOKS] Error generating OAuth URL:", error);
-      res.status(500).json({ error: "Failed to generate OAuth URL" });
-    }
-  });
-
-  // QuickBooks Data Fetching Endpoints
-  // Helper function to get QuickBooks connection and make API calls
-  const getQuickBooksConnection = async (organizationId: number) => {
-    const [connection] = await db.select()
-      .from(quickbooksConnections)
-      .where(and(
-        eq(quickbooksConnections.organizationId, organizationId),
-        eq(quickbooksConnections.isActive, true)
-      ))
-      .limit(1);
-
-    if (!connection) {
-      throw new Error('No active QuickBooks connection found');
-    }
-
-    return connection;
-  };
-
-  // Helper to make QuickBooks API requests using OAuth2
-  const makeQuickBooksRequest = async (connection: any, endpoint: string) => {
-    const baseUrl = connection.baseUrl || 'https://sandbox-quickbooks.api.intuit.com';
-    const url = `${baseUrl}/v3/company/${connection.realmId}/${endpoint}`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${connection.accessToken}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`QuickBooks API error: ${response.status} - ${errorText}`);
-    }
-
-    return response.json();
-  };
-
-  // Fetch QuickBooks Company Info
-  app.get("/api/quickbooks/data/company-info", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const connection = await getQuickBooksConnection(organizationId);
-      const data = await makeQuickBooksRequest(connection, `companyinfo/${connection.realmId}`);
-      res.json(data.CompanyInfo);
-    } catch (error: any) {
-      console.error("Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch company info" });
-    }
-  });
-
-  // Fetch QuickBooks Invoices
-  app.get("/api/quickbooks/data/invoices", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const connection = await getQuickBooksConnection(organizationId);
-      const data = await makeQuickBooksRequest(connection, `query?query=${encodeURIComponent('SELECT * FROM Invoice MAXRESULTS 100')}`);
-      res.json(data.QueryResponse?.Invoice || []);
-    } catch (error: any) {
-      console.error("Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch invoices" });
-    }
-  });
-
-  // Fetch QuickBooks Profit & Loss Report
-  app.get("/api/quickbooks/data/profit-loss", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const connection = await getQuickBooksConnection(organizationId);
-      const { startDate, endDate } = req.query;
-      const start = startDate as string || '2024-01-01';
-      const end = endDate as string || '2024-12-31';
-      const data = await makeQuickBooksRequest(connection, `reports/ProfitAndLoss?start_date=${start}&end_date=${end}&accounting_method=Accrual`);
-      res.json(data);
-    } catch (error: any) {
-      console.error("Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch P&L report" });
-    }
-  });
-
-  // Fetch QuickBooks Expenses/Purchases
-  app.get("/api/quickbooks/data/expenses", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const connection = await getQuickBooksConnection(organizationId);
-      const data = await makeQuickBooksRequest(connection, `query?query=${encodeURIComponent('SELECT * FROM Purchase MAXRESULTS 100')}`);
-      res.json(data.QueryResponse?.Purchase || []);
-    } catch (error: any) {
-      console.error("Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch expenses" });
-    }
-  });
-
-  // Fetch QuickBooks Accounts
-  app.get("/api/quickbooks/data/accounts", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const connection = await getQuickBooksConnection(organizationId);
-      const data = await makeQuickBooksRequest(connection, `query?query=${encodeURIComponent('SELECT * FROM Account MAXRESULTS 100')}`);
-      res.json(data.QueryResponse?.Account || []);
-    } catch (error: any) {
-      console.error("Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch accounts" });
-    }
-  });
-
-  // Fetch QuickBooks Customers
-  app.get("/api/quickbooks/data/customers", authMiddleware, requireNonPatientRole(), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const connection = await getQuickBooksConnection(organizationId);
-      const data = await makeQuickBooksRequest(connection, `query?query=${encodeURIComponent('SELECT * FROM Customer MAXRESULTS 100')}`);
-      res.json(data.QueryResponse?.Customer || []);
-    } catch (error: any) {
-      console.error("Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch customers" });
-    }
-  });
-
-
-  // Symptom Checker Endpoints
-  app.post('/api/symptom-checker/analyze', authMiddleware, multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const { symptoms, symptomDescription, duration, severity, patientId } = req.body;
-      
-      if (!symptoms || symptoms.length === 0 || !symptomDescription) {
-        return res.status(400).json({ error: "Symptoms and description are required" });
-      }
-
-      const organizationId = req.tenant!.id;
-      const userId = req.user!.id;
-
-      // Look up patient record for this user (if they have one)
-      let finalPatientId = patientId || null;
-      if (!finalPatientId) {
-        const [patientRecord] = await db.select()
-          .from(patients)
-          .where(and(
-            eq(patients.userId, userId),
-            eq(patients.organizationId, organizationId)
-          ))
-          .limit(1);
-        
-        if (patientRecord) {
-          finalPatientId = patientRecord.id;
-        }
-      }
-
-      // Use AI service to analyze symptoms and provide diagnosis
-      const aiAnalysis = await aiService.analyzeSymptoms({
-        symptoms,
-        symptomDescription,
-        duration,
-        severity
-      });
-
-      // Save symptom check to database
-      const [symptomCheck] = await db.insert(symptomChecks).values({
-        organizationId,
-        patientId: finalPatientId,
-        userId,
-        symptoms,
-        symptomDescription,
-        duration: duration || null,
-        severity: severity || null,
-        aiAnalysis,
-        status: 'completed'
-      }).returning();
-
-      res.json({
-        success: true,
-        symptomCheck,
-        analysis: aiAnalysis
-      });
-    } catch (error) {
-      console.error("Error analyzing symptoms:", error);
-      res.status(500).json({ error: "Failed to analyze symptoms" });
-    }
-  });
-
-  app.get('/api/symptom-checker/history', authMiddleware, multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.tenant!.id;
-      const userId = req.user!.id;
-      const userRole = req.user!.role;
-
-      // Patients see only their own history, others see all
-      let history;
-      if (userRole === 'patient') {
-        history = await db.select({
-          id: symptomChecks.id,
-          organizationId: symptomChecks.organizationId,
-          patientId: symptomChecks.patientId,
-          userId: symptomChecks.userId,
-          symptoms: symptomChecks.symptoms,
-          symptomDescription: symptomChecks.symptomDescription,
-          duration: symptomChecks.duration,
-          severity: symptomChecks.severity,
-          aiAnalysis: symptomChecks.aiAnalysis,
-          status: symptomChecks.status,
-          createdAt: symptomChecks.createdAt,
-          updatedAt: symptomChecks.updatedAt,
-          patient: {
-            id: patients.id,
-            patientId: patients.patientId,
-            firstName: patients.firstName,
-            lastName: patients.lastName,
-            dateOfBirth: patients.dateOfBirth,
-            phone: patients.phone,
-            email: patients.email
-          }
-        })
-          .from(symptomChecks)
-          .leftJoin(patients, eq(symptomChecks.patientId, patients.id))
-          .where(and(
-            eq(symptomChecks.organizationId, organizationId),
-            eq(symptomChecks.patientId, userId)
-          ))
-          .orderBy(desc(symptomChecks.createdAt));
-      } else {
-        history = await db.select({
-          id: symptomChecks.id,
-          organizationId: symptomChecks.organizationId,
-          patientId: symptomChecks.patientId,
-          userId: symptomChecks.userId,
-          symptoms: symptomChecks.symptoms,
-          symptomDescription: symptomChecks.symptomDescription,
-          duration: symptomChecks.duration,
-          severity: symptomChecks.severity,
-          aiAnalysis: symptomChecks.aiAnalysis,
-          status: symptomChecks.status,
-          createdAt: symptomChecks.createdAt,
-          updatedAt: symptomChecks.updatedAt,
-          patient: {
-            id: patients.id,
-            patientId: patients.patientId,
-            firstName: patients.firstName,
-            lastName: patients.lastName,
-            dateOfBirth: patients.dateOfBirth,
-            phone: patients.phone,
-            email: patients.email
-          }
-        })
-          .from(symptomChecks)
-          .leftJoin(patients, eq(symptomChecks.patientId, patients.id))
-          .where(eq(symptomChecks.organizationId, organizationId))
-          .orderBy(desc(symptomChecks.createdAt));
-      }
-
-      res.json(history);
-    } catch (error) {
-      console.error("Error fetching symptom check history:", error);
-      res.status(500).json({ error: "Failed to fetch history" });
-    }
-  });
-
-  // ========================================
-  // Pricing Management API Routes
-  // ========================================
-
-  // Doctors Fee Routes
-  app.get("/api/pricing/doctors-fees", authMiddleware, requireRole(['admin', 'doctor', 'nurse', 'patient']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const fees = await storage.getDoctorsFees(organizationId);
-      res.json(fees);
-    } catch (error) {
-      handleRouteError(error, "fetch doctors fees", res);
-    }
-  });
-
-  app.get("/api/pricing/doctors-fees/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const fee = await storage.getDoctorsFee(parseInt(req.params.id), organizationId);
-      if (!fee) {
-        return res.status(404).json({ error: "Doctors fee not found" });
-      }
-      res.json(fee);
-    } catch (error) {
-      handleRouteError(error, "fetch doctors fee", res);
-    }
-  });
-
-  app.post("/api/pricing/doctors-fees", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const payload = enforceCreatedBy(req, {
-        ...req.body,
-        organizationId
-      }, 'createdBy');
-      
-      const fee = await storage.createDoctorsFee(payload);
-      res.status(201).json(fee);
-    } catch (error) {
-      handleRouteError(error, "create doctors fee", res);
-    }
-  });
-
-  app.patch("/api/pricing/doctors-fees/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const updated = await storage.updateDoctorsFee(parseInt(req.params.id), organizationId, req.body);
-      if (!updated) {
-        return res.status(404).json({ error: "Doctors fee not found" });
-      }
-      res.json(updated);
-    } catch (error) {
-      handleRouteError(error, "update doctors fee", res);
-    }
-  });
-
-  app.delete("/api/pricing/doctors-fees/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const success = await storage.deleteDoctorsFee(parseInt(req.params.id), organizationId);
-      if (!success) {
-        return res.status(404).json({ error: "Doctors fee not found" });
-      }
-      res.json({ message: "Doctors fee deleted successfully" });
-    } catch (error) {
-      handleRouteError(error, "delete doctors fee", res);
-    }
-  });
-
-  // Lab Test Pricing Routes
-  app.get("/api/pricing/lab-tests", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const pricing = await storage.getLabTestPricing(organizationId);
-      res.json(pricing);
-    } catch (error) {
-      handleRouteError(error, "fetch lab test pricing", res);
-    }
-  });
-
-  app.get("/api/pricing/lab-tests/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const pricing = await storage.getLabTestPricingById(parseInt(req.params.id), organizationId);
-      if (!pricing) {
-        return res.status(404).json({ error: "Lab test pricing not found" });
-      }
-      res.json(pricing);
-    } catch (error) {
-      handleRouteError(error, "fetch lab test pricing", res);
-    }
-  });
-
-  app.post("/api/pricing/lab-tests", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const payload = enforceCreatedBy(req, {
-        ...req.body,
-        organizationId
-      }, 'createdBy');
-      
-      const pricing = await storage.createLabTestPricing(payload);
-      res.status(201).json(pricing);
-    } catch (error) {
-      handleRouteError(error, "create lab test pricing", res);
-    }
-  });
-
-  app.patch("/api/pricing/lab-tests/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const updated = await storage.updateLabTestPricing(parseInt(req.params.id), organizationId, req.body);
-      if (!updated) {
-        return res.status(404).json({ error: "Lab test pricing not found" });
-      }
-      res.json(updated);
-    } catch (error) {
-      handleRouteError(error, "update lab test pricing", res);
-    }
-  });
-
-  app.delete("/api/pricing/lab-tests/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const success = await storage.deleteLabTestPricing(parseInt(req.params.id), organizationId);
-      if (!success) {
-        return res.status(404).json({ error: "Lab test pricing not found" });
-      }
-      res.json({ message: "Lab test pricing deleted successfully" });
-    } catch (error) {
-      handleRouteError(error, "delete lab test pricing", res);
-    }
-  });
-
-  // Imaging Pricing Routes
-  app.get("/api/pricing/imaging", authMiddleware, requireRole(['doctor', 'nurse', 'patient', 'admin']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const pricing = await storage.getImagingPricing(organizationId);
-      res.json(pricing);
-    } catch (error) {
-      handleRouteError(error, "fetch imaging pricing", res);
-    }
-  });
-
-  app.get("/api/pricing/imaging/:id", authMiddleware, requireRole(['doctor', 'nurse', 'patient', 'admin']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const pricing = await storage.getImagingPricingById(parseInt(req.params.id), organizationId);
-      if (!pricing) {
-        return res.status(404).json({ error: "Imaging pricing not found" });
-      }
-      res.json(pricing);
-    } catch (error) {
-      handleRouteError(error, "fetch imaging pricing", res);
-    }
-  });
-
-  app.post("/api/pricing/imaging", authMiddleware, requireRole(['admin']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const payload = enforceCreatedBy(req, {
-        ...req.body,
-        organizationId
-      }, 'createdBy');
-      
-      const pricing = await storage.createImagingPricing(payload);
-      res.status(201).json(pricing);
-    } catch (error) {
-      handleRouteError(error, "create imaging pricing", res);
-    }
-  });
-
-  app.patch("/api/pricing/imaging/:id", authMiddleware, requireRole(['admin']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const updated = await storage.updateImagingPricing(parseInt(req.params.id), organizationId, req.body);
-      if (!updated) {
-        return res.status(404).json({ error: "Imaging pricing not found" });
-      }
-      res.json(updated);
-    } catch (error) {
-      handleRouteError(error, "update imaging pricing", res);
-    }
-  });
-
-  app.delete("/api/pricing/imaging/:id", authMiddleware, requireRole(['admin']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const success = await storage.deleteImagingPricing(parseInt(req.params.id), organizationId);
-      if (!success) {
-        return res.status(404).json({ error: "Imaging pricing not found" });
-      }
-      res.json({ message: "Imaging pricing deleted successfully" });
-    } catch (error) {
-      handleRouteError(error, "delete imaging pricing", res);
-    }
-  });
-
-  // Treatments Pricing Routes
-  app.get("/api/pricing/treatments", authMiddleware, requireRole(['admin', 'doctor', 'nurse', 'patient']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const entries = await storage.getTreatments(organizationId);
-      res.json(entries);
-    } catch (error) {
-      handleRouteError(error, "fetch treatments pricing", res);
-    }
-  });
-
-  app.post("/api/pricing/treatments", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      
-      // BUILD A CLEAN OBJECT: Drizzle-Zod can be very picky about extra fields or types
-      const cleanPayload: any = {
-        organizationId,
-        createdBy: req.user!.id,
-        name: String(req.body.name || "").trim(),
-        basePrice: String(req.body.basePrice || "0"),
-        colorCode: String(req.body.colorCode || "#2563eb"),
-        currency: String(req.body.currency || "GBP"),
-        isActive: req.body.isActive ?? true,
-        version: Number(req.body.version || 1),
-        notes: req.body.notes ? String(req.body.notes) : null,
-        metadata: req.body.metadata || {}
-      };
-
-      // Only add doctor fields if they are provided
-      if (req.body.doctorId) cleanPayload.doctorId = Number(req.body.doctorId);
-      if (req.body.doctorName) cleanPayload.doctorName = String(req.body.doctorName);
-      if (req.body.doctorRole) cleanPayload.doctorRole = String(req.body.doctorRole);
-
-      console.log("Saving treatment with clean payload:", JSON.stringify(cleanPayload, null, 2));
-
-      // Use the schema to validate the clean object
-      const validatedData = insertTreatmentSchema.parse(cleanPayload);
-      const treatment = await storage.createTreatment(validatedData);
-      res.status(201).json(treatment);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        console.error("Treatment validation failed:", JSON.stringify(error.format(), null, 2));
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: error.format(),
-          receivedData: req.body 
-        });
-      }
-      handleRouteError(error, "create treatment pricing", res);
-    }
-  });
-
-  // Treatments Info (name + color metadata)
-  app.post("/api/treatments-info", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = req.organizationId ?? req.user?.organizationId;
-      if (!organizationId) {
-        throw new Error("Organization context is missing for treatments info creation");
-      }
-      const payloadWithOrg = {
-        ...req.body,
-        organizationId
-      };
-      const preparedPayload = enforceCreatedBy(req, payloadWithOrg, 'createdBy');
-      const validatedPayload = insertTreatmentsInfoSchema.parse(preparedPayload);
-      const info = await storage.createTreatmentsInfo(validatedPayload);
-      res.status(201).json(info);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        console.error("Treatments info validation failed:", JSON.stringify(error.format(), null, 2));
-        return res.status(400).json({
-          error: "Validation failed",
-          details: error.format(),
-          receivedData: req.body
-        });
-      }
-      handleRouteError(error, "create treatments info", res);
-    }
-  });
-
-  app.get("/api/treatments-info", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const infos = await storage.getTreatmentsInfo(organizationId);
-      res.json(infos);
-    } catch (error) {
-      handleRouteError(error, "fetch treatments info", res);
-    }
-  });
-
-  app.patch("/api/treatments-info/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const updatePayload: any = {};
-
-      if (req.body.name !== undefined) updatePayload.name = String(req.body.name).trim();
-      if (req.body.colorCode !== undefined) updatePayload.colorCode = String(req.body.colorCode);
-
-      const validatedData = insertTreatmentsInfoSchema.partial().parse(updatePayload);
-      const updated = await storage.updateTreatmentsInfo(parseInt(req.params.id), organizationId, validatedData);
-
-      if (!updated) {
-        return res.status(404).json({ error: "Treatment metadata not found" });
-      }
-
-      res.json(updated);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        console.error("Treatments info update validation failed:", JSON.stringify(error.format(), null, 2));
-        return res.status(400).json({
-          error: "Validation failed",
-          details: error.format(),
-          receivedData: req.body
-        });
-      }
-      handleRouteError(error, "update treatments info", res);
-    }
-  });
-
-  app.delete("/api/treatments-info/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const success = await storage.deleteTreatmentsInfo(parseInt(req.params.id), organizationId);
-      if (!success) {
-        return res.status(404).json({ error: "Treatment metadata not found" });
-      }
-      res.json({ message: "Treatment metadata deleted successfully" });
-    } catch (error) {
-      handleRouteError(error, "delete treatments info", res);
-    }
-  });
-
-  app.patch("/api/pricing/treatments/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      
-      // BUILD A CLEAN UPDATE OBJECT
-      const updatePayload: any = {};
-      if (req.body.name !== undefined) updatePayload.name = String(req.body.name).trim();
-      if (req.body.basePrice !== undefined) updatePayload.basePrice = String(req.body.basePrice);
-      if (req.body.colorCode !== undefined) updatePayload.colorCode = String(req.body.colorCode);
-      if (req.body.currency !== undefined) updatePayload.currency = String(req.body.currency);
-      if (req.body.isActive !== undefined) updatePayload.isActive = !!req.body.isActive;
-      if (req.body.version !== undefined) updatePayload.version = Number(req.body.version);
-      if (req.body.notes !== undefined) updatePayload.notes = req.body.notes ? String(req.body.notes) : null;
-      if (req.body.metadata !== undefined) updatePayload.metadata = req.body.metadata;
-      
-      if (req.body.doctorId !== undefined) updatePayload.doctorId = req.body.doctorId ? Number(req.body.doctorId) : null;
-      if (req.body.doctorName !== undefined) updatePayload.doctorName = req.body.doctorName ? String(req.body.doctorName) : null;
-      if (req.body.doctorRole !== undefined) updatePayload.doctorRole = req.body.doctorRole ? String(req.body.doctorRole) : null;
-
-      console.log(`Updating treatment ${req.params.id} with clean payload:`, JSON.stringify(updatePayload, null, 2));
-
-      // Validate update payload with partial schema
-      const validatedData = insertTreatmentSchema.partial().parse(updatePayload);
-      
-      const updated = await storage.updateTreatment(parseInt(req.params.id), organizationId, validatedData);
-      
-      if (!updated) {
-        return res.status(404).json({ error: "Treatment pricing not found" });
-      }
-      res.json(updated);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        console.error("Treatment update validation failed:", JSON.stringify(error.format(), null, 2));
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: error.format(),
-          receivedData: req.body 
-        });
-      }
-      handleRouteError(error, "update treatment pricing", res);
-    }
-  });
-
-  app.delete("/api/pricing/treatments/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const success = await storage.deleteTreatment(parseInt(req.params.id), organizationId);
-      if (!success) {
-        return res.status(404).json({ error: "Treatment pricing not found" });
-      }
-      res.json({ message: "Treatment pricing deleted successfully" });
-    } catch (error) {
-      handleRouteError(error, "delete treatment pricing", res);
-    }
-  });
-
-  // ===== Clinic Headers & Footers Routes =====
-  
-  // Create or update clinic header
-  app.post("/api/clinic-headers", authMiddleware, requireModulePermission('forms', 'edit'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const validated = insertClinicHeaderSchema.parse({
-        ...req.body,
-        organizationId
-      });
-      
-      // Check if header already exists for this organization
-      const existingHeader = await storage.getActiveClinicHeader(organizationId);
-      
-      let header;
-      if (existingHeader) {
-        // Update existing header
-        header = await storage.updateClinicHeader(existingHeader.id, organizationId, validated);
-        res.json(header);
-      } else {
-        // Create new header
-        header = await storage.createClinicHeader(validated);
-        res.status(201).json(header);
-      }
-    } catch (error) {
-      handleRouteError(error, "create or update clinic header", res);
-    }
-  });
-
-  // Get active clinic header for organization
-  app.get("/api/clinic-headers", authMiddleware, multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const header = await storage.getActiveClinicHeader(organizationId);
-      res.json(header || null);
-    } catch (error) {
-      handleRouteError(error, "get clinic header", res);
-    }
-  });
-
-  // Create or update clinic footer
-  app.post("/api/clinic-footers", authMiddleware, requireModulePermission('forms', 'edit'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const validated = insertClinicFooterSchema.parse({
-        ...req.body,
-        organizationId
-      });
-      
-      // Check if footer already exists for this organization
-      const existingFooter = await storage.getActiveClinicFooter(organizationId);
-      
-      let footer;
-      if (existingFooter) {
-        // Update existing footer
-        footer = await storage.updateClinicFooter(existingFooter.id, organizationId, validated);
-        res.json(footer);
-      } else {
-        // Create new footer
-        footer = await storage.createClinicFooter(validated);
-        res.status(201).json(footer);
-      }
-    } catch (error) {
-      handleRouteError(error, "create or update clinic footer", res);
-    }
-  });
-
-  // Get active clinic footer for organization
-  app.get("/api/clinic-footers", authMiddleware, multiTenantEnforcer(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const footer = await storage.getActiveClinicFooter(organizationId);
-      res.json(footer || null);
-    } catch (error) {
-      handleRouteError(error, "get clinic footer", res);
-    }
-  });
-
-  // ========================================
-  // PHARMACY ROLE MODULE API ROUTES
-  // ========================================
-
-  // Pharmacist role check middleware
-  const requirePharmacistRole = (roles: string[] = ['pharmacist', 'admin', 'store_manager']) => {
-    return (req: TenantRequest, res: Response, next: NextFunction) => {
-      if (!req.user) {
-        return res.status(401).json({ error: "Authentication required" });
-      }
-      if (!roles.includes(req.user.role || '')) {
-        return res.status(403).json({ error: "Pharmacy access denied. Required role: pharmacist, admin, or store_manager" });
-      }
-      next();
-    };
-  };
-
-  // Pharmacy Dashboard Summary
-  app.get("/api/pharmacy/dashboard", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const summary = await pharmacyService.getDashboardSummary(organizationId);
-      res.json(summary);
-    } catch (error) {
-      handleRouteError(error, "get pharmacy dashboard", res);
-    }
-  });
-
-  // Shift Management
-  app.post("/api/pharmacy/shifts/start", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const userId = req.user!.id;
-      
-      const shiftData = {
-        organizationId,
-        pharmacistId: userId,
-        shiftDate: new Date(),
-        shiftStartTime: new Date(),
-        openingCash: req.body.openingCash || "0.00",
-        notes: req.body.notes,
-      };
-
-      const shift = await pharmacyService.startShift(shiftData);
-      
-      // Log activity
-      await pharmacyService.logActivity({
-        organizationId,
-        userId,
-        action: "shift_started",
-        entityType: "shift",
-        entityId: shift.id,
-        ipAddress: req.ip,
-      });
-
-      res.status(201).json(shift);
-    } catch (error) {
-      handleRouteError(error, "start pharmacy shift", res);
-    }
-  });
-
-  app.get("/api/pharmacy/shifts/current", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const userId = req.user!.id;
-      const shift = await pharmacyService.getOpenShift(organizationId, userId);
-      res.json(shift || null);
-    } catch (error) {
-      handleRouteError(error, "get current shift", res);
-    }
-  });
-
-  app.post("/api/pharmacy/shifts/:id/close", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const userId = req.user!.id;
-      const shiftId = parseInt(req.params.id);
-
-      const shift = await pharmacyService.closeShift(shiftId, {
-        closingCash: req.body.closingCash,
-        discrepancyNotes: req.body.discrepancyNotes,
-        notes: req.body.notes,
-      });
-
-      // Log activity
-      await pharmacyService.logActivity({
-        organizationId,
-        userId,
-        action: "shift_closed",
-        entityType: "shift",
-        entityId: shift.id,
-        details: {
-          saleAmount: parseFloat(shift.totalSalesAmount || "0"),
-          returnAmount: parseFloat(shift.totalReturnsAmount || "0"),
-        },
-        ipAddress: req.ip,
-      });
-
-      res.json(shift);
-    } catch (error) {
-      handleRouteError(error, "close pharmacy shift", res);
-    }
-  });
-
-  app.get("/api/pharmacy/shifts", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const filters: any = {};
-      
-      if (req.query.pharmacistId) {
-        filters.pharmacistId = parseInt(req.query.pharmacistId as string);
-      }
-      if (req.query.startDate) {
-        filters.startDate = new Date(req.query.startDate as string);
-      }
-      if (req.query.endDate) {
-        filters.endDate = new Date(req.query.endDate as string);
-      }
-      if (req.query.status) {
-        filters.status = req.query.status as string;
-      }
-
-      const shifts = await pharmacyService.getShiftHistory(organizationId, filters);
-      res.json(shifts);
-    } catch (error) {
-      handleRouteError(error, "get shift history", res);
-    }
-  });
-
-  app.post("/api/pharmacy/shifts/:id/approve", authMiddleware, multiTenantEnforcer(), requireRole(['admin', 'store_manager']), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const userId = req.user!.id;
-      const shiftId = parseInt(req.params.id);
-
-      const shift = await pharmacyService.approveShift(shiftId, userId, req.body.approvalNotes);
-
-      // Log activity
-      await pharmacyService.logActivity({
-        organizationId,
-        userId,
-        action: "shift_approved",
-        entityType: "shift",
-        entityId: shift.id,
-        ipAddress: req.ip,
-      });
-
-      res.json(shift);
-    } catch (error) {
-      handleRouteError(error, "approve shift", res);
-    }
-  });
-
-  // Activity Logs
-  app.get("/api/pharmacy/activity-logs", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const filters: any = {};
-
-      if (req.query.userId) {
-        filters.userId = parseInt(req.query.userId as string);
-      }
-      if (req.query.action) {
-        filters.action = req.query.action as string;
-      }
-      if (req.query.entityType) {
-        filters.entityType = req.query.entityType as string;
-      }
-      if (req.query.startDate) {
-        filters.startDate = new Date(req.query.startDate as string);
-      }
-      if (req.query.endDate) {
-        filters.endDate = new Date(req.query.endDate as string);
-      }
-      if (req.query.limit) {
-        filters.limit = parseInt(req.query.limit as string);
-      }
-
-      const logs = await pharmacyService.getActivityLogs(organizationId, filters);
-      res.json(logs);
-    } catch (error) {
-      handleRouteError(error, "get activity logs", res);
-    }
-  });
-
-  // Reports
-  app.get("/api/pharmacy/reports/daily-sales", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const date = req.query.date ? new Date(req.query.date as string) : new Date();
-      const report = await pharmacyService.getDailySalesReport(organizationId, date);
-      res.json(report);
-    } catch (error) {
-      handleRouteError(error, "get daily sales report", res);
-    }
-  });
-
-  app.get("/api/pharmacy/reports/returns", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(new Date().setDate(new Date().getDate() - 30));
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-      const report = await pharmacyService.getReturnSummaryReport(organizationId, startDate, endDate);
-      res.json(report);
-    } catch (error) {
-      handleRouteError(error, "get returns report", res);
-    }
-  });
-
-  app.get("/api/pharmacy/reports/item-wise-sales", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(new Date().setDate(new Date().getDate() - 30));
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-      const report = await pharmacyService.getItemWiseSalesReport(organizationId, startDate, endDate);
-      res.json(report);
-    } catch (error) {
-      handleRouteError(error, "get item-wise sales report", res);
-    }
-  });
-
-  app.get("/api/pharmacy/reports/pharmacist-activity", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(['admin', 'store_manager']), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(new Date().setDate(new Date().getDate() - 30));
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
-      const report = await pharmacyService.getPharmacistActivityReport(organizationId, startDate, endDate);
-      res.json(report);
-    } catch (error) {
-      handleRouteError(error, "get pharmacist activity report", res);
-    }
-  });
-
-  // Invoices
-  app.get("/api/pharmacy/invoices/sales", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const filters: any = {};
-
-      if (req.query.startDate) {
-        filters.startDate = new Date(req.query.startDate as string);
-      }
-      if (req.query.endDate) {
-        filters.endDate = new Date(req.query.endDate as string);
-      }
-      if (req.query.patientId) {
-        filters.patientId = parseInt(req.query.patientId as string);
-      }
-      if (req.query.invoiceNumber) {
-        filters.invoiceNumber = req.query.invoiceNumber as string;
-      }
-      if (req.query.status) {
-        filters.status = req.query.status as string;
-      }
-
-      const invoices = await pharmacyService.getSalesInvoices(organizationId, filters);
-      res.json(invoices);
-    } catch (error) {
-      handleRouteError(error, "get sales invoices", res);
-    }
-  });
-
-  app.get("/api/pharmacy/invoices/returns", authMiddleware, multiTenantEnforcer(), requirePharmacistRole(), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const filters: any = {};
-
-      if (req.query.startDate) {
-        filters.startDate = new Date(req.query.startDate as string);
-      }
-      if (req.query.endDate) {
-        filters.endDate = new Date(req.query.endDate as string);
-      }
-      if (req.query.returnType) {
-        filters.returnType = req.query.returnType as string;
-      }
-      if (req.query.status) {
-        filters.status = req.query.status as string;
-      }
-
-      const invoices = await pharmacyService.getReturnInvoices(organizationId, filters);
-      res.json(invoices);
-    } catch (error) {
-      handleRouteError(error, "get return invoices", res);
-    }
-  });
-
-  // Permissions
-  app.get("/api/pharmacy/permissions", authMiddleware, multiTenantEnforcer(), requireRole(['admin']), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const roleName = req.query.role as string || 'pharmacist';
-      const permissions = await pharmacyService.getPermissions(organizationId, roleName);
-      res.json(permissions);
-    } catch (error) {
-      handleRouteError(error, "get pharmacy permissions", res);
-    }
-  });
-
-  app.post("/api/pharmacy/permissions", authMiddleware, multiTenantEnforcer(), requireRole(['admin']), async (req: TenantRequest, res) => {
-    try {
-      const organizationId = requireOrgId(req);
-      const permission = await pharmacyService.setPermission({
-        organizationId,
-        roleName: req.body.roleName,
-        permissionKey: req.body.permissionKey,
-        isEnabled: req.body.isEnabled,
-      });
-      res.json(permission);
-    } catch (error) {
-      handleRouteError(error, "set pharmacy permission", res);
-    }
-  });
-  
-  // Add WebSocket support for real-time messaging
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-  
-  // Store connected clients by user ID for message broadcasting
-  const connectedClients = new Map();
-  
-  wss.on('connection', (ws: any, req: any) => {
-    console.log('🔗 WebSocket client connected');
-    console.log('🔍 Current connected clients count:', connectedClients.size);
-    
-    // Send immediate ping to keep connection alive
-    ws.ping();
-    
-    // Setup ping/pong to maintain connection
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      } else {
-        clearInterval(pingInterval);
-      }
-    }, 30000); // Ping every 30 seconds
-    
-    ws.on('message', (message: Buffer) => {
-      try {
-        const data = JSON.parse(message.toString());
-        console.log('📥 WebSocket message received from client:', data);
-        
-        // Handle client authentication and registration
-        if (data.type === 'auth' && data.userId) {
-          connectedClients.set(data.userId, ws);
-          ws.userId = data.userId;
-          console.log(`👤 User ${data.userId} authenticated via WebSocket`);
-          console.log('🔍 Total authenticated clients:', connectedClients.size);
-          console.log('🔍 Authenticated client IDs:', Array.from(connectedClients.keys()));
-        }
-      } catch (error) {
-        console.error('WebSocket message parsing error:', error);
-      }
-    });
-    
-    ws.on('close', () => {
-      clearInterval(pingInterval);
-      if (ws.userId) {
-        connectedClients.delete(ws.userId);
-        console.log(`👤 User ${ws.userId} disconnected from WebSocket`);
-        console.log('🔍 Remaining connected clients:', connectedClients.size);
-      } else {
-        console.log('🔗 WebSocket client disconnected (unauthenticated)');
-      }
-    });
-  });
-  
-  // Export function to broadcast messages to specific users
-  app.set('broadcastMessage', (targetUserId: number, messageData: any) => {
-    const targetClient = connectedClients.get(targetUserId);
-    if (targetClient && targetClient.readyState === WebSocket.OPEN) {
-      targetClient.send(JSON.stringify({
-        type: 'new_message',
-        message: messageData.message || messageData,
-        conversationId: messageData.conversationId,
-        data: messageData
-      }));
-      console.log(`📨 Message broadcasted to user ${targetUserId}`);
-      return true;
-    }
-    return false;
-  });
-  
   return httpServer;
 }
-
