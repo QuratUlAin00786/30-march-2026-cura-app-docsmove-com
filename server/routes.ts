@@ -25855,36 +25855,37 @@ Cura EMR Team
         const drawClinicalSection = (title: string, content: string) => {
           if (!content) return;
           
-          // Calculate section height for text wrapping
+          // Calculate section height for text wrapping with reduced spacing
           const maxLineLength = 70;
           const lines = content.match(new RegExp(`.{1,${maxLineLength}}(\\s|$)`, 'g')) || [content];
-          const sectionHeight = Math.max(60, lines.length * 15 + 40);
+          const lineSpacing = 9; // Reduced from 11 to 9
+          const sectionHeight = Math.max(40, lines.length * lineSpacing + 25); // Reduced from 45 and 30
           
           // Draw section background
-          drawSectionBox(30, yPosition + 10, width - 60, sectionHeight);
+          drawSectionBox(30, yPosition + 5, width - 60, sectionHeight);
           
           page.drawText(title, {
             x: 40,
-            y: yPosition - 5,
-            size: 12,
+            y: yPosition - 3,
+            size: 9, // Reduced from 10 to 9
             font: boldFont,
             color: primaryBlue
           });
           
           // Draw content with text wrapping
-          let textY = yPosition - 25;
+          let textY = yPosition - 16; // Reduced from 18 to 16
           lines.forEach((line: string) => {
             page.drawText(line.trim(), { 
               x: 50, 
               y: textY, 
-              size: 10, 
+              size: 8, // Reduced from 9 to 8
               font,
               maxWidth: width - 100
             });
-            textY -= 15;
+            textY -= lineSpacing; // Use reduced line spacing
           });
           
-          yPosition -= sectionHeight + 10;
+          yPosition -= sectionHeight + 3; // Reduced spacing from 5 to 3
         };
         
         // Draw CLINICAL INDICATION
@@ -25898,14 +25899,14 @@ Cura EMR Team
         }
         
         // Draw DOCTOR DETAILS before FINDINGS
-        yPosition -= 20;
-        const doctorDetailsHeight = 100;
+        yPosition -= 10; // Reduced from 20 to 10
+        const doctorDetailsHeight = 90; // Reduced from 100 to 90
         drawSectionBox(30, yPosition + 10, width - 60, doctorDetailsHeight);
         
         page.drawText('DOCTOR DETAILS', {
           x: 40,
           y: yPosition - 5,
-          size: 12,
+          size: 10, // Reduced from 12 to 10
           font: boldFont,
           color: primaryBlue
         });
@@ -25936,48 +25937,48 @@ Cura EMR Team
           // Continue with N/A values if fetch fails
         }
         
-        let doctorY = yPosition - 30;
+        let doctorY = yPosition - 18; // Reduced from 20 to 18
         page.drawText(`Name: ${doctorName}`, { 
           x: 50, 
           y: doctorY, 
-          size: 10, 
+          size: 8, // Reduced from 9 to 8
           font,
           color: darkGray
         });
-        doctorY -= 15;
+        doctorY -= 10; // Reduced from 12 to 10
         
         page.drawText(`Specialization: ${doctorSpecialization}`, { 
           x: 50, 
           y: doctorY, 
-          size: 10, 
+          size: 8, // Reduced from 9 to 8
           font,
           color: darkGray
         });
-        doctorY -= 15;
+        doctorY -= 10; // Reduced from 12 to 10
         
         page.drawText(`Email: ${doctorEmail}`, { 
           x: 50, 
           y: doctorY, 
-          size: 10, 
+          size: 8, // Reduced from 9 to 8
           font,
           color: darkGray
         });
-        doctorY -= 15;
+        doctorY -= 10; // Reduced from 12 to 10
         
         // Only show Department if it's not "N/A"
         if (doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '') {
           page.drawText(`Department: ${doctorDepartment}`, { 
             x: 50, 
             y: doctorY, 
-            size: 10, 
+            size: 8, // Reduced from 9 to 8
             font,
             color: darkGray
           });
-          doctorY -= 15;
+          doctorY -= 10; // Reduced from 12 to 10
         }
         
-        // Adjust yPosition for doctor details section
-        const actualDoctorDetailsHeight = doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '' ? 75 : 60;
+        // Adjust yPosition for doctor details section with reduced spacing
+        const actualDoctorDetailsHeight = doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '' ? 50 : 42; // Reduced from 60/48 to 50/42
         yPosition -= actualDoctorDetailsHeight;
         
         // Draw FINDINGS
@@ -25985,15 +25986,20 @@ Cura EMR Team
           drawClinicalSection('FINDINGS', reportFormData.findings);
         }
         
-        // Draw RADIOLOGIST REPORT after FINDINGS
-        yPosition -= 20;
-        const signatureHeight = 120;
+        // Draw IMPRESSION after FINDINGS (reordered)
+        if (reportFormData.impression) {
+          drawClinicalSection('IMPRESSION', reportFormData.impression);
+        }
+        
+        // Draw RADIOLOGIST REPORT after IMPRESSION
+        yPosition -= 10; // Reduced from 20 to 10
+        const signatureHeight = 100; // Reduced from 120 to 100
         drawSectionBox(30, yPosition + 10, width - 60, signatureHeight);
         
         page.drawText('RADIOLOGIST REPORT', {
           x: 40,
           y: yPosition - 5,
-          size: 12,
+          size: 10, // Reduced from 12 to 10
           font: boldFont,
           color: primaryBlue
         });
@@ -26003,16 +26009,16 @@ Cura EMR Team
         
         page.drawText(`Reported by: ${radiologistName}`, { 
           x: 50, 
-          y: yPosition - 30, 
-          size: 11, 
+          y: yPosition - 25, // Reduced from 30 to 25
+          size: 9, // Reduced from 11 to 9
           font: boldFont,
           color: blackColor
         });
         
         page.drawText('Medical License: MD-RAD-2024', { 
           x: 50, 
-          y: yPosition - 45, 
-          size: 10, 
+          y: yPosition - 38, // Reduced from 45 to 38
+          size: 8, // Reduced from 10 to 8
           font,
           color: darkGray
         });
@@ -26027,53 +26033,48 @@ Cura EMR Team
         });
         page.drawText(`Report Date: ${reportDate}`, { 
           x: width - 250, 
-          y: yPosition - 30, 
-          size: 10, 
+          y: yPosition - 25, // Reduced from 30 to 25
+          size: 8, // Reduced from 10 to 8
           font,
           color: darkGray
         });
         
         page.drawText(`Report ID: ${reportId}`, { 
           x: width - 250, 
-          y: yPosition - 45, 
-          size: 9, 
+          y: yPosition - 38, // Reduced from 45 to 38
+          size: 7, // Reduced from 9 to 7
           font,
           color: rgb(0.6, 0.6, 0.6)
         });
         
         // Adjust yPosition for RADIOLOGIST REPORT section
-        yPosition -= 60;
-        
-        // Draw IMPRESSION
-        if (reportFormData.impression) {
-          drawClinicalSection('IMPRESSION', reportFormData.impression);
-        }
+        yPosition -= 50; // Reduced from 60 to 50
       } else {
         // Add indication and findings from study data if no form data
-        yPosition -= 20;
+        yPosition -= 10; // Reduced from 20 to 10
         
         if (study.indication) {
-          drawSectionBox(30, yPosition + 10, width - 60, 50);
+          drawSectionBox(30, yPosition + 10, width - 60, 45); // Reduced from 50 to 45
           page.drawText('CLINICAL INDICATION', {
             x: 40,
             y: yPosition - 5,
-            size: 12,
+            size: 9, // Reduced from 12 to 9
             font: boldFont,
             color: primaryBlue
           });
-          page.drawText(study.indication, { x: 50, y: yPosition - 25, size: 10, font });
-          yPosition -= 70;
+          page.drawText(study.indication, { x: 50, y: yPosition - 20, size: 8, font }); // Reduced from 25/10 to 20/8
+          yPosition -= 55; // Reduced from 70 to 55
         }
         
         // Draw DOCTOR DETAILS before FINDINGS
-        yPosition -= 20;
-        const doctorDetailsHeight = 100;
+        yPosition -= 10; // Reduced from 20 to 10
+        const doctorDetailsHeight = 90; // Reduced from 100 to 90
         drawSectionBox(30, yPosition + 10, width - 60, doctorDetailsHeight);
         
         page.drawText('DOCTOR DETAILS', {
           x: 40,
           y: yPosition - 5,
-          size: 12,
+          size: 10, // Reduced from 12 to 10
           font: boldFont,
           color: primaryBlue
         });
@@ -26099,44 +26100,59 @@ Cura EMR Team
           console.error('Error fetching doctor details:', error);
         }
         
-        let doctorY = yPosition - 30;
-        page.drawText(`Name: ${doctorName}`, { x: 50, y: doctorY, size: 10, font, color: darkGray });
-        doctorY -= 15;
-        page.drawText(`Specialization: ${doctorSpecialization}`, { x: 50, y: doctorY, size: 10, font, color: darkGray });
-        doctorY -= 15;
-        page.drawText(`Email: ${doctorEmail}`, { x: 50, y: doctorY, size: 10, font, color: darkGray });
-        doctorY -= 15;
+        let doctorY = yPosition - 18; // Reduced from 30 to 18
+        page.drawText(`Name: ${doctorName}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
+        doctorY -= 10; // Reduced from 15 to 10
+        page.drawText(`Specialization: ${doctorSpecialization}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
+        doctorY -= 10; // Reduced from 15 to 10
+        page.drawText(`Email: ${doctorEmail}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
+        doctorY -= 10; // Reduced from 15 to 10
         
         if (doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '') {
-          page.drawText(`Department: ${doctorDepartment}`, { x: 50, y: doctorY, size: 10, font, color: darkGray });
-          doctorY -= 15;
+          page.drawText(`Department: ${doctorDepartment}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
+          doctorY -= 10; // Reduced from 15 to 10
         }
         
-        const actualDoctorDetailsHeight = doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '' ? 75 : 60;
+        const actualDoctorDetailsHeight = doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '' ? 50 : 42; // Reduced from 75/60 to 50/42
         yPosition -= actualDoctorDetailsHeight;
         
+        // Draw FINDINGS
         if (study.findings) {
-          drawSectionBox(30, yPosition + 10, width - 60, 50);
+          drawSectionBox(30, yPosition + 10, width - 60, 45); // Reduced from 50 to 45
           page.drawText('FINDINGS', {
             x: 40,
             y: yPosition - 5,
-            size: 12,
+            size: 9, // Reduced from 12 to 9
             font: boldFont,
             color: primaryBlue
           });
-          page.drawText(study.findings, { x: 50, y: yPosition - 25, size: 10, font });
-          yPosition -= 70;
+          page.drawText(study.findings, { x: 50, y: yPosition - 20, size: 8, font }); // Reduced from 25/10 to 20/8
+          yPosition -= 55; // Reduced from 70 to 55
         }
         
-        // Draw RADIOLOGIST REPORT after FINDINGS
-        yPosition -= 20;
-        const signatureHeight = 120;
+        // Draw IMPRESSION after FINDINGS (reordered)
+        if (study.impression) {
+          drawSectionBox(30, yPosition + 10, width - 60, 45); // Reduced from 50 to 45
+          page.drawText('IMPRESSION', {
+            x: 40,
+            y: yPosition - 5,
+            size: 9, // Reduced from 12 to 9
+            font: boldFont,
+            color: primaryBlue
+          });
+          page.drawText(study.impression, { x: 50, y: yPosition - 20, size: 8, font }); // Reduced from 25/10 to 20/8
+          yPosition -= 55; // Reduced from 70 to 55
+        }
+        
+        // Draw RADIOLOGIST REPORT after IMPRESSION
+        yPosition -= 10; // Reduced from 20 to 10
+        const signatureHeight = 100; // Reduced from 120 to 100
         drawSectionBox(30, yPosition + 10, width - 60, signatureHeight);
         
         page.drawText('RADIOLOGIST REPORT', {
           x: 40,
           y: yPosition - 5,
-          size: 12,
+          size: 10, // Reduced from 12 to 10
           font: boldFont,
           color: primaryBlue
         });
@@ -26144,16 +26160,16 @@ Cura EMR Team
         const radiologistName = study.radiologist || "Dr. Sarah Johnson, MD";
         page.drawText(`Reported by: ${radiologistName}`, { 
           x: 50, 
-          y: yPosition - 30, 
-          size: 11, 
+          y: yPosition - 25, // Reduced from 30 to 25
+          size: 9, // Reduced from 11 to 9
           font: boldFont,
           color: blackColor
         });
         
         page.drawText('Medical License: MD-RAD-2024', { 
           x: 50, 
-          y: yPosition - 45, 
-          size: 10, 
+          y: yPosition - 38, // Reduced from 45 to 38
+          size: 8, // Reduced from 10 to 8
           font,
           color: darkGray
         });
@@ -26167,21 +26183,21 @@ Cura EMR Team
         });
         page.drawText(`Report Date: ${reportDate}`, { 
           x: width - 250, 
-          y: yPosition - 30, 
-          size: 10, 
+          y: yPosition - 25, // Reduced from 30 to 25
+          size: 8, // Reduced from 10 to 8
           font,
           color: darkGray
         });
         
         page.drawText(`Report ID: ${reportId}`, { 
           x: width - 250, 
-          y: yPosition - 45, 
-          size: 9, 
+          y: yPosition - 38, // Reduced from 45 to 38
+          size: 7, // Reduced from 9 to 7
           font,
           color: rgb(0.6, 0.6, 0.6)
         });
         
-        yPosition -= 60;
+        yPosition -= 50; // Reduced from 60 to 50
       }
       
       // E-Signature Section (if signature data provided)
