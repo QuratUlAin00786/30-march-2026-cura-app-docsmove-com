@@ -1569,6 +1569,9 @@ export default function UserManagement() {
               console.log(`🌍 City detected: ${city}`);
             }
             
+            // Clear validation errors for city when auto-populated
+            form.clearErrors("address.city");
+            
             setIsDetectingCountry(false);
             return;
           }
@@ -1596,6 +1599,9 @@ export default function UserManagement() {
               form.setValue("address.city", city);
               console.log(`🌍 City detected: ${city}`);
             }
+            
+            // Clear validation errors for city when auto-populated
+            form.clearErrors("address.city");
           }
         } else {
           console.log(`🌍 ❌ No match found for postcode: ${normalizedPostcode} in ${selectedCountry}`);
@@ -1831,6 +1837,11 @@ export default function UserManagement() {
         "address.building",
         result.premise || result.building_name || result.admin_ward || result.line_1 || ""
       );
+
+      // Clear validation errors for address fields when populated via lookup
+      form.clearErrors("address.street");
+      form.clearErrors("address.city");
+      form.clearErrors("address.postcode");
 
       setSelectedAddressDetails({
         street: streetAddress,
@@ -2483,18 +2494,26 @@ export default function UserManagement() {
         form.setError("address.postcode", { type: "manual", message: "Postal Code / ZIP Code is required" });
       }
       
-      // Validate Street Address
+      // Validate Street Address - skip if populated via lookup
       const streetValue = data.address?.street || '';
-      if (!streetValue || streetValue.trim() === '') {
+      // Only validate if field is empty AND not populated via lookup
+      if ((!streetValue || streetValue.trim() === '') && !selectedAddressDetails?.street) {
         patientValidationErrors.push("Street Address");
         form.setError("address.street", { type: "manual", message: "Street Address is required" });
+      } else if (streetValue && streetValue.trim() !== '') {
+        // Clear error if field has value
+        form.clearErrors("address.street");
       }
       
-      // Validate City/Town
+      // Validate City/Town - skip if populated via lookup
       const cityValue = data.address?.city || '';
-      if (!cityValue || cityValue.trim() === '') {
+      // Only validate if field is empty AND not populated via lookup
+      if ((!cityValue || cityValue.trim() === '') && !selectedAddressDetails?.city) {
         patientValidationErrors.push("City/Town");
         form.setError("address.city", { type: "manual", message: "City/Town is required" });
+      } else if (cityValue && cityValue.trim() !== '') {
+        // Clear error if field has value
+        form.clearErrors("address.city");
       }
       
       // Validate Department
@@ -2569,6 +2588,13 @@ export default function UserManagement() {
         });
         return;
       }
+    }
+    
+    // Validate Gender at Birth (required for all users)
+    if (!data.genderAtBirth || data.genderAtBirth.trim() === '') {
+      form.setError("genderAtBirth", { type: "manual", message: "Gender at Birth is required" });
+      form.trigger("genderAtBirth");
+      return;
     }
     
     // Validate Date of Birth for patient role (required)
@@ -3935,10 +3961,19 @@ export default function UserManagement() {
                   <div className="space-y-2">
                     <Label htmlFor="genderAtBirth">Gender at Birth</Label>
                     <Select 
-                      onValueChange={(value) => form.setValue("genderAtBirth", value)}
+                      onValueChange={(value) => {
+                        form.setValue("genderAtBirth", value);
+                        // Clear error when user selects
+                        if (form.formState.errors.genderAtBirth) {
+                          form.clearErrors("genderAtBirth");
+                        }
+                      }}
                       value={form.watch("genderAtBirth") || ""}
                     >
-                      <SelectTrigger data-testid="dropdown-gender-at-birth">
+                      <SelectTrigger 
+                        data-testid="dropdown-gender-at-birth"
+                        className={form.formState.errors.genderAtBirth ? "border-red-500" : ""}
+                      >
                         <SelectValue placeholder="Select gender..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -4692,6 +4727,13 @@ export default function UserManagement() {
                         {...form.register("password")}
                         className={form.formState.errors.password ? "border-red-500 pr-10" : "pr-10"}
                         data-testid="input-password"
+                        onChange={(e) => {
+                          form.setValue("password", e.target.value);
+                          // Clear error when user starts typing
+                          if (form.formState.errors.password) {
+                            form.clearErrors("password");
+                          }
+                        }}
                       />
                       <button
                         type="button"
