@@ -4558,14 +4558,11 @@ export default function BillingPage() {
 
   // Fetch regular invoices for non-doctor roles
   const { data: invoices = [], isLoading: invoicesLoading } = useQuery({
-    queryKey: ["/api/billing/invoices", statusFilter],
+    queryKey: ["/api/billing/invoices"],
     queryFn: async () => {
       const token = localStorage.getItem('auth_token');
       const subdomain = localStorage.getItem('user_subdomain') || 'demo';
-      const url = statusFilter && statusFilter !== 'all' 
-        ? `/api/billing/invoices?status=${statusFilter}`
-        : '/api/billing/invoices';
-      const response = await fetch(url, {
+      const response = await fetch('/api/billing/invoices', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'X-Tenant-Subdomain': subdomain
