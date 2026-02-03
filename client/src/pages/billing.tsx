@@ -3307,6 +3307,7 @@ export default function BillingPage() {
   const isDoctor = isDoctorLike(user?.role);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [patientNameFilter, setPatientNameFilter] = useState<string>("");
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -5076,7 +5077,11 @@ export default function BillingPage() {
     const matchesInvoiceId = invoiceIdFilter === "all" || 
       String(invoice.invoiceNumber || invoice.id) === invoiceIdFilter;
     
-    return matchesSearch && matchesStatus && matchesServiceDateFrom && matchesPaymentMethod && matchesInsuranceProvider && matchesInvoiceId;
+    // Filter by patient name
+    const matchesPatientName = !patientNameFilter || 
+      invoice.patientName?.toLowerCase().includes(patientNameFilter.toLowerCase());
+    
+    return matchesSearch && matchesStatus && matchesServiceDateFrom && matchesPaymentMethod && matchesInsuranceProvider && matchesInvoiceId && matchesPatientName;
   }) : [];
 
   const getStatusColor = (status: string) => {
@@ -6391,6 +6396,18 @@ export default function BillingPage() {
                               </SelectContent>
                             </Select>
 
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                              <Input
+                                type="text"
+                                placeholder="Search by patient name"
+                                value={patientNameFilter}
+                                onChange={(e) => setPatientNameFilter(e.target.value)}
+                                className="pl-9 w-56 h-9 text-sm"
+                                data-testid="input-patient-name-filter"
+                              />
+                            </div>
+
                             {user?.role === 'doctor' && (
                               <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
                                 <SelectTrigger className="w-52">
@@ -6428,11 +6445,14 @@ export default function BillingPage() {
                               />
                             </div>
 
-                            {serviceDateFrom && (
+                            {(serviceDateFrom || patientNameFilter) && (
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => setServiceDateFrom("")}
+                                onClick={() => {
+                                  setServiceDateFrom("");
+                                  setPatientNameFilter("");
+                                }}
                                 data-testid="button-admin-clear-filters"
                                 className="mt-5"
                               >
