@@ -2290,6 +2290,14 @@ export class DatabaseStorage implements IStorage {
     return notification;
   }
 
+  /**
+   * Creates a notification
+   * 
+   * EXPLANATION:
+   * - If createdAt is provided, use it (explicitly set in notification-helper.ts)
+   * - If not provided, database will use defaultNow() (UTC)
+   * - We preserve the explicit createdAt to ensure correct time
+   */
   async createNotification(notification: InsertNotification): Promise<Notification> {
     const cleanNotification: any = { ...notification };
     // Clean metadata to avoid type issues
@@ -2297,6 +2305,8 @@ export class DatabaseStorage implements IStorage {
       cleanNotification.metadata = JSON.parse(JSON.stringify(cleanNotification.metadata));
     }
     
+    // Preserve explicit createdAt if provided (set in notification-helper.ts)
+    // This ensures notifications use CURRENT TIME, not database default
     const [created] = await db
       .insert(notifications)
       .values([cleanNotification])

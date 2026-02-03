@@ -49,45 +49,62 @@ interface Notification {
   readAt?: string;
 }
 
-// Component to display relative time that updates in real-time
-// Backend stores dates in UTC, we convert to user's local timezone
+/**
+ * Component to display relative time that updates in real-time
+ * 
+ * EXPLANATION:
+ * - Backend now stores notifications with CURRENT TIME (explicitly set, no UTC conversion)
+ * - We parse the date string and calculate the difference from NOW
+ * - If date has timezone (ends with 'Z'), parse directly
+ * - If date has no timezone, treat it as UTC (backend stores in UTC format)
+ * - Calculate seconds difference and display accordingly
+ */
 function TimeAgo({ date }: { date: string }) {
   const [timeAgo, setTimeAgo] = useState<string>("");
 
   useEffect(() => {
     const updateTime = () => {
       try {
-        // Get current time in user's local timezone
+        // Get CURRENT TIME in user's local timezone
         const now = new Date();
         let notificationDate: Date;
         
-        // Handle different date formats - backend stores in UTC
+        // Parse the date string from backend
         if (typeof date === 'string') {
           let dateString = date.trim();
           
-          // Check if it's already a valid ISO string with timezone
-          if (dateString.includes('T') && (dateString.includes('Z') || dateString.match(/[+-]\d{2}:\d{2}$/))) {
-            // Has timezone info, parse as-is
+          // Check if date has timezone indicator ('Z' for UTC or +/-HH:MM)
+          const hasTimezone = dateString.includes('Z') || dateString.match(/[+-]\d{2}:\d{2}$/);
+          
+          if (hasTimezone) {
+            // Has timezone info - parse directly (JavaScript handles timezone conversion)
             notificationDate = new Date(dateString);
-          } else if (dateString.includes('T')) {
-            // ISO format without timezone - backend stores in UTC
-            // Parse as UTC, JavaScript will automatically convert to local timezone
-            notificationDate = new Date(dateString + 'Z');
           } else {
-            // Try parsing as-is first
-            notificationDate = new Date(dateString);
+            // No timezone info - backend returns ISO format without 'Z'
+            // We need to append 'Z' to tell JavaScript this is UTC
+            let normalizedDate = dateString;
             
-            // If invalid, try adding UTC (backend stores in UTC)
-            if (isNaN(notificationDate.getTime())) {
-              notificationDate = new Date(dateString + ' UTC');
+            // Remove milliseconds if present (e.g., "2024-01-15T10:00:00.123" -> "2024-01-15T10:00:00")
+            if (normalizedDate.includes('.')) {
+              normalizedDate = normalizedDate.split('.')[0];
             }
             
-            // If still invalid, try parsing as timestamp
+            // Convert space-separated to ISO format (e.g., "2024-01-15 10:00:00" -> "2024-01-15T10:00:00")
+            if (normalizedDate.includes(' ') && !normalizedDate.includes('T')) {
+              normalizedDate = normalizedDate.replace(' ', 'T');
+            }
+            
+            // Append 'Z' to indicate UTC - this is CRITICAL for correct parsing
+            if (!normalizedDate.endsWith('Z')) {
+              normalizedDate = normalizedDate + 'Z';
+            }
+            
+            notificationDate = new Date(normalizedDate);
+            
+            // Fallback parsing if above fails
             if (isNaN(notificationDate.getTime())) {
-              const timestamp = Date.parse(dateString);
-              if (!isNaN(timestamp)) {
-                notificationDate = new Date(timestamp);
-              } else {
+              notificationDate = new Date(dateString + ' UTC');
+              if (isNaN(notificationDate.getTime())) {
                 console.warn("Invalid date format:", date);
                 setTimeAgo("just now");
                 return;
@@ -98,24 +115,23 @@ function TimeAgo({ date }: { date: string }) {
           notificationDate = new Date(date);
         }
         
-        // Check if date is valid
+        // Validate the parsed date
         if (isNaN(notificationDate.getTime())) {
           setTimeAgo("just now");
           return;
         }
 
-        // Both dates are now in JavaScript Date objects, which are in the user's local timezone
-        // differenceInSeconds will correctly calculate the difference
-        // Calculate difference in seconds
-        const secondsDiff = Math.floor(differenceInSeconds(now, notificationDate));
+        // Calculate time difference in seconds
+        // differenceInSeconds(now, notificationDate) = positive if notificationDate is in the past
+        let secondsDiff = Math.floor(differenceInSeconds(now, notificationDate));
 
-        // If the date is in the future (negative difference), show "just now"
+        // If date is in the future (negative difference), show "just now"
         if (secondsDiff < 0) {
           setTimeAgo("just now");
           return;
         }
 
-        // For very recent notifications, show precise time
+        // Display time based on how long ago it was
         if (secondsDiff === 0) {
           setTimeAgo("just now");
         } else if (secondsDiff < 5) {
@@ -133,8 +149,7 @@ function TimeAgo({ date }: { date: string }) {
           const hours = Math.floor(secondsDiff / 3600);
           setTimeAgo(`${hours} hour${hours === 1 ? '' : 's'} ago`);
         } else {
-          // Use formatDistanceToNow for longer durations
-          // formatDistanceToNow automatically uses the user's local timezone
+          // More than 1 day - use formatDistanceToNow for better formatting
           const distance = formatDistanceToNow(notificationDate, { addSuffix: true });
           setTimeAgo(distance);
         }

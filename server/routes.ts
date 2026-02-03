@@ -14212,7 +14212,37 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         notifications = await storage.getNotifications(userId, organizationId, safeLimit);
       }
 
-      res.json(notifications);
+      // Format dates to ISO strings with timezone (UTC) to ensure correct parsing on frontend
+      // PostgreSQL timestamp without timezone is stored in UTC but returned without 'Z'
+      // We need to explicitly format as ISO string with 'Z' to indicate UTC
+      const formatDate = (dateValue: any): string | null => {
+        if (!dateValue) return null;
+        if (dateValue instanceof Date) {
+          return dateValue.toISOString();
+        }
+        if (typeof dateValue === 'string') {
+          // If already has timezone, return as-is
+          if (dateValue.includes('Z') || dateValue.match(/[+-]\d{2}:\d{2}$/)) {
+            return dateValue;
+          }
+          // If no timezone, treat as UTC and convert to ISO string
+          const date = new Date(dateValue + ' UTC');
+          return date.toISOString();
+        }
+        // Fallback: try to parse and convert
+        return new Date(dateValue).toISOString();
+      };
+
+      const formattedNotifications = notifications.map((notification: any) => ({
+        ...notification,
+        createdAt: formatDate(notification.createdAt) || new Date().toISOString(),
+        updatedAt: formatDate(notification.updatedAt) || new Date().toISOString(),
+        readAt: formatDate(notification.readAt),
+        scheduledFor: formatDate(notification.scheduledFor),
+        expiresAt: formatDate(notification.expiresAt),
+      }));
+
+      res.json(formattedNotifications);
     } catch (error) {
       console.error("Error fetching notifications:", error);
       res.status(500).json({ error: "Failed to fetch notifications" });

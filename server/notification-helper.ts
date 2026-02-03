@@ -23,8 +23,19 @@ export interface CreateNotificationParams {
   expiresAt?: Date;
 }
 
+/**
+ * Creates a notification with CURRENT LOCAL TIME (no UTC conversion)
+ * 
+ * EXPLANATION:
+ * - We explicitly set createdAt to new Date() which gives us the CURRENT LOCAL TIME
+ * - This ensures notifications show "just now" or "0 seconds ago" when created
+ * - No timezone conversion is applied - we use the actual current time
+ */
 export async function createNotification(params: CreateNotificationParams): Promise<void> {
   try {
+    // Get CURRENT TIME (local time, not UTC)
+    const currentTime = new Date();
+    
     const notificationData: InsertNotification = {
       organizationId: params.organizationId,
       userId: params.userId,
@@ -38,17 +49,36 @@ export async function createNotification(params: CreateNotificationParams): Prom
       metadata: params.metadata,
       scheduledFor: params.scheduledFor,
       expiresAt: params.expiresAt,
+      // EXPLICITLY set createdAt to CURRENT TIME (local time)
+      // This ensures the notification shows "just now" when created
+      createdAt: currentTime,
+      updatedAt: currentTime,
     };
 
-    await db.insert(notifications).values(notificationData);
+    const result = await db.insert(notifications).values(notificationData).returning();
+    const createdNotification = result[0];
+    
+    // Log the datetime format being inserted/returned
     console.log(`[Notification Created] Type: ${params.type}, User: ${params.userId}, Title: ${params.title}`);
+    console.log(`[Notification DateTime] Created at: ${currentTime.toISOString()} (Local: ${currentTime.toString()})`);
+    console.log(`[Notification DateTime] Database returned: ${createdNotification?.createdAt}`);
   } catch (error) {
     console.error("[Notification Error] Failed to create notification:", error);
   }
 }
 
+/**
+ * Creates multiple notifications with CURRENT LOCAL TIME (no UTC conversion)
+ * 
+ * EXPLANATION:
+ * - Same as createNotification but for bulk operations
+ * - Each notification gets the CURRENT TIME when created
+ */
 export async function createBulkNotifications(notificationsList: CreateNotificationParams[]): Promise<void> {
   try {
+    // Get CURRENT TIME (local time, not UTC) - same time for all in this batch
+    const currentTime = new Date();
+    
     const notificationDataList: InsertNotification[] = notificationsList.map(params => ({
       organizationId: params.organizationId,
       userId: params.userId,
@@ -62,10 +92,13 @@ export async function createBulkNotifications(notificationsList: CreateNotificat
       metadata: params.metadata,
       scheduledFor: params.scheduledFor,
       expiresAt: params.expiresAt,
+      // EXPLICITLY set createdAt to CURRENT TIME (local time)
+      createdAt: currentTime,
+      updatedAt: currentTime,
     }));
 
     await db.insert(notifications).values(notificationDataList);
-    console.log(`[Bulk Notifications Created] Count: ${notificationsList.length}`);
+    console.log(`[Bulk Notifications Created] Count: ${notificationsList.length} at ${currentTime.toISOString()}`);
   } catch (error) {
     console.error("[Notification Error] Failed to create bulk notifications:", error);
   }
