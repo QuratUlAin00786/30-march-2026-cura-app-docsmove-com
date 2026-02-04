@@ -2744,43 +2744,43 @@ ${
         doc.setFontSize(12);
         if (clinicHeader.clinicName) {
           doc.text(clinicHeader.clinicName, headerTextX, headerTextY);
-          headerTextY += 6;
+          headerTextY += 5;
         }
 
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10);
         if (clinicHeader.address) {
           doc.text(clinicHeader.address, headerTextX, headerTextY);
-          headerTextY += 5;
+          headerTextY += 4;
         }
         if (clinicHeader.phone) {
           doc.text(clinicHeader.phone, headerTextX, headerTextY);
-          headerTextY += 5;
+          headerTextY += 4;
         }
         if (clinicHeader.email) {
           doc.text(clinicHeader.email, headerTextX, headerTextY);
-          headerTextY += 5;
+          headerTextY += 4;
         }
 
-        yPos = Math.max(headerTextY, yPos + 35);
+        yPos = Math.max(headerTextY, yPos + 30);
       } else {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(14);
         doc.text("Generated Treatment Plan", margin, yPos);
-        yPos += 10;
+        yPos += 6;
       }
 
-      yPos += 10;
+      yPos += 5;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
       doc.text("Professional Anatomical Treatment Plan", pageWidth / 2, yPos, {
         align: "center",
       });
-      yPos += 12;
+      yPos += 8;
       doc.setFontSize(12);
       const detailsTitleY = yPos;
       doc.text("Analysis Details:", margin, detailsTitleY);
-      yPos += 8;
+      yPos += 5;
 
       const imageUrl = imagePathToUse;
       const imageWidth = 75;
@@ -2862,9 +2862,9 @@ ${
             yPos = 30;
           }
           doc.text(fieldLine, margin, yPos);
-          yPos += 4;
+          yPos += 3.5;
         });
-        yPos += 2;
+        yPos += 1;
       };
 
       labelValuePairs.forEach((field) => addField(field.label, field.value));
@@ -2872,9 +2872,17 @@ ${
       doc.setFont("helvetica", "normal");
       doc.setFontSize(11);
 
-      const planLines = doc.splitTextToSize(treatmentPlanText, pageWidth - margin * 2);
-      const planBlockTop = yPos - 5;
-      const planBlockHeight = planLines.length * 4.5 + 12;
+      // Clean up treatment plan text - remove extra whitespace
+      const cleanedTreatmentPlanText = treatmentPlanText
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n'); // Replace 3+ newlines with 2
+
+      const planLines = doc.splitTextToSize(cleanedTreatmentPlanText, pageWidth - margin * 2);
+      const planBlockTop = yPos - 3;
+      const planBlockHeight = planLines.length * 3.5 + 8;
       const marginBottom = margin;
       if (planBlockTop + planBlockHeight > pageHeight - marginBottom) {
         doc.addPage();
@@ -2882,17 +2890,21 @@ ${
       }
       doc.setDrawColor(200, 200, 200);
       doc.setFillColor(245, 245, 245);
-      doc.rect(margin - 3, yPos - 8, pageWidth - margin * 2 + 6, planBlockHeight, "F");
+      doc.rect(margin - 3, yPos - 6, pageWidth - margin * 2 + 6, planBlockHeight, "F");
       doc.setDrawColor(205, 205, 205);
-      doc.rect(margin - 3, yPos - 8, pageWidth - margin * 2 + 6, planBlockHeight, "S");
+      doc.rect(margin - 3, yPos - 6, pageWidth - margin * 2 + 6, planBlockHeight, "S");
       doc.setFillColor(255, 255, 255);
       planLines.forEach((line) => {
         if (yPos > pageHeight - marginBottom) {
           doc.addPage();
           yPos = 20;
         }
-        doc.text(line, margin, yPos);
-        yPos += 4.5;
+        if (line.trim().length > 0) {
+          doc.text(line, margin, yPos);
+          yPos += 3.5;
+        } else {
+          yPos += 2;
+        }
       });
 
       if (clinicFooter && clinicFooter.footerText) {
