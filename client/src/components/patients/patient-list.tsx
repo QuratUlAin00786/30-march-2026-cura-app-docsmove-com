@@ -3090,44 +3090,50 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <span className="patient-name">
+                        <CardTitle className="text-lg flex items-center gap-2 min-w-0">
+                          <span className="patient-name truncate flex-shrink">
                             {patient.firstName} {patient.lastName}
                           </span>
                           <TooltipProvider>
-                            {patient.medicalHistory?.allergies &&
-                              patient.medicalHistory.allergies.length > 0 && (
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <AlertTriangle className="h-4 w-4 text-red-500" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>
-                                      Allergies:{" "}
-                                      {patient.medicalHistory.allergies.join(
-                                        ", ",
-                                      )}
-                                    </p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              )}
-                            {patient.medicalHistory?.chronicConditions &&
-                              patient.medicalHistory.chronicConditions.length >
-                                0 && (
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <Clock className="h-4 w-4 text-orange-500" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>
-                                      Conditions:{" "}
-                                      {patient.medicalHistory.chronicConditions.join(
-                                        ", ",
-                                      )}
-                                    </p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              )}
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {patient.medicalHistory?.allergies &&
+                                patient.medicalHistory.allergies.length > 0 && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="flex-shrink-0">
+                                        <AlertTriangle className="h-4 w-4 text-red-500" />
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>
+                                        Allergies:{" "}
+                                        {patient.medicalHistory.allergies.join(
+                                          ", ",
+                                        )}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                              {patient.medicalHistory?.chronicConditions &&
+                                patient.medicalHistory.chronicConditions.length >
+                                  0 && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="flex-shrink-0">
+                                        <Clock className="h-4 w-4 text-orange-500" />
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>
+                                        Conditions:{" "}
+                                        {patient.medicalHistory.chronicConditions.join(
+                                          ", ",
+                                        )}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                            </div>
                           </TooltipProvider>
                         </CardTitle>
                         <p className="text-sm patient-info">
@@ -3150,16 +3156,16 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         </p>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end space-y-1 h-20 overflow-hidden">
+                    <div className="flex flex-col items-end space-y-1.5 h-auto min-h-[60px] overflow-visible gap-1.5">
                       {patient.riskLevel && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                           {editingRiskLevelId === patient.id ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 flex-shrink-0">
                               <Select
                                 value={tempRiskLevel}
                                 onValueChange={setTempRiskLevel}
                               >
-                                <SelectTrigger className="w-[80px] h-6 text-xs">
+                                <SelectTrigger className="w-[80px] h-6 text-xs flex-shrink-0">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -3173,7 +3179,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                                 size="sm"
                                 onClick={handleSaveRiskLevel}
                                 disabled={riskLevelUpdateMutation.isPending}
-                                className="h-6 w-6 p-0"
+                                className="h-6 w-6 p-0 flex-shrink-0"
                               >
                                 <Check className="h-3 w-3" />
                               </Button>
@@ -3182,15 +3188,15 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                                 variant="outline"
                                 onClick={handleCancelEditingRiskLevel}
                                 disabled={riskLevelUpdateMutation.isPending}
-                                className="h-6 w-6 p-0"
+                                className="h-6 w-6 p-0 flex-shrink-0"
                               >
                                 <X className="h-3 w-3" />
                               </Button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
                               <Badge
-                                className={`text-xs ${getRiskLevelColor(patient.riskLevel)}`}
+                                className={`text-xs flex-shrink-0 whitespace-nowrap ${getRiskLevelColor(patient.riskLevel)}`}
                                 style={{
                                   backgroundColor: getRiskLevelBgColor(
                                     patient.riskLevel,
@@ -3203,7 +3209,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => handleStartEditingRiskLevel(patient.id, patient.riskLevel)}
-                                className="h-4 w-4 p-0 hover:bg-gray-100"
+                                className="h-4 w-4 p-0 hover:bg-gray-100 flex-shrink-0"
                                 data-testid="button-edit-risk-level"
                               >
                                 <Edit className="h-2 w-2" />
@@ -3215,14 +3221,14 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                       {patient.insuranceInfo?.provider && (
                         <Badge
                           variant="outline"
-                          className="text-xs dark:text-gray-200 dark:border-gray-600"
+                          className="text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
                         >
                           {patient.insuranceInfo.provider === "NHS (National Health Service)" ? "NHS" : patient.insuranceInfo.provider.toUpperCase()}
                         </Badge>
                       )}
                       {patient.isInsured && (
                         <Badge
-                          className="text-xs text-black"
+                          className="text-xs text-black flex-shrink-0 whitespace-nowrap"
                           style={{ backgroundColor: "#FFFACD" }}
                           data-testid={`badge-insured-${patient.id}`}
                         >
@@ -3278,13 +3284,13 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
                           Conditions:
                         </p>
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1 max-w-full">
                           {patient.medicalHistory.chronicConditions
                             .slice(0, 2)
                             .map((condition: string, index: number) => (
                               <Badge
                                 key={index}
-                                className={`text-xs ${getConditionColor(condition)}`}
+                                className={`text-xs flex-shrink-0 whitespace-nowrap ${getConditionColor(condition)}`}
                                 style={{
                                   backgroundColor:
                                     getConditionBgColor(condition),
@@ -3297,7 +3303,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                             2 && (
                             <Badge
                               variant="outline"
-                              className="text-xs dark:text-gray-200 dark:border-gray-600"
+                              className="text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
                             >
                               +
                               {patient.medicalHistory.chronicConditions.length -
@@ -3319,11 +3325,11 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                     </div>
                   )}
 
-                  {/* Display patient flags */}
+                  {/* Display patient flags - Show only 2, hide others */}
                   {patient.flags && patient.flags.length > 0 && (
                     <TooltipProvider>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {patient.flags.map((flag: string, index: number) => {
+                      <div className="flex flex-wrap gap-1.5 mt-2 min-h-[24px] max-w-full">
+                        {patient.flags.slice(0, 2).map((flag: string, index: number) => {
                           const flagParts = flag.split(":");
                           const [category, , reason] = flagParts;
                           const getFlagTypeDisplay = (type: string) => {
@@ -3346,16 +3352,16 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                           return (
                             <Tooltip key={index}>
                               <TooltipTrigger asChild>
-                                <div className="relative group">
+                                <div className="relative group flex-shrink-0 max-w-full">
                                   <Badge
                                     variant="outline"
-                                    className="text-xs pr-6 cursor-pointer"
+                                    className="text-xs pr-6 cursor-pointer whitespace-nowrap flex-shrink-0"
                                   >
                                     {getFlagTypeDisplay(category)}
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="absolute right-0 top-0 h-full w-6 p-0 hover:bg-red-100 dark:hover:bg-red-900 rounded-r-md"
+                                      className="absolute right-0 top-0 h-full w-6 p-0 hover:bg-red-100 dark:hover:bg-red-900 rounded-r-md flex-shrink-0"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         deleteFlagMutation.mutate({
@@ -3378,6 +3384,14 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                             </Tooltip>
                           );
                         })}
+                        {patient.flags.length > 2 && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
+                          >
+                            +{patient.flags.length - 2} more
+                          </Badge>
+                        )}
                       </div>
                     </TooltipProvider>
                   )}

@@ -276,7 +276,21 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
   // Create flag mutation
   const createFlagMutation = useMutation({
     mutationFn: async (data: any) => {
-      return apiRequest('POST', `/api/patients/${patient?.id}/flags`, data);
+      // Get patient ID - check both id and patientId fields
+      const patientId = patient?.id || patient?.patientId;
+      
+      if (!patientId) {
+        throw new Error("Patient ID is required");
+      }
+      
+      // Ensure patientId is a number
+      const numericPatientId = typeof patientId === 'string' ? parseInt(patientId, 10) : patientId;
+      
+      if (isNaN(numericPatientId)) {
+        throw new Error("Invalid patient ID format");
+      }
+      
+      return apiRequest('POST', `/api/patients/${numericPatientId}/flags`, data);
     },
     onSuccess: () => {
       toast({
@@ -288,9 +302,11 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
       resetForm();
     },
     onError: (error: any) => {
+      console.error("Flag creation error:", error);
+      const errorMessage = error?.response?.data?.error || error?.message || "Failed to create flag. Please try again.";
       toast({
         title: "Error",
-        description: error.message || "Failed to create flag",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -335,7 +351,32 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
     });
   };
 
+  // Check if a flag type already exists for this patient
+  const checkFlagExists = (flagTypeToCheck: string): boolean => {
+    if (!patient?.flags || !Array.isArray(patient.flags) || !flagTypeToCheck) {
+      return false;
+    }
+    
+    return patient.flags.some((flag: string) => {
+      const flagParts = flag.split(":");
+      const [category] = flagParts;
+      return category === flagTypeToCheck;
+    });
+  };
+
   const handleCreateFlag = () => {
+    // Get patient ID - check both id and patientId fields
+    const patientId = patient?.id || patient?.patientId;
+    
+    if (!patientId) {
+      toast({
+        title: "Error",
+        description: "Patient information is missing. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!flagType || !flagReason.trim()) {
       toast({
         title: "Missing Information",
@@ -345,11 +386,20 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
       return;
     }
 
+    // Check if flag type already exists
+    if (checkFlagExists(flagType)) {
+      toast({
+        title: "Flag Already Exists",
+        description: "This patient already has a flag of this type. Please select a different flag type.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     createFlagMutation.mutate({
       type: flagType,
       reason: flagReason.trim(),
-      severity: flagSeverity,
-      isActive: true
+      severity: flagSeverity
     });
   };
 
@@ -662,6 +712,14 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                       ))}
                     </SelectContent>
                   </Select>
+                  {flagType && checkFlagExists(flagType) && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <AlertTriangle className="h-4 w-4 text-orange-500 flex-shrink-0" />
+                      <span className="text-sm text-orange-600 dark:text-orange-400 font-medium">
+                        Already exists this flag
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -700,7 +758,7 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
 
                 <Button 
                   onClick={handleCreateFlag} 
-                  disabled={createFlagMutation.isPending}
+                  disabled={createFlagMutation.isPending || (flagType && checkFlagExists(flagType))}
                   className="w-full"
                   data-testid="button-create-flag"
                 >

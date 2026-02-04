@@ -2590,90 +2590,101 @@ export default function PatientFamilyHistory({
             {anatomicalFilesLoading ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">Checking for uploads…</p>
             ) : anatomicalFiles.length > 0 ? (
-              <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-            {anatomicalFiles.map((file) => (
-                  <div
-                    key={file.filename}
-                    className="border rounded-xl border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#0b0c16] p-4 space-y-3 flex flex-col"
-                  >
-                    <div className="h-36 rounded-lg overflow-hidden bg-black flex items-center justify-center">
-                      {file.filename.toLowerCase().endsWith(".pdf") ? (
-                        <div className="flex flex-col items-center gap-2 text-sm text-white">
-                          <FileText className="h-8 w-8" />
-                          <span className="text-xs uppercase tracking-wide">PDF</span>
-                        </div>
-                      ) : (
-                        <img
-                          src={file.url}
-                          alt={file.filename}
-                          className="h-full w-full object-cover"
-                        />
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                  <a
-                    className="text-sm font-semibold text-[hsl(var(--cura-bluewave))] hover:underline"
-                    onClick={() => window.open(file.url, "_blank")}
-                  >
-                    {file.filename}
-                  </a>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Uploaded {new Date(file.uploadedAt).toLocaleString()}
-                      </p>
-                      <div className="flex items-center gap-2 text-xs">
-                        <a
-                          target="_blank"
-                          rel="noreferrer"
-                          href={file.url}
-                          className="text-[hsl(var(--cura-bluewave))] hover:underline"
-                        >
-                          View full-size
-                        </a>
-                        <span className="text-gray-400">·</span>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {(file.size / 1024).toFixed(1)} KB
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-auto flex items-center justify-between gap-3 text-xs">
-                      <p className="text-gray-500 dark:text-gray-400">
-                        {new Date(file.uploadedAt).toLocaleString()}
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-full"
-                        onClick={async () => {
-                          if (!onDeleteAnatomicalFile) return;
-                          setDeletingFile(file.filename);
-                          try {
-                            const success = await onDeleteAnatomicalFile(file.filename);
-                            if (success) {
-                              toast({
-                                title: "File deleted",
-                                description: `${file.filename} removed`,
-                                variant: "success",
-                                icon: <CheckCircle className="h-4 w-4 text-green-600" />,
-                              });
-                            } else {
-                              toast({
-                                title: "Delete failed",
-                                description: `Unable to delete ${file.filename}`,
-                                variant: "destructive",
-                              });
-                            }
-                          } finally {
-                            setDeletingFile(null);
-                          }
-                        }}
-                        disabled={deletingFile === file.filename}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+              <div className="border rounded-lg border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Preview</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">File Name</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Uploaded</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Size</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
+                      {anatomicalFiles.map((file) => (
+                        <tr key={file.filename} className="hover:bg-gray-50 dark:hover:bg-slate-800">
+                          <td className="px-4 py-3">
+                            <div className="h-16 w-16 rounded overflow-hidden bg-black flex items-center justify-center">
+                              {file.filename.toLowerCase().endsWith(".pdf") ? (
+                                <div className="flex flex-col items-center gap-1 text-xs text-white">
+                                  <FileText className="h-6 w-6" />
+                                  <span className="text-[10px] uppercase tracking-wide">PDF</span>
+                                </div>
+                              ) : (
+                                <img
+                                  src={file.url}
+                                  alt={file.filename}
+                                  className="h-full w-full object-cover"
+                                />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <a
+                              className="text-sm font-semibold text-[hsl(var(--cura-bluewave))] hover:underline cursor-pointer"
+                              onClick={() => window.open(file.url, "_blank")}
+                            >
+                              {file.filename}
+                            </a>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                            {new Date(file.uploadedAt).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                            {(file.size / 1024).toFixed(1)} KB
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <a
+                                target="_blank"
+                                rel="noreferrer"
+                                href={file.url}
+                                className="text-sm text-[hsl(var(--cura-bluewave))] hover:underline flex items-center gap-1"
+                              >
+                                <Eye className="h-4 w-4" />
+                                View full-size
+                              </a>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="flex items-center gap-1 px-3 py-1.5"
+                                onClick={async () => {
+                                  if (!onDeleteAnatomicalFile) return;
+                                  setDeletingFile(file.filename);
+                                  try {
+                                    const success = await onDeleteAnatomicalFile(file.filename);
+                                    if (success) {
+                                      toast({
+                                        title: "File deleted",
+                                        description: `${file.filename} removed`,
+                                        variant: "success",
+                                        icon: <CheckCircle className="h-4 w-4 text-green-600" />,
+                                      });
+                                    } else {
+                                      toast({
+                                        title: "Delete failed",
+                                        description: `Unable to delete ${file.filename}`,
+                                        variant: "destructive",
+                                      });
+                                    }
+                                  } finally {
+                                    setDeletingFile(null);
+                                  }
+                                }}
+                                disabled={deletingFile === file.filename}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
               <p className="text-sm text-gray-500 dark:text-gray-400">
