@@ -315,6 +315,7 @@ export default function MessagingPage() {
   const [viewingCampaign, setViewingCampaign] = useState<any>(null);
   const [showViewCampaignRecipients, setShowViewCampaignRecipients] = useState(false);
   const [campaignSubTab, setCampaignSubTab] = useState<"all" | "history" | "email_history">("all");
+  const [sendingCampaignId, setSendingCampaignId] = useState<number | null>(null);
   const [recipientFilter, setRecipientFilter] = useState({
     role: "all",
     searchName: ""
@@ -1832,9 +1833,62 @@ export default function MessagingPage() {
     }
   });
 
+  // Helper function to generate a unique duplicate campaign name
+  const generateDuplicateCampaignName = (originalName: string, existingCampaigns: any[], excludeCampaignId?: number): string => {
+    // Remove any existing "(Copy)" or "(Copy N)" suffix
+    const baseName = originalName.replace(/\s*\(Copy(?:\s+\d+)?\)\s*$/, '').trim();
+    
+    // Find all campaigns that start with the base name and have a "(Copy)" suffix
+    // Exclude the campaign being duplicated
+    const copyPattern = /^(.+?)\s*\(Copy(?:\s+(\d+))?\)\s*$/;
+    const existingCopies: number[] = [];
+    
+    existingCampaigns.forEach((c: any) => {
+      // Skip the campaign being duplicated
+      if (excludeCampaignId && c.id === excludeCampaignId) {
+        return;
+      }
+      
+      const match = c.name.match(copyPattern);
+      if (match) {
+        const existingBase = match[1].trim();
+        if (existingBase === baseName) {
+          const copyNumber = match[2] ? parseInt(match[2], 10) : 1;
+          existingCopies.push(copyNumber);
+        }
+      }
+    });
+    
+    // Also check if the base name itself exists (without any copy suffix)
+    // Exclude the campaign being duplicated
+    const baseNameExists = existingCampaigns.some((c: any) => {
+      if (excludeCampaignId && c.id === excludeCampaignId) {
+        return false;
+      }
+      return c.name.trim() === baseName;
+    });
+    
+    // Find the next available copy number
+    let nextCopyNumber = 1;
+    if (baseNameExists || existingCopies.length > 0) {
+      const maxCopyNumber = existingCopies.length > 0 ? Math.max(...existingCopies) : 0;
+      nextCopyNumber = maxCopyNumber + 1;
+    }
+    
+    // Generate the new name
+    return nextCopyNumber === 1 
+      ? `${baseName} (Copy)`
+      : `${baseName} (Copy ${nextCopyNumber})`;
+  };
+
   const duplicateCampaignMutation = useMutation({
     mutationFn: async (campaign: any) => {
       const token = localStorage.getItem('auth_token');
+      
+      // Get current campaigns from cache to check for existing names
+      const cachedCampaigns = queryClient.getQueryData<any[]>(['/api/messaging/campaigns']) || [];
+      const duplicateName = generateDuplicateCampaignName(campaign.name, cachedCampaigns, campaign.id);
+      
       const response = await fetch('/api/messaging/campaigns', {
         method: 'POST',
         headers: {
@@ -1844,7 +1898,7 @@ export default function MessagingPage() {
         },
         credentials: 'include',
         body: JSON.stringify({
-          name: `${campaign.name} (Copy)`,
+          name: duplicateName,
           type: campaign.type,
           subject: campaign.subject,
           content: campaign.content,
@@ -2064,6 +2118,7 @@ export default function MessagingPage() {
       return response.json();
     },
     onSuccess: (data) => {
+      setSendingCampaignId(null);
       queryClient.invalidateQueries({ queryKey: ['/api/messaging/campaigns'] });
       setCampaignSummary({
         totalRecipients: data.totalRecipients,
@@ -2078,6 +2133,7 @@ export default function MessagingPage() {
       });
     },
     onError: (error: any) => {
+      setSendingCampaignId(null);
       console.error("Error sending campaign:", error);
       toast({
         title: "Failed to Send Campaign",
@@ -2087,15 +2143,33 @@ export default function MessagingPage() {
     }
   });
 
-  const handleSendExistingCampaign = (campaign: any) => {
-    if (campaign.status === 'sent') {
+  const handleSendExistingCampaign = (campaign: any, event?: React.MouseEvent) => {
+    // Prevent event propagation to avoid multiple triggers
+    if (event) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+    
+    // Prevent sending if already sending this campaign
+    if (sendingCampaignId === campaign.id) {
+      return;
+    }
+    
+    // Check if campaign has recipients - check both recipients array and recipientCount
+    const hasRecipients = (campaign.recipients && Array.isArray(campaign.recipients) && campaign.recipients.length > 0) || 
+                          (campaign.recipientCount && campaign.recipientCount > 0);
+    
+    if (!hasRecipients) {
       toast({
-        title: "Already Sent",
-        description: "This campaign has already been sent.",
+        title: "Failed to Send Campaign",
+        description: "No recipients in this campaign. Please add recipients before sending.",
         variant: "destructive"
       });
       return;
     }
+    
+    // Allow resending even if status is 'sent' (that's what "Resend Campaign" is for)
+    setSendingCampaignId(campaign.id);
     sendCampaignMutation.mutate(campaign.id);
   };
 
@@ -4520,21 +4594,21 @@ export default function MessagingPage() {
                         {campaign.status !== 'sent' && (
                           <Button 
                             size="sm"
-                            onClick={() => handleSendExistingCampaign(campaign)}
-                            disabled={sendCampaignMutation.isPending}
+                            onClick={(e) => handleSendExistingCampaign(campaign, e)}
+                            disabled={sendingCampaignId === campaign.id || sendCampaignMutation.isPending}
                             data-testid={`button-send-campaign-${campaign.id}`}
                           >
-                            {sendCampaignMutation.isPending ? "Sending..." : "Send Campaign"}
+                            {sendingCampaignId === campaign.id ? "Sending..." : "Send Campaign"}
                           </Button>
                         )}
                         {campaign.status === 'sent' && (
                           <Button 
                             size="sm"
-                            onClick={() => handleSendExistingCampaign(campaign)}
-                            disabled={sendCampaignMutation.isPending}
+                            onClick={(e) => handleSendExistingCampaign(campaign, e)}
+                            disabled={sendingCampaignId === campaign.id || sendCampaignMutation.isPending}
                             data-testid={`button-resend-campaign-${campaign.id}`}
                           >
-                            {sendCampaignMutation.isPending ? "Sending..." : "Resend Campaign"}
+                            {sendingCampaignId === campaign.id ? "Sending..." : "Resend Campaign"}
                           </Button>
                         )}
                         <Button 
@@ -4648,11 +4722,11 @@ export default function MessagingPage() {
                               </Button>
                               <Button 
                                 size="sm"
-                                onClick={() => handleSendExistingCampaign(campaign)}
-                                disabled={sendCampaignMutation.isPending}
+                                onClick={(e) => handleSendExistingCampaign(campaign, e)}
+                                disabled={sendingCampaignId === campaign.id || sendCampaignMutation.isPending}
                                 data-testid={`button-resend-history-campaign-${campaign.id}`}
                               >
-                                {sendCampaignMutation.isPending ? "Sending..." : "Resend Campaign"}
+                                {sendingCampaignId === campaign.id ? "Sending..." : "Resend Campaign"}
                               </Button>
                               <Button 
                                 variant="outline" 
@@ -4755,11 +4829,11 @@ export default function MessagingPage() {
                               </Button>
                               <Button 
                                 size="sm"
-                                onClick={() => handleSendExistingCampaign(campaign)}
-                                disabled={sendCampaignMutation.isPending}
+                                onClick={(e) => handleSendExistingCampaign(campaign, e)}
+                                disabled={sendingCampaignId === campaign.id || sendCampaignMutation.isPending}
                                 data-testid={`button-resend-email-history-campaign-${campaign.id}`}
                               >
-                                {sendCampaignMutation.isPending ? "Sending..." : "Resend Campaign"}
+                                {sendingCampaignId === campaign.id ? "Sending..." : "Resend Campaign"}
                               </Button>
                               <Button 
                                 variant="outline" 

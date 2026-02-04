@@ -2557,6 +2557,86 @@ export default function ImagingPage() {
     setLastPosition({ x, y });
   };
 
+  // Load signature from database onto canvas
+  const loadSignatureFromDatabase = async () => {
+    if (!eSignStudy || !canvasRef.current) return;
+
+    try {
+      // Fetch medical image from database to get latest signature data
+      const response = await apiRequest(
+        "GET",
+        `/api/medical-images/${eSignStudy.id}`
+      );
+
+      if (response.ok) {
+        const medicalImageData = await response.json();
+        
+        // Check if signature exists in database (imaging uses signatureData field)
+        if (
+          medicalImageData.signatureData &&
+          String(medicalImageData.signatureData).trim() !== ""
+        ) {
+          const signatureImage = new Image();
+          signatureImage.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            
+            // Clear canvas first
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw the signature image onto canvas
+            ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+            setSignature(medicalImageData.signatureData);
+          };
+          signatureImage.onerror = () => {
+            console.error("Error loading signature image");
+          };
+          signatureImage.src = medicalImageData.signatureData;
+        } else {
+          // No signature exists, clear canvas
+          clearSignature();
+        }
+      }
+    } catch (error) {
+      console.error("Error loading signature from database:", error);
+      // If error, check if signature exists in eSignStudy
+      if (
+        eSignStudy.signatureData &&
+        String(eSignStudy.signatureData).trim() !== ""
+      ) {
+        const signatureImage = new Image();
+        signatureImage.onload = () => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+          setSignature(eSignStudy.signatureData);
+        };
+        signatureImage.src = eSignStudy.signatureData;
+      } else {
+        clearSignature();
+      }
+    }
+  };
+
+  // Load signature when dialog opens
+  useEffect(() => {
+    if (showESignDialog && eSignStudy) {
+      // Small delay to ensure canvas is rendered
+      setTimeout(() => {
+        loadSignatureFromDatabase();
+      }, 100);
+    } else if (!showESignDialog) {
+      // Clear signature when dialog closes
+      clearSignature();
+    }
+  }, [showESignDialog, eSignStudy?.id]);
+
   const clearSignature = () => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;

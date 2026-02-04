@@ -2114,6 +2114,86 @@ export default function PrescriptionsPage() {
     setSignatureSaved(false);
   };
 
+  // Load signature from database onto canvas
+  const loadSignatureFromDatabase = async () => {
+    if (!selectedPrescription || !canvasRef.current) return;
+
+    try {
+      // Fetch prescription from database to get latest signature data
+      const response = await apiRequest(
+        "GET",
+        `/api/prescriptions/${selectedPrescription.id}`
+      );
+
+      if (response.ok) {
+        const prescriptionData = await response.json();
+        
+        // Check if signature exists in database
+        if (
+          prescriptionData.signature?.doctorSignature &&
+          String(prescriptionData.signature.doctorSignature).trim() !== ""
+        ) {
+          const signatureImage = new Image();
+          signatureImage.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            
+            // Clear canvas first
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw the signature image onto canvas
+            ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+            setSignature(prescriptionData.signature.doctorSignature);
+          };
+          signatureImage.onerror = () => {
+            console.error("Error loading signature image");
+          };
+          signatureImage.src = prescriptionData.signature.doctorSignature;
+        } else {
+          // No signature exists, clear canvas
+          clearSignature();
+        }
+      }
+    } catch (error) {
+      console.error("Error loading signature from database:", error);
+      // If error, check if signature exists in selectedPrescription
+      if (
+        selectedPrescription.signature?.doctorSignature &&
+        String(selectedPrescription.signature.doctorSignature).trim() !== ""
+      ) {
+        const signatureImage = new Image();
+        signatureImage.onload = () => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+          setSignature(selectedPrescription.signature.doctorSignature);
+        };
+        signatureImage.src = selectedPrescription.signature.doctorSignature;
+      } else {
+        clearSignature();
+      }
+    }
+  };
+
+  // Load signature when dialog opens
+  useEffect(() => {
+    if (showESignDialog && selectedPrescription) {
+      // Small delay to ensure canvas is rendered
+      setTimeout(() => {
+        loadSignatureFromDatabase();
+      }, 100);
+    } else if (!showESignDialog) {
+      // Clear signature when dialog closes
+      clearSignature();
+    }
+  }, [showESignDialog, selectedPrescription?.id]);
+
   const saveSignature = async () => {
     if (!canvasRef.current || !selectedPrescription) return;
 

@@ -990,6 +990,8 @@ export const patientCommunications = pgTable("patient_communications", {
     flagType?: "urgent" | "follow-up" | "billing" | "general";
     priority?: "low" | "medium" | "high" | "urgent";
     method?: string;
+    timezone?: string;
+    localTime?: string;
   }>().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

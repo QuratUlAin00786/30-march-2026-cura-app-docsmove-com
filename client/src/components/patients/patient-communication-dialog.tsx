@@ -129,23 +129,67 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
   const queryClient = useQueryClient();
 
   // Convert local time in selected timezone to UTC ISO string
+  // Uses proper timezone handling to account for DST
   const convertToUTC = (localDateTime: string, timezone: string): string => {
     if (!localDateTime) return "";
     
     const tz = TIMEZONES.find(t => t.value === timezone);
     if (!tz) return localDateTime;
     
-    // Parse the local datetime-local value (format: YYYY-MM-DDTHH:mm)
-    const [datePart, timePart] = localDateTime.split('T');
-    const [year, month, day] = datePart.split('-').map(Number);
-    const [hours, minutes] = timePart.split(':').map(Number);
-    
-    // Create a date object and subtract the timezone offset to get UTC
-    const localDate = new Date(year, month - 1, day, hours, minutes);
-    const utcTime = localDate.getTime() - (tz.offset * 60 * 60 * 1000);
-    const utcDate = new Date(utcTime);
-    
-    return utcDate.toISOString();
+    try {
+      // Parse the local datetime-local value (format: YYYY-MM-DDTHH:mm)
+      const [datePart, timePart] = localDateTime.split('T');
+      const [year, month, day] = datePart.split('-').map(Number);
+      const [hours, minutes] = timePart.split(':').map(Number);
+      
+      // Use iterative approach to find the correct UTC time
+      // We want to find the UTC time that, when displayed in the target timezone, equals our input
+      let candidateUTC = new Date(Date.UTC(year, month - 1, day, hours, minutes));
+      
+      // Iterate to find the correct UTC time (usually converges in 1-2 iterations)
+      for (let i = 0; i < 3; i++) {
+        const formatter = new Intl.DateTimeFormat('en', {
+          timeZone: tz.value,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+        
+        const parts = formatter.formatToParts(candidateUTC);
+        const tzYear = parseInt(parts.find(p => p.type === 'year')?.value || '0');
+        const tzMonth = parseInt(parts.find(p => p.type === 'month')?.value || '0');
+        const tzDay = parseInt(parts.find(p => p.type === 'day')?.value || '0');
+        const tzHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+        const tzMinute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
+        
+        // Check if we've found the correct time
+        if (tzYear === year && tzMonth === month && tzDay === day && 
+            tzHour === hours && tzMinute === minutes) {
+          return candidateUTC.toISOString();
+        }
+        
+        // Calculate the difference and adjust
+        const targetLocal = new Date(year, month - 1, day, hours, minutes);
+        const displayedLocal = new Date(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute);
+        const diffMs = targetLocal.getTime() - displayedLocal.getTime();
+        candidateUTC = new Date(candidateUTC.getTime() + diffMs);
+      }
+      
+      return candidateUTC.toISOString();
+    } catch (error) {
+      console.error("Error converting timezone:", error);
+      // Fallback: use offset-based calculation (may not handle DST perfectly)
+      const [datePart, timePart] = localDateTime.split('T');
+      const [year, month, day] = datePart.split('-').map(Number);
+      const [hours, minutes] = timePart.split(':').map(Number);
+      const localDate = new Date(year, month - 1, day, hours, minutes);
+      const utcTime = localDate.getTime() - (tz.offset * 60 * 60 * 1000);
+      return new Date(utcTime).toISOString();
+    }
   };
 
   // Get the display time info for the selected schedule
@@ -438,7 +482,55 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
     }
   };
 
-  // Format date without timezone conversion - display exactly as stored
+  // Format date with timezone conversion - convert from UTC to the timezone stored in metadata
+  const formatDateWithTimezone = (dateString: string, formatStr: string, metadata?: any) => {
+    if (!dateString) return '';
+    
+    try {
+      const date = new Date(dateString);
+      // Get timezone from metadata, or default to UTC if not available
+      const timezone = (metadata && typeof metadata === 'object' && metadata.timezone) ? metadata.timezone : 'UTC';
+      
+      // Find the timezone info
+      const tz = TIMEZONES.find(t => t.value === timezone);
+      if (!tz) {
+        // Fallback to simple format if timezone not found
+        return format(date, formatStr);
+      }
+      
+      // Use Intl.DateTimeFormat to convert UTC to the target timezone
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz.value,
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: 'short',
+        year: formatStr.includes('yyyy') ? 'numeric' : undefined,
+        hour12: false
+      });
+      
+      const parts = formatter.formatToParts(date);
+      const hours = parts.find(p => p.type === 'hour')?.value || '00';
+      const minutes = parts.find(p => p.type === 'minute')?.value || '00';
+      const day = parts.find(p => p.type === 'day')?.value || '01';
+      const month = parts.find(p => p.type === 'month')?.value || 'Jan';
+      const year = parts.find(p => p.type === 'year')?.value || '2024';
+      
+      if (formatStr === 'MMM dd, HH:mm') {
+        return `${month} ${day}, ${hours}:${minutes}`;
+      } else if (formatStr === 'MMM dd, yyyy HH:mm') {
+        return `${month} ${day}, ${year} ${hours}:${minutes}`;
+      }
+      
+      return format(date, formatStr);
+    } catch (error) {
+      console.error("Error formatting date with timezone:", error);
+      // Fallback to original format function if parsing fails
+      return format(new Date(dateString), formatStr);
+    }
+  };
+
+  // Format date without timezone conversion - display exactly as stored (for backward compatibility)
   const formatDateWithoutTimezone = (dateString: string, formatStr: string) => {
     if (!dateString) return '';
     // Parse the date string and extract components without timezone conversion
@@ -994,7 +1086,7 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             <div className="flex items-center gap-2">
                               {getStatusIcon(comm.status)}
                               <span className="text-sm text-gray-500">
-                                {formatDateWithoutTimezone(comm.createdAt, 'MMM dd, HH:mm')}
+                                {formatDateWithTimezone(comm.createdAt, 'MMM dd, HH:mm', comm.metadata)}
                               </span>
                             </div>
                           </div>
@@ -1016,13 +1108,13 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             
                             {comm.status === 'scheduled' && comm.scheduledFor && (
                               <span className="text-blue-600 dark:text-blue-400">
-                                Scheduled for: {formatDateWithoutTimezone(comm.scheduledFor, 'MMM dd, yyyy HH:mm')}
+                                Scheduled for: {formatDateWithTimezone(comm.scheduledFor, 'MMM dd, yyyy HH:mm', comm.metadata)}
                               </span>
                             )}
                             
                             {comm.sentAt && comm.status !== 'scheduled' && (
                               <span className="text-gray-500">
-                                Sent: {formatDateWithoutTimezone(comm.sentAt, 'MMM dd, yyyy HH:mm')}
+                                Sent: {formatDateWithTimezone(comm.sentAt, 'MMM dd, yyyy HH:mm', comm.metadata)}
                               </span>
                             )}
                           </div>
@@ -1060,7 +1152,7 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             <div className="flex items-center gap-2">
                               {getStatusIcon(comm.status)}
                               <span className="text-sm text-gray-500">
-                                {formatDateWithoutTimezone(comm.createdAt, 'MMM dd, HH:mm')}
+                                {formatDateWithTimezone(comm.createdAt, 'MMM dd, HH:mm', comm.metadata)}
                               </span>
                             </div>
                           </div>
@@ -1082,13 +1174,13 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             
                             {comm.status === 'scheduled' && comm.scheduledFor && (
                               <span className="text-blue-600 dark:text-blue-400">
-                                Scheduled for: {formatDateWithoutTimezone(comm.scheduledFor, 'MMM dd, yyyy HH:mm')}
+                                Scheduled for: {formatDateWithTimezone(comm.scheduledFor, 'MMM dd, yyyy HH:mm', comm.metadata)}
                               </span>
                             )}
                             
                             {comm.sentAt && comm.status !== 'scheduled' && (
                               <span className="text-gray-500">
-                                Sent: {formatDateWithoutTimezone(comm.sentAt, 'MMM dd, yyyy HH:mm')}
+                                Sent: {formatDateWithTimezone(comm.sentAt, 'MMM dd, yyyy HH:mm', comm.metadata)}
                               </span>
                             )}
                           </div>
@@ -1126,7 +1218,7 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             <div className="flex items-center gap-2">
                               {getStatusIcon(comm.status)}
                               <span className="text-sm text-gray-500">
-                                {formatDateWithoutTimezone(comm.createdAt, 'MMM dd, HH:mm')}
+                                {formatDateWithTimezone(comm.createdAt, 'MMM dd, HH:mm', comm.metadata)}
                               </span>
                             </div>
                           </div>
@@ -1193,7 +1285,7 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             <div className="flex items-center gap-2">
                               {getStatusIcon(comm.status)}
                               <span className="text-sm text-gray-500">
-                                {formatDateWithoutTimezone(comm.createdAt, 'MMM dd, HH:mm')}
+                                {formatDateWithTimezone(comm.createdAt, 'MMM dd, HH:mm', comm.metadata)}
                               </span>
                             </div>
                           </div>
@@ -1215,13 +1307,13 @@ export function PatientCommunicationDialog({ open, onOpenChange, patient, mode }
                             
                             {comm.status === 'scheduled' && comm.scheduledFor && (
                               <span className="text-blue-600 dark:text-blue-400">
-                                Scheduled for: {formatDateWithoutTimezone(comm.scheduledFor, 'MMM dd, yyyy HH:mm')}
+                                Scheduled for: {formatDateWithTimezone(comm.scheduledFor, 'MMM dd, yyyy HH:mm', comm.metadata)}
                               </span>
                             )}
                             
                             {comm.sentAt && comm.status !== 'scheduled' && (
                               <span className="text-gray-500">
-                                Sent: {formatDateWithoutTimezone(comm.sentAt, 'MMM dd, yyyy HH:mm')}
+                                Sent: {formatDateWithTimezone(comm.sentAt, 'MMM dd, yyyy HH:mm', comm.metadata)}
                               </span>
                             )}
                           </div>

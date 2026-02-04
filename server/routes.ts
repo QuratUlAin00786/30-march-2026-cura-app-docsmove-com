@@ -4904,7 +4904,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         metadata: {
           reminderType: reminderData.type,
           messageSent,
-          timezone: reminderData.timezone || null,
+          timezone: reminderData.timezone || 'UTC',
+          localTime: req.body.metadata?.localTime || null,
           provider: reminderData.method === 'sms' || reminderData.method === 'whatsapp' ? 'Twilio' : reminderData.method === 'email' ? 'SendGrid' : 'System'
         }
       };
@@ -12677,6 +12678,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const patientId = Number(req.body.patientId);
         if (!patientId) {
           return res.status(400).json({ error: "patientId is required" });
+        }
+
+        // Validate that the patient exists in the patients table
+        const patient = await storage.getPatient(patientId, organizationId);
+        if (!patient) {
+          return res.status(404).json({ error: `Patient with ID ${patientId} not found in this organization` });
         }
 
         const result = await formService.shareForm({
@@ -25953,10 +25960,10 @@ Cura EMR Team
       }
       
       // Move yPosition down after both sections
-      yPosition = sectionsStartY - 110;
+      yPosition = sectionsStartY - 120; // Increased spacing to prevent overlap
       
       // DOCTOR DETAILS section - placed right after PATIENT INFORMATION
-      yPosition -= 15; // Spacing before DOCTOR DETAILS
+      yPosition -= 20; // Increased spacing before DOCTOR DETAILS
       
       // Fetch doctor details from database using selectedUserId
       let doctorName = 'N/A';
@@ -25979,8 +25986,8 @@ Cura EMR Team
         console.error('Error fetching doctor details:', error);
       }
       
-      // Calculate DOCTOR DETAILS section height
-      const doctorDetailsHeight = 60;
+      // Calculate DOCTOR DETAILS section height with proper spacing
+      const doctorDetailsHeight = 70; // Increased height to prevent overlap
       drawSectionBox(30, yPosition + 5, width - 60, doctorDetailsHeight);
       
       page.drawText('DOCTOR DETAILS', {
@@ -25991,7 +25998,7 @@ Cura EMR Team
         color: primaryBlue
       });
       
-      let doctorY = yPosition - 16;
+      let doctorY = yPosition - 18; // Increased spacing
       page.drawText(`Name: ${doctorName}`, { 
         x: 50, 
         y: doctorY, 
@@ -25999,7 +26006,7 @@ Cura EMR Team
         font,
         color: darkGray
       });
-      doctorY -= 11;
+      doctorY -= 12; // Increased line spacing
       
       page.drawText(`Specialization: ${doctorSpecialization}`, { 
         x: 50, 
@@ -26008,7 +26015,7 @@ Cura EMR Team
         font,
         color: darkGray
       });
-      doctorY -= 11;
+      doctorY -= 12; // Increased line spacing
       
       page.drawText(`Email: ${doctorEmail}`, { 
         x: 50, 
@@ -26017,7 +26024,7 @@ Cura EMR Team
         font,
         color: darkGray
       });
-      doctorY -= 11;
+      doctorY -= 12; // Increased line spacing
       
       // Only show Department if it's not "N/A"
       if (doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '') {
@@ -26028,11 +26035,11 @@ Cura EMR Team
           font,
           color: darkGray
         });
-        doctorY -= 11;
+        doctorY -= 12; // Increased line spacing
       }
       
-      // Adjust yPosition after DOCTOR DETAILS
-      yPosition -= doctorDetailsHeight;
+      // Adjust yPosition after DOCTOR DETAILS with extra spacing
+      yPosition -= doctorDetailsHeight + 10; // Added extra spacing
       
       if (reportFormData) {
         yPosition -= 20;

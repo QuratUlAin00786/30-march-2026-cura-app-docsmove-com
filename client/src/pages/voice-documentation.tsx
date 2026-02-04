@@ -168,6 +168,8 @@ export default function VoiceDocumentation() {
   const [editingNote, setEditingNote] = useState<VoiceNote | null>(null);
   const [editedTranscript, setEditedTranscript] = useState("");
   const [localTemplates, setLocalTemplates] = useState<SmartTemplate[]>([]);
+  const [editingTemplate, setEditingTemplate] = useState<SmartTemplate | null>(null);
+  const [editTemplateDialogOpen, setEditTemplateDialogOpen] = useState(false);
   const [viewFullDialogOpen, setViewFullDialogOpen] = useState(false);
   const [annotateDialogOpen, setAnnotateDialogOpen] = useState(false);
   const [addToReportDialogOpen, setAddToReportDialogOpen] = useState(false);
@@ -175,6 +177,8 @@ export default function VoiceDocumentation() {
   const [analyzeDialogOpen, setAnalyzeDialogOpen] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState("en-US");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const speechRecognitionRef = useRef<any>(null);
@@ -643,6 +647,12 @@ export default function VoiceDocumentation() {
       localStorage.getItem("duplicatedTemplates") || "[]",
     );
     setLocalTemplates([...mockTemplates, ...duplicatedTemplates]);
+    
+    // Load saved language setting
+    const savedLanguage = localStorage.getItem('voiceDocumentationLanguage');
+    if (savedLanguage) {
+      setSelectedLanguage(savedLanguage);
+    }
   }, []);
 
   // Recording timer effect
@@ -677,7 +687,7 @@ export default function VoiceDocumentation() {
         speechRecognitionRef.current = new SpeechRecognition();
         speechRecognitionRef.current.continuous = true;
         speechRecognitionRef.current.interimResults = true;
-        speechRecognitionRef.current.lang = "en-US";
+        speechRecognitionRef.current.lang = selectedLanguage || localStorage.getItem('voiceDocumentationLanguage') || "en-US";
 
         speechRecognitionRef.current.onstart = () => {
           console.log("Speech recognition started");
@@ -1797,11 +1807,70 @@ export default function VoiceDocumentation() {
                   </Button>
 
                   <div className="flex flex-col gap-2">
-                    <Button size="sm" variant="outline" disabled={!isRecording}>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      disabled={!isRecording}
+                      onClick={() => {
+                        if (isPaused) {
+                          // Resume recording
+                          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+                            mediaRecorderRef.current.resume();
+                            if (speechRecognitionRef.current) {
+                              try {
+                                speechRecognitionRef.current.start();
+                              } catch (e) {
+                                console.error("Failed to resume speech recognition:", e);
+                              }
+                            }
+                            setIsPaused(false);
+                            toast({
+                              title: "Recording resumed",
+                              description: "Recording has been resumed",
+                            });
+                          }
+                        } else {
+                          // Pause recording
+                          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                            mediaRecorderRef.current.pause();
+                            if (speechRecognitionRef.current) {
+                              try {
+                                speechRecognitionRef.current.stop();
+                              } catch (e) {
+                                console.error("Failed to pause speech recognition:", e);
+                              }
+                            }
+                            setIsPaused(true);
+                            toast({
+                              title: "Recording paused",
+                              description: "Recording has been paused",
+                            });
+                          }
+                        }
+                      }}
+                    >
                       <Pause className="w-4 h-4 mr-1" />
-                      Pause
+                      {isPaused ? "Resume" : "Pause"}
                     </Button>
-                    <Button size="sm" variant="outline">
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => {
+                        if (isRecording) {
+                          stopRecording();
+                        }
+                        setCurrentTranscript("");
+                        setRecordingTime(0);
+                        setIsPaused(false);
+                        if (audioChunksRef.current) {
+                          audioChunksRef.current = [];
+                        }
+                        toast({
+                          title: "Reset",
+                          description: "Recording has been reset",
+                        });
+                      }}
+                    >
                       <RotateCcw className="w-4 h-4 mr-1" />
                       Reset
                     </Button>
@@ -2503,144 +2572,270 @@ export default function VoiceDocumentation() {
                         </DialogContent>
                       </Dialog>
 
-                      <Dialog>
+                      <Dialog open={editTemplateDialogOpen} onOpenChange={setEditTemplateDialogOpen}>
                         <DialogTrigger asChild>
-                          <Button size="sm" variant="outline">
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => {
+                              // Initialize editing template with a deep copy
+                              setEditingTemplate({
+                                ...template,
+                                fields: template.fields.map(f => ({ ...f }))
+                              });
+                              setEditTemplateDialogOpen(true);
+                            }}
+                          >
                             Edit Template
                           </Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
                             <DialogTitle>
-                              Edit Template - {template.name}
+                              Edit Template - {editingTemplate?.name || template.name}
                             </DialogTitle>
                           </DialogHeader>
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                          {editingTemplate && (
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="text-sm font-medium mb-2 block">
+                                    Template Name
+                                  </label>
+                                  <Input 
+                                    value={editingTemplate.name}
+                                    onChange={(e) => {
+                                      setEditingTemplate({
+                                        ...editingTemplate,
+                                        name: e.target.value
+                                      });
+                                    }}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-sm font-medium mb-2 block">
+                                    Category
+                                  </label>
+                                  <Select 
+                                    value={editingTemplate.category}
+                                    onValueChange={(value) => {
+                                      setEditingTemplate({
+                                        ...editingTemplate,
+                                        category: value as SmartTemplate['category']
+                                      });
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="soap_note">
+                                        SOAP Note
+                                      </SelectItem>
+                                      <SelectItem value="procedure">
+                                        Procedure
+                                      </SelectItem>
+                                      <SelectItem value="consultation">
+                                        Consultation
+                                      </SelectItem>
+                                      <SelectItem value="discharge">
+                                        Discharge
+                                      </SelectItem>
+                                      <SelectItem value="admission">
+                                        Admission
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+
                               <div>
                                 <label className="text-sm font-medium mb-2 block">
-                                  Template Name
+                                  Template Content
                                 </label>
-                                <Input defaultValue={template.name} />
+                                <Textarea
+                                  value={editingTemplate.template}
+                                  onChange={(e) => {
+                                    setEditingTemplate({
+                                      ...editingTemplate,
+                                      template: e.target.value
+                                    });
+                                  }}
+                                  className="min-h-[200px] font-mono text-sm"
+                                  placeholder="Enter template content with field placeholders like {chief_complaint}, {assessment}, etc."
+                                />
                               </div>
+
                               <div>
-                                <label className="text-sm font-medium mb-2 block">
-                                  Category
-                                </label>
-                                <Select defaultValue={template.category}>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="soap_note">
-                                      SOAP Note
-                                    </SelectItem>
-                                    <SelectItem value="procedure">
-                                      Procedure
-                                    </SelectItem>
-                                    <SelectItem value="consultation">
-                                      Consultation
-                                    </SelectItem>
-                                    <SelectItem value="discharge">
-                                      Discharge
-                                    </SelectItem>
-                                    <SelectItem value="admission">
-                                      Admission
-                                    </SelectItem>
-                                  </SelectContent>
-                                </Select>
+                                <div className="flex items-center justify-between mb-2">
+                                  <label className="text-sm font-medium">
+                                    Template Fields
+                                  </label>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => {
+                                      const newField = {
+                                        name: `field_${editingTemplate.fields.length + 1}`,
+                                        type: "text" as const,
+                                        required: false
+                                      };
+                                      setEditingTemplate({
+                                        ...editingTemplate,
+                                        fields: [...editingTemplate.fields, newField]
+                                      });
+                                    }}
+                                  >
+                                    <Plus className="w-4 h-4 mr-1" />
+                                    Add Field
+                                  </Button>
+                                </div>
+                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                  {editingTemplate.fields.map((field, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="flex items-center gap-2 p-2 border rounded"
+                                    >
+                                      <Input
+                                        value={field.name}
+                                        onChange={(e) => {
+                                          const updatedFields = [...editingTemplate.fields];
+                                          updatedFields[idx] = {
+                                            ...updatedFields[idx],
+                                            name: e.target.value
+                                          };
+                                          setEditingTemplate({
+                                            ...editingTemplate,
+                                            fields: updatedFields
+                                          });
+                                        }}
+                                        className="flex-1"
+                                        placeholder="Field name"
+                                      />
+                                      <Select 
+                                        value={field.type}
+                                        onValueChange={(value) => {
+                                          const updatedFields = [...editingTemplate.fields];
+                                          updatedFields[idx] = {
+                                            ...updatedFields[idx],
+                                            type: value as "text" | "select" | "textarea"
+                                          };
+                                          setEditingTemplate({
+                                            ...editingTemplate,
+                                            fields: updatedFields
+                                          });
+                                        }}
+                                      >
+                                        <SelectTrigger className="w-32">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="text">
+                                            Text
+                                          </SelectItem>
+                                          <SelectItem value="textarea">
+                                            Textarea
+                                          </SelectItem>
+                                          <SelectItem value="select">
+                                            Select
+                                          </SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          const updatedFields = editingTemplate.fields.filter((_, i) => i !== idx);
+                                          setEditingTemplate({
+                                            ...editingTemplate,
+                                            fields: updatedFields
+                                          });
+                                        }}
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
 
-                            <div>
-                              <label className="text-sm font-medium mb-2 block">
-                                Template Content
-                              </label>
-                              <Textarea
-                                defaultValue={template.template}
-                                className="min-h-[200px] font-mono text-sm"
-                                placeholder="Enter template content with field placeholders like {chief_complaint}, {assessment}, etc."
-                              />
-                            </div>
+                              <div className="flex items-center gap-4">
+                                <div className="flex items-center space-x-2">
+                                  <input
+                                    type="checkbox"
+                                    id="autoComplete"
+                                    checked={editingTemplate.autoComplete}
+                                    onChange={(e) => {
+                                      setEditingTemplate({
+                                        ...editingTemplate,
+                                        autoComplete: e.target.checked
+                                      });
+                                    }}
+                                    className="rounded"
+                                  />
+                                  <label
+                                    htmlFor="autoComplete"
+                                    className="text-sm"
+                                  >
+                                    Enable auto-complete
+                                  </label>
+                                </div>
+                              </div>
 
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <label className="text-sm font-medium">
-                                  Template Fields
-                                </label>
-                                <Button size="sm" variant="outline">
-                                  <Plus className="w-4 h-4 mr-1" />
-                                  Add Field
+                              <div className="flex justify-end gap-2 pt-4">
+                                <DialogClose asChild>
+                                  <Button 
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditingTemplate(null);
+                                      setEditTemplateDialogOpen(false);
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </DialogClose>
+                                <Button
+                                  onClick={() => {
+                                    // Update the template in localTemplates
+                                    setLocalTemplates((prev) => {
+                                      const updated = prev.map((t) =>
+                                        t.id === template.id ? editingTemplate : t
+                                      );
+                                      return updated;
+                                    });
+                                    
+                                    // Also update in localStorage if needed
+                                    try {
+                                      const existingTemplates = JSON.parse(
+                                        localStorage.getItem("duplicatedTemplates") || "[]"
+                                      );
+                                      const updatedTemplates = existingTemplates.map((t: SmartTemplate) =>
+                                        t.id === template.id ? editingTemplate : t
+                                      );
+                                      localStorage.setItem(
+                                        "duplicatedTemplates",
+                                        JSON.stringify(updatedTemplates)
+                                      );
+                                    } catch (error) {
+                                      console.error("Error updating localStorage:", error);
+                                    }
+                                    
+                                    toast({
+                                      title: "Template Updated",
+                                      description: `${editingTemplate.name} has been successfully updated`,
+                                    });
+                                    
+                                    setEditingTemplate(null);
+                                    setEditTemplateDialogOpen(false);
+                                  }}
+                                >
+                                  Save Changes
                                 </Button>
                               </div>
-                              <div className="space-y-2 max-h-40 overflow-y-auto">
-                                {template.fields.map((field, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="flex items-center gap-2 p-2 border rounded"
-                                  >
-                                    <Input
-                                      defaultValue={field.name}
-                                      className="flex-1"
-                                      placeholder="Field name"
-                                    />
-                                    <Select defaultValue={field.type}>
-                                      <SelectTrigger className="w-32">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="text">
-                                          Text
-                                        </SelectItem>
-                                        <SelectItem value="textarea">
-                                          Textarea
-                                        </SelectItem>
-                                        <SelectItem value="select">
-                                          Select
-                                        </SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                    <Button size="sm" variant="outline">
-                                      <X className="w-4 h-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                              </div>
                             </div>
-
-                            <div className="flex items-center gap-4">
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="checkbox"
-                                  id="autoComplete"
-                                  defaultChecked={template.autoComplete}
-                                  className="rounded"
-                                />
-                                <label
-                                  htmlFor="autoComplete"
-                                  className="text-sm"
-                                >
-                                  Enable auto-complete
-                                </label>
-                              </div>
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-4">
-                              <DialogClose asChild>
-                                <Button variant="outline">Cancel</Button>
-                              </DialogClose>
-                              <Button
-                                onClick={() => {
-                                  toast({
-                                    title: "Template Updated",
-                                    description: `${template.name} has been successfully updated`,
-                                  });
-                                }}
-                              >
-                                Save Changes
-                              </Button>
-                            </div>
-                          </div>
+                          )}
                         </DialogContent>
                       </Dialog>
 
@@ -3530,7 +3725,20 @@ export default function VoiceDocumentation() {
                                 <Copy className="w-4 h-4 mr-1" />
                                 Copy Code
                               </Button>
-                              <Button size="sm">
+                              <Button 
+                                size="sm"
+                                onClick={() => {
+                                  // Navigate to billing page with the code pre-filled
+                                  const billingCode = code.code;
+                                  const billingDescription = code.description || code.code;
+                                  const billingUrl = `/billing?addCode=${encodeURIComponent(billingCode)}&description=${encodeURIComponent(billingDescription)}`;
+                                  window.location.href = billingUrl;
+                                  toast({
+                                    title: "Code Added",
+                                    description: `${billingCode} has been added to billing`,
+                                  });
+                                }}
+                              >
                                 <Plus className="w-4 h-4 mr-1" />
                                 Add to Billing
                               </Button>
@@ -3681,7 +3889,10 @@ export default function VoiceDocumentation() {
                           Primary language for transcription
                         </p>
                       </div>
-                      <Select defaultValue="en-US">
+                      <Select 
+                        value={selectedLanguage}
+                        onValueChange={(value) => setSelectedLanguage(value)}
+                      >
                         <SelectTrigger className="w-40">
                           <SelectValue />
                         </SelectTrigger>
@@ -3797,6 +4008,14 @@ export default function VoiceDocumentation() {
                 </Button>
                 <Button
                   onClick={() => {
+                    // Save language setting to localStorage
+                    localStorage.setItem('voiceDocumentationLanguage', selectedLanguage);
+                    
+                    // Update speech recognition language if it's running
+                    if (speechRecognitionRef.current) {
+                      speechRecognitionRef.current.lang = selectedLanguage;
+                    }
+                    
                     toast({
                       title: "Settings Saved",
                       description:

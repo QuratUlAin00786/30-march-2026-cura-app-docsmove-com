@@ -2297,6 +2297,30 @@ Coverage Details: [Insurance Coverage]`;
       return response.json();
     },
   });
+
+  // Fetch shares for all forms to determine if they've been shared
+  const { data: formSharesMap = {} } = useQuery<Record<number, any[]>>({
+    queryKey: ["formSharesMap", savedForms.map(f => f.id).join(",")],
+    queryFn: async () => {
+      const sharesMap: Record<number, any[]> = {};
+      await Promise.all(
+        savedForms.map(async (form) => {
+          try {
+            const response = await apiRequest("GET", `/api/forms/${form.id}/shares`);
+            if (response.ok) {
+              const shares = await response.json();
+              sharesMap[form.id] = shares || [];
+            }
+          } catch (error) {
+            console.error(`Error fetching shares for form ${form.id}:`, error);
+            sharesMap[form.id] = [];
+          }
+        })
+      );
+      return sharesMap;
+    },
+    enabled: savedForms.length > 0,
+  });
   const savedFormsToDisplay = useMemo(() => {
     if (!userIsDoctor || !currentUserId) return savedForms;
     return savedForms.filter((form) => resolveFormCreatorId(form) === currentUserId);
@@ -6350,21 +6374,24 @@ const formIds = useMemo(
                               >
                                 Edit
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={!latestLinks[form.id]}
-                                asChild
-                              >
-                                <a
-                                  href={latestLinks[form.id]}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className={!latestLinks[form.id] ? "pointer-events-none opacity-60" : ""}
+                              {/* Hide "Open Form" button if form has been shared with patients */}
+                              {(!formSharesMap[form.id] || formSharesMap[form.id].length === 0) && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={!latestLinks[form.id]}
+                                  asChild
                                 >
-                                  Open Form
-                                </a>
-                              </Button>
+                                  <a
+                                    href={latestLinks[form.id]}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className={!latestLinks[form.id] ? "pointer-events-none opacity-60" : ""}
+                                  >
+                                    Open Form
+                                  </a>
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </div>

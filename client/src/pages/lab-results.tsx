@@ -750,6 +750,21 @@ export default function LabResultsPage() {
     },
   });
 
+  // Fetch clinic footer data
+  const { data: clinicFooter } = useQuery({
+    queryKey: ["/api/clinic-footers"],
+    queryFn: async () => {
+      try {
+        const response = await apiRequest("GET", "/api/clinic-footers");
+        const data = await response.json();
+        return data;
+      } catch (error) {
+        console.error("Clinic footer fetch error:", error);
+        return null;
+      }
+    },
+  });
+
   // Doctor specialty states for lab order
   const [selectedSpecialtyCategory, setSelectedSpecialtyCategory] =
     useState<string>("");
@@ -1820,8 +1835,12 @@ Report generated from Cura EMR System`;
           <body>
             <div class="prescription-content">
               <div style="display: grid; grid-template-columns: auto 1fr auto; align-items: center; border-bottom: 1px solid #ccc; padding: 1rem 0; position: relative;">
-                ${clinicHeader?.logoBase64 && (clinicHeader?.logoPosition === 'left' || clinicHeader?.logoPosition === 'center') ? `
-                  <div style="grid-column: 1 / 2;">
+                ${clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left' ? `
+                  <div style="grid-column: 1 / 2; display: flex; align-items: center;">
+                    <img src="${clinicHeader.logoBase64}" alt="Clinic Logo" style="max-width: 80px; max-height: 80px;" />
+                  </div>
+                ` : clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'center' ? `
+                  <div style="grid-column: 1 / 2; display: flex; align-items: center; justify-content: center;">
                     <img src="${clinicHeader.logoBase64}" alt="Clinic Logo" style="max-width: 80px; max-height: 80px;" />
                   </div>
                 ` : '<div></div>'}
@@ -1842,47 +1861,47 @@ Report generated from Cura EMR System`;
                 ` : '<div></div>'}
               </div>
 
-              <div style="display: flex; justify-content: space-between; gap: 2rem; margin-top: 1rem;">
-                <div style="flex: 1;">
-                  <h5 style="font-size: 16px; font-weight: bold; margin-bottom: 0.5rem;">Physician Information</h5>
-                  <div style="margin-bottom: 0.25rem;">
+              <div style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+                <div style="margin-bottom: 1.5rem;">
+                  <h5 style="font-size: 16px; font-weight: bold; margin-bottom: 0.5rem;">PATIENT INFORMATION</h5>
+                  <div style="margin-bottom: 0.4rem;">
+                    <strong>Name:</strong>
+                    <span style="margin-left: 0.5rem;">${getPatientName(selectedResult.patientId)}</span>
+                  </div>
+                  <div style="margin-bottom: 0.4rem;">
+                    <strong>DOB:</strong>
+                    <span style="margin-left: 0.5rem;">N/A</span>
+                  </div>
+                  <div style="margin-bottom: 0.4rem;">
+                    <strong>Study Date:</strong>
+                    <span style="margin-left: 0.5rem;">${format(new Date(selectedResult.orderedAt || new Date()), "dd/MM/yyyy")}</span>
+                  </div>
+                </div>
+
+                <div style="margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                  <h5 style="font-size: 9px; font-weight: bold; margin-bottom: 0.5rem;">DOCTOR DETAILS</h5>
+                  <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
                     <strong>Name:</strong>
                     <span style="margin-left: 0.5rem;">${selectedResult.doctorName || "Doctor"}</span>
                   </div>
                   ${selectedResult.mainSpecialty ? `
-                  <div style="margin-bottom: 0.25rem;">
-                    <strong>Main Specialization:</strong>
+                  <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
+                    <strong>Specialization:</strong>
                     <span style="margin-left: 0.5rem;">${selectedResult.mainSpecialty}</span>
                   </div>
                   ` : ""}
-                  ${selectedResult.subSpecialty ? `
-                  <div style="margin-bottom: 0.25rem;">
-                    <strong>Sub-Specialization:</strong>
-                    <span style="margin-left: 0.5rem;">${selectedResult.subSpecialty}</span>
+                  ${(selectedResult as any).doctorEmail ? `
+                  <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
+                    <strong>Email:</strong>
+                    <span style="margin-left: 0.5rem;">${(selectedResult as any).doctorEmail}</span>
                   </div>
                   ` : ""}
-                  ${selectedResult.priority ? `
-                  <div style="margin-bottom: 0.25rem;">
-                    <strong>Priority:</strong>
-                    <span style="margin-left: 0.5rem;">${selectedResult.priority.toUpperCase()}</span>
+                  ${(selectedResult as any).doctorDepartment ? `
+                  <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
+                    <strong>Department:</strong>
+                    <span style="margin-left: 0.5rem;">${(selectedResult as any).doctorDepartment}</span>
                   </div>
                   ` : ""}
-                </div>
-
-                <div style="flex: 1;">
-                  <h5 style="font-size: 16px; font-weight: bold; margin-bottom: 0.5rem;">Patient Information</h5>
-                  <div style="margin-bottom: 0.25rem;">
-                    <strong>Name:</strong>
-                    <span style="margin-left: 0.5rem;">${getPatientName(selectedResult.patientId)}</span>
-                  </div>
-                  <div style="margin-bottom: 0.25rem;">
-                    <strong>Date:</strong>
-                    <span style="margin-left: 0.5rem;">${format(new Date(), "MMM dd, yyyy")}</span>
-                  </div>
-                  <div style="margin-bottom: 0.25rem;">
-                    <strong>Time:</strong>
-                    <span style="margin-left: 0.5rem;">${format(new Date(), "HH:mm")}</span>
-                  </div>
                 </div>
               </div>
 
@@ -1945,9 +1964,15 @@ Report generated from Cura EMR System`;
                   <div style="font-weight: bold;">${selectedResult.doctorName || "Doctor"}</div>
                   ${selectedResult.mainSpecialty ? `<div style="font-size: 12px; color: #666;">${selectedResult.mainSpecialty}</div>` : ""}
                 </div>
+                ${clinicFooter?.footerText ? `
+                <div style="font-size: 12px; color: #666; margin-top: 1rem;">
+                  ${clinicFooter.footerText}
+                </div>
+                ` : `
                 <div style="font-size: 12px; color: #666;">
                   Generated by Cura EMR System - ${format(new Date(), "MMM dd, yyyy HH:mm")}
                 </div>
+                `}
               </div>
             </div>
           </body>
@@ -2231,8 +2256,12 @@ Report generated from Cura EMR System`;
       <div style="display: grid; grid-template-columns: auto 1fr auto; align-items: center; border-bottom: 1px solid #ccc; padding: 1rem 0; position: relative;">
   
   <!-- Left Icon -->
-  ${clinicHeader?.logoBase64 && (clinicHeader?.logoPosition === 'left' || clinicHeader?.logoPosition === 'center') ? `
-    <div style="grid-column: 1 / 2;">
+  ${clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left' ? `
+    <div style="grid-column: 1 / 2; display: flex; align-items: center;">
+      <img src="${clinicHeader.logoBase64}" alt="Clinic Logo" style="max-width: 80px; max-height: 80px;" />
+    </div>
+  ` : clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'center' ? `
+    <div style="grid-column: 1 / 2; display: flex; align-items: center; justify-content: center;">
       <img src="${clinicHeader.logoBase64}" alt="Clinic Logo" style="max-width: 80px; max-height: 80px;" />
     </div>
   ` : '<div></div>'}
@@ -2255,68 +2284,59 @@ Report generated from Cura EMR System`;
   ` : '<div></div>'}
 </div>
 
-            <div style="display: flex; justify-content: space-between; gap: 2rem; margin-top: 1rem;">
-              <!-- Physician Information -->
-              <div style="flex: 1;">
-                <h5 style="font-size: 16px; font-weight: bold; margin-bottom: 0.5rem;">Physician Information</h5>
+            <div style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+              <div style="margin-bottom: 1.5rem;">
+                <h5 style="font-size: 16px; font-weight: bold; margin-bottom: 0.5rem;">PATIENT INFORMATION</h5>
+                <div style="margin-bottom: 0.4rem;">
+                  <strong>Name:</strong>
+                  <span style="margin-left: 0.5rem;">${getPatientName(selectedResult.patientId)}</span>
+                </div>
+                <div style="margin-bottom: 0.4rem;">
+                  <strong>DOB:</strong>
+                  <span style="margin-left: 0.5rem;">N/A</span>
+                </div>
+                <div style="margin-bottom: 0.4rem;">
+                  <strong>Study Date:</strong>
+                  <span style="margin-left: 0.5rem;">${format(new Date(selectedResult.orderedAt || new Date()), "dd/MM/yyyy")}</span>
+                </div>
+              </div>
 
-                <div style="margin-bottom: 0.25rem;">
+              <div style="margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                <h5 style="font-size: 9px; font-weight: bold; margin-bottom: 0.5rem;">DOCTOR DETAILS</h5>
+                <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
                   <strong>Name:</strong>
                   <span style="margin-left: 0.5rem;">${selectedResult.doctorName || "Doctor"}</span>
                 </div>
-
                 ${
                   selectedResult.mainSpecialty
                     ? `
-                <div style="margin-bottom: 0.25rem;">
-                  <strong>Main Specialization:</strong>
+                <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
+                  <strong>Specialization:</strong>
                   <span style="margin-left: 0.5rem;">${selectedResult.mainSpecialty}</span>
                 </div>
                 `
                     : ""
                 }
-
                 ${
-                  selectedResult.subSpecialty
+                  (selectedResult as any).doctorEmail
                     ? `
-                <div style="margin-bottom: 0.25rem;">
-                  <strong>Sub-Specialization:</strong>
-                  <span style="margin-left: 0.5rem;">${selectedResult.subSpecialty}</span>
+                <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
+                  <strong>Email:</strong>
+                  <span style="margin-left: 0.5rem;">${(selectedResult as any).doctorEmail}</span>
                 </div>
                 `
                     : ""
                 }
-
                 ${
-                  selectedResult.priority
+                  (selectedResult as any).doctorDepartment
                     ? `
-                <div style="margin-bottom: 0.25rem;">
-                  <strong>Priority:</strong>
-                  <span style="margin-left: 0.5rem;">${selectedResult.priority.toUpperCase()}</span>
+                <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
+                  <strong>Department:</strong>
+                  <span style="margin-left: 0.5rem;">${(selectedResult as any).doctorDepartment}</span>
                 </div>
                 `
                     : ""
                 }
-              </div>
-
-              <!-- Patient Information -->
-              <div style="flex: 1;">
-                <h5 style="font-size: 16px; font-weight: bold; margin-bottom: 0.5rem;">Patient Information</h5>
-
-                <div style="margin-bottom: 0.25rem;">
-                  <strong>Name:</strong>
-                  <span style="margin-left: 0.5rem;">${getPatientName(selectedResult.patientId)}</span>
-                </div>
-
-                <div style="margin-bottom: 0.25rem;">
-                  <strong>Date:</strong>
-                  <span style="margin-left: 0.5rem;">${format(new Date(), "MMM dd, yyyy")}</span>
-                </div>
-
-                <div style="margin-bottom: 0.25rem;">
-                  <strong>Time:</strong>
-                  <span style="margin-left: 0.5rem;">${format(new Date(), "HH:mm")}</span>
-                </div>
               </div>
             </div>
 
@@ -2398,14 +2418,20 @@ Report generated from Cura EMR System`;
                 <div style="font-weight: bold;">${selectedResult.doctorName || "Doctor"}</div>
                 ${selectedResult.mainSpecialty ? `<div style="font-size: 12px; color: #666;">${selectedResult.mainSpecialty}</div>` : ""}
               </div>
-              <div style="font-size: 12px; color: #666;">
-                Generated by Cura EMR System - ${format(new Date(), "MMM dd, yyyy HH:mm")}
+                ${clinicFooter?.footerText ? `
+                <div style="font-size: 12px; color: #666; margin-top: 1rem;">
+                  ${clinicFooter.footerText}
+                </div>
+                ` : `
+                <div style="font-size: 12px; color: #666;">
+                  Generated by Cura EMR System - ${format(new Date(), "MMM dd, yyyy HH:mm")}
+                </div>
+                `}
               </div>
             </div>
-          </div>
-        </body>
-      </html>
-    `;
+          </body>
+        </html>
+      `;
 
     // Write the HTML to the print window
     printWindow.document.write(printHTML);
@@ -2592,6 +2618,87 @@ Report generated from Cura EMR System`;
     setSignature("");
     setSignatureSaved(false);
   };
+
+  // Load signature from database onto canvas
+  const loadSignatureFromDatabase = async () => {
+    if (!selectedResult || !canvasRef.current) return;
+
+    try {
+      // Fetch lab result from database to get latest signature data
+      const response = await apiRequest(
+        "GET",
+        `/api/lab-results/${selectedResult.id}`
+      );
+
+      if (response.ok) {
+        const labResultData = await response.json();
+        
+        // Check if signature exists in database
+        if (
+          labResultData.signature?.doctorSignature &&
+          String(labResultData.signature.doctorSignature).trim() !== ""
+        ) {
+          const signatureImage = new Image();
+          signatureImage.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            
+            // Clear canvas first
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw the signature image onto canvas
+            ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+            setSignature(labResultData.signature.doctorSignature);
+          };
+          signatureImage.onerror = () => {
+            console.error("Error loading signature image");
+          };
+          signatureImage.src = labResultData.signature.doctorSignature;
+        } else {
+          // No signature exists, clear canvas
+          clearSignature();
+        }
+      }
+    } catch (error) {
+      console.error("Error loading signature from database:", error);
+      // If error, check if signature exists in selectedResult
+      const signatureData = selectedResult?.signature?.doctorSignature;
+      if (
+        signatureData &&
+        String(signatureData).trim() !== ""
+      ) {
+        const signatureImage = new Image();
+        signatureImage.onload = () => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+          setSignature(signatureData);
+        };
+        signatureImage.src = signatureData;
+      } else {
+        clearSignature();
+      }
+    }
+  };
+
+  // Load signature when dialog opens
+  useEffect(() => {
+    if (showESignDialog && selectedResult) {
+      // Small delay to ensure canvas is rendered
+      setTimeout(() => {
+        loadSignatureFromDatabase();
+      }, 100);
+    } else if (!showESignDialog) {
+      // Clear signature when dialog closes
+      clearSignature();
+    }
+  }, [showESignDialog, selectedResult?.id]);
 
   const saveSignature = async () => {
     if (!canvasRef.current || !selectedResult) return;
@@ -7429,60 +7536,190 @@ Report generated from Cura EMR System`;
                     const pageWidth = pdf.internal.pageSize.getWidth();
                     let yPos = 20;
 
+                    // Fetch clinic header and footer (they should already be in scope from the component)
+                    // Add clinic header with logo on left
+                    if (clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left') {
+                      try {
+                        const logoData = clinicHeader.logoBase64.includes(',') 
+                          ? clinicHeader.logoBase64.split(',')[1] 
+                          : clinicHeader.logoBase64;
+                        pdf.addImage(logoData, 'PNG', 20, yPos, 30, 30);
+                      } catch (error) {
+                        console.error('Error adding logo to PDF:', error);
+                      }
+                    }
+
+                    // Clinic header text (to the right of logo or centered)
+                    const headerTextX = clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left' ? 60 : pageWidth / 2;
+                    const textAlign = clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left' ? 'left' : 'center';
+                    
+                    pdf.setFontSize(parseInt(clinicHeader?.clinicNameFontSize?.replace('pt', '') || '16'));
+                    pdf.setFont(clinicHeader?.fontFamily || 'helvetica', clinicHeader?.fontWeight || 'bold');
+                    pdf.text(clinicHeader?.clinicName || 'CURA EMR SYSTEM', headerTextX, yPos + 10, { align: textAlign });
+                    
+                    pdf.setFontSize(9);
+                    pdf.setFont(clinicHeader?.fontFamily || 'helvetica', 'normal');
+                    if (clinicHeader?.address) {
+                      pdf.text(clinicHeader.address, headerTextX, yPos + 18, { align: textAlign });
+                    }
+                    if (clinicHeader?.phone) {
+                      pdf.text(clinicHeader.phone, headerTextX, yPos + 24, { align: textAlign });
+                    }
+                    if (clinicHeader?.email) {
+                      pdf.text(clinicHeader.email, headerTextX, yPos + 30, { align: textAlign });
+                    }
+                    
+                    yPos += 45;
+
                     // Title - "Lab Test Result Report"
-                    pdf.setFontSize(20);
+                    pdf.setFontSize(16);
                     pdf.setFont('helvetica', 'bold');
                     pdf.text('Lab Test Result Report', pageWidth / 2, yPos, { align: 'center' });
-                    yPos += 20;
+                    yPos += 15;
 
-                    // Lab Order Information Section
-                    pdf.setFontSize(14);
+                    // Patient Information Section
+                    pdf.setFontSize(9);
                     pdf.setFont('helvetica', 'bold');
-                    pdf.text('Lab Order Information', 20, yPos);
-                    yPos += 10;
+                    pdf.text('PATIENT INFORMATION', 20, yPos);
+                    yPos += 8;
 
-                    // Simple list format (no table)
-                    pdf.setFontSize(11);
                     pdf.setFont('helvetica', 'normal');
                     
                     // Patient Name
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Patient Name:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.text(getPatientName(selectedLabOrder.patientId), 80, yPos);
-                    yPos += 7;
+                    const patientName = getPatientName(selectedLabOrder.patientId);
+                    if (patientName && patientName !== `Patient #${selectedLabOrder.patientId}`) {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Patient Name:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(patientName, 70, yPos);
+                      yPos += 6;
+                    }
 
                     // Test ID
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Test ID:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.text(selectedLabOrder.testId || 'N/A', 80, yPos);
-                    yPos += 7;
+                    if (selectedLabOrder.testId && selectedLabOrder.testId !== 'N/A') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Test ID:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(selectedLabOrder.testId, 70, yPos);
+                      yPos += 6;
+                    }
 
-                    // Ordered Date
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Ordered Date:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.text(
-                      selectedLabOrder.orderedDate ? new Date(selectedLabOrder.orderedDate).toLocaleDateString() : 'N/A',
-                      80,
-                      yPos
-                    );
-                    yPos += 7;
+                    // Ordered Date - only show if not N/A
+                    const orderedDate = selectedLabOrder.orderedDate 
+                      ? format(new Date(selectedLabOrder.orderedDate), "dd/MM/yyyy")
+                      : null;
+                    if (orderedDate && orderedDate !== 'N/A') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Ordered Date:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(orderedDate, 70, yPos);
+                      yPos += 6;
+                    }
 
-                    // Ordered By
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Ordered By:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.text(getUserName(selectedLabOrder.orderedBy), 80, yPos);
-                    yPos += 7;
+                    // Ordered By - only show if not N/A
+                    const orderedByName = getUserName(selectedLabOrder.orderedBy);
+                    if (orderedByName && orderedByName !== `User #${selectedLabOrder.orderedBy}`) {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Ordered By:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(orderedByName, 70, yPos);
+                      yPos += 6;
+                    }
 
-                    // Priority
+                    // Priority - only show if not N/A
+                    if (selectedLabOrder.priority && selectedLabOrder.priority !== 'N/A') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Priority:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(selectedLabOrder.priority, 70, yPos);
+                      yPos += 6;
+                    }
+
+                    yPos += 5;
+
+                    // Doctor Details Section
+                    pdf.setFontSize(9);
                     pdf.setFont('helvetica', 'bold');
-                    pdf.text('Priority:', 20, yPos);
+                    pdf.text('DOCTOR DETAILS', 20, yPos);
+                    yPos += 8;
+
                     pdf.setFont('helvetica', 'normal');
-                    pdf.text(selectedLabOrder.priority || 'routine', 80, yPos);
-                    yPos += 15;
+                    
+                    // Get doctor information
+                    const orderedByUser = users.find((u: any) => u && u.id === selectedLabOrder.orderedBy);
+                    const doctorName = selectedLabOrder.doctorName || 
+                                      (orderedByUser ? `${orderedByUser.firstName || ''} ${orderedByUser.lastName || ''}`.trim() : null);
+                    const doctorSpecialization = selectedLabOrder.mainSpecialty || (orderedByUser as any)?.medicalSpecialtyCategory || (orderedByUser as any)?.department || null;
+                    const doctorEmail = orderedByUser?.email || null;
+                    const doctorDepartment = selectedLabOrder.doctorDepartment || (orderedByUser as any)?.department || null;
+
+                    if (doctorName && doctorName.trim() !== '') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Name:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(doctorName, 70, yPos);
+                      yPos += 6;
+                    }
+
+                    if (doctorSpecialization && doctorSpecialization !== 'N/A') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Specialization:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(doctorSpecialization, 70, yPos);
+                      yPos += 6;
+                    }
+
+                    if (doctorEmail && doctorEmail !== 'N/A') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Email:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(doctorEmail, 70, yPos);
+                      yPos += 6;
+                    }
+
+                    if (doctorDepartment && doctorDepartment !== 'N/A') {
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Department:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(doctorDepartment, 70, yPos);
+                      yPos += 6;
+                    }
+
+                    yPos += 5;
+
+                    // Report Created By Section
+                    if (user) {
+                      pdf.setFontSize(9);
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('REPORT CREATED BY', 20, yPos);
+                      yPos += 8;
+                      
+                      pdf.setFont('helvetica', 'normal');
+                      const creatorName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'System';
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Name:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(creatorName, 70, yPos);
+                      yPos += 6;
+                      
+                      if (user.email) {
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.text('Email:', 20, yPos);
+                        pdf.setFont('helvetica', 'normal');
+                        pdf.text(user.email, 70, yPos);
+                        yPos += 6;
+                      }
+                      
+                      if (user.role) {
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.text('Role:', 20, yPos);
+                        pdf.setFont('helvetica', 'normal');
+                        pdf.text(user.role, 70, yPos);
+                        yPos += 6;
+                      }
+                      
+                      yPos += 10;
+                    }
 
                     // Group results by test type
                     const resultsByTestType: Record<string, any[]> = {};
@@ -7516,16 +7753,16 @@ Report generated from Cura EMR System`;
                       }
 
                       // Test Type Header (Blue)
-                      pdf.setFontSize(14);
+                      pdf.setFontSize(9);
                       pdf.setFont('helvetica', 'bold');
                       pdf.setTextColor(66, 133, 244);
                       pdf.text(testType, 20, yPos);
                       pdf.setTextColor(0, 0, 0);
-                      yPos += 10;
+                      yPos += 8;
 
                       // Table Header
                       const tableStartY = yPos;
-                      const rowHeight = 8;
+                      const rowHeight = 7;
                       const colWidths = [60, 30, 30, 50]; // Parameter, Value, Unit, Reference Range
                       const tableX = 20;
                       const tableWidth = colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
@@ -7540,11 +7777,11 @@ Report generated from Cura EMR System`;
                       
                       // Header text
                       pdf.setFont('helvetica', 'bold');
-                      pdf.setFontSize(10);
-                      pdf.text('Parameter', tableX + 2, tableStartY + 5);
-                      pdf.text('Value', tableX + colWidths[0] + 2, tableStartY + 5);
-                      pdf.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 5);
-                      pdf.text('Reference Range', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, tableStartY + 5);
+                      pdf.setFontSize(9);
+                      pdf.text('Parameter', tableX + 2, tableStartY + 4);
+                      pdf.text('Value', tableX + colWidths[0] + 2, tableStartY + 4);
+                      pdf.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 4);
+                      pdf.text('Reference Range', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, tableStartY + 4);
                       
                       yPos = tableStartY + rowHeight;
 
@@ -7557,6 +7794,7 @@ Report generated from Cura EMR System`;
 
                       // Table rows
                       pdf.setFont('helvetica', 'normal');
+                      pdf.setFontSize(9);
                       sortedResults.forEach((result: any, index: number) => {
                         if (yPos > 270) {
                           pdf.addPage();
@@ -7586,10 +7824,11 @@ Report generated from Cura EMR System`;
                           paramName = paramName.substring(dashIndex + 3).trim();
                         }
                         
-                        pdf.text(paramName, tableX + 2, yPos + 5);
-                        pdf.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 5);
-                        pdf.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 5);
-                        pdf.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 5);
+                        pdf.setFontSize(9);
+                        pdf.text(paramName, tableX + 2, yPos + 4);
+                        pdf.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 4);
+                        pdf.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 4);
+                        pdf.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 4);
                         
                         yPos += rowHeight;
                       });
@@ -7603,16 +7842,30 @@ Report generated from Cura EMR System`;
                       yPos = 20;
                     }
                     
-                    pdf.setFontSize(14);
+                    pdf.setFontSize(9);
                     pdf.setFont('helvetica', 'bold');
                     pdf.text('Clinical Notes', 20, yPos);
-                    yPos += 10;
+                    yPos += 8;
 
-                    pdf.setFontSize(11);
+                    pdf.setFontSize(9);
                     pdf.setFont('helvetica', 'normal');
                     const notes = fillResultFormData.notes || selectedLabOrder.notes || "none";
                     const splitNotes = pdf.splitTextToSize(notes, 170);
                     pdf.text(splitNotes, 20, yPos);
+                    yPos += splitNotes.length * 5 + 10;
+
+                    // Add clinic footer at the bottom of the last page
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    if (clinicFooter?.footerText) {
+                      pdf.setFontSize(9);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(clinicFooter.footerText, pageWidth / 2, pageHeight - 15, { align: 'center' });
+                    } else {
+                      // Default footer
+                      pdf.setFontSize(9);
+                      pdf.setFont('helvetica', 'normal');
+                      pdf.text(`Generated by Cura EMR System - ${format(new Date(), "MMM dd, yyyy HH:mm")}`, pageWidth / 2, pageHeight - 15, { align: 'center' });
+                    }
 
                     // Download the PDF
                     const fileName = `${selectedLabOrder.testId || Date.now()}.pdf`;
