@@ -34,9 +34,9 @@ export default function FormSharePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#edf0ff] flex flex-col items-center py-10 px-4 space-y-6">
+    <div className="min-h-screen bg-[#edf0ff] dark:bg-slate-900 flex flex-col items-center py-10 px-4 space-y-6">
       {header && (
-        <div className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-lg">
+        <div className="w-full max-w-4xl rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg">
           <div className="flex flex-col gap-2 px-6 py-6 md:flex-row md:items-start md:justify-between">
             <div className="flex items-center gap-4">
               {header.logoBase64 && (
@@ -47,11 +47,11 @@ export default function FormSharePage() {
                 />
               )}
               <div>
-                <h1 className="text-2xl font-semibold text-slate-900">{header.clinicName}</h1>
-                {header.address && <p className="text-sm text-slate-600">{header.address}</p>}
+                <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{header.clinicName}</h1>
+                {header.address && <p className="text-sm text-slate-600 dark:text-slate-400">{header.address}</p>}
               </div>
             </div>
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-slate-500 dark:text-slate-400">
               {header.phone && <div>{header.phone}</div>}
               {header.email && <div>{header.email}</div>}
             </div>
@@ -60,13 +60,13 @@ export default function FormSharePage() {
       )}
 
       <div className="w-full max-w-4xl space-y-6">
-        <div className="rounded-[32px] bg-gradient-to-b from-white to-[#f5f7ff] p-6 shadow-[0_25px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-slate-400">
+        <div className="rounded-[32px] bg-gradient-to-b from-white to-[#f5f7ff] dark:from-slate-800 dark:to-slate-900 p-6 shadow-[0_25px_60px_rgba(15,23,42,0.08)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-slate-400 dark:text-slate-500">
             Form Preview - fill your form details
           </p>
-          <h2 className="mt-2 text-3xl font-semibold text-slate-900">Form Preview</h2>
+          <h2 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100">Form Preview</h2>
           <div className="mt-6">
-            <div className="rounded-[28px] bg-white p-4 shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
+            <div className="rounded-[28px] bg-white dark:bg-slate-800 p-4 shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
               <FormFill
                 token={token}
                 header={header}

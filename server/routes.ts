@@ -2992,22 +2992,22 @@ The Cura EMR Team`,
 
       const organizationId = req.tenant.id;
 
-      // Fetch all active imaging pricing for this organization
+      // Fetch all imaging pricing for this organization (including inactive ones)
       const pricing = await db
         .select()
         .from(imagingPricing)
         .where(
-          and(
-            eq(imagingPricing.organizationId, organizationId),
-            eq(imagingPricing.isActive, true)
-          )
+          eq(imagingPricing.organizationId, organizationId)
         )
         .orderBy(imagingPricing.imagingType);
 
-      res.json(pricing);
+      console.log(`[IMAGING PRICING] Fetched ${pricing.length} imaging services for organization ${organizationId}`);
+      
+      // Return empty array if no pricing found, not an error
+      res.json(pricing || []);
     } catch (error) {
       console.error("Error fetching imaging pricing:", error);
-      res.status(500).json({ error: "Failed to fetch imaging pricing" });
+      res.status(500).json({ error: "Failed to fetch imaging pricing", details: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -6591,22 +6591,22 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const organizationId = req.tenant.id;
 
-      // Fetch all active lab test pricing for this organization
+      // Fetch all lab test pricing for this organization (including inactive ones)
       const tests = await db
         .select()
         .from(schema.labTestPricing)
         .where(
-          and(
-            eq(schema.labTestPricing.organizationId, organizationId),
-            eq(schema.labTestPricing.isActive, true)
-          )
+          eq(schema.labTestPricing.organizationId, organizationId)
         )
         .orderBy(schema.labTestPricing.testName);
 
-      res.json(tests);
+      console.log(`[LAB TESTS PRICING] Fetched ${tests.length} lab tests for organization ${organizationId}`);
+      
+      // Return empty array if no tests found, not an error
+      res.json(tests || []);
     } catch (error) {
       console.error("Error fetching lab tests pricing:", error);
-      res.status(500).json({ error: "Failed to fetch lab tests pricing" });
+      res.status(500).json({ error: "Failed to fetch lab tests pricing", details: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -14641,6 +14641,31 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
+  // Find or create conversation between two users
+  app.post("/api/messaging/conversations/find-or-create", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant || !req.user) {
+        return res.status(401).json({ error: "Organization or user not found" });
+      }
+
+      const { recipientId } = req.body;
+      if (!recipientId) {
+        return res.status(400).json({ error: "recipientId is required" });
+      }
+
+      const conversationId = await storage.findOrCreateConversation(
+        req.user.id,
+        recipientId,
+        req.tenant.id
+      );
+
+      res.json({ conversationId });
+    } catch (error: any) {
+      console.error("Error finding or creating conversation:", error);
+      res.status(500).json({ error: "Failed to find or create conversation", details: error.message });
+    }
+  });
+
   app.post("/api/messaging/send", authMiddleware, async (req: TenantRequest, res) => {
     try {
       console.log("📨 POST /api/messaging/send - Received message data:", JSON.stringify(req.body, null, 2));
@@ -14977,7 +15002,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           try {
             // Get conversation data to find all participants
             console.log(`🔍 DEBUG - Getting conversations for org: ${req.organizationId}`);
-            const conversations = await storage.getConversations(req.tenant!.id);
+            const conversations = await storage.getConversations(req.tenant!.id, req.user?.id);
             console.log(`🔍 DEBUG - Found ${conversations.length} conversations`);
             const currentConversation = conversations.find(c => c.id === actualConversationId);
             console.log(`🔍 DEBUG - Current conversation found:`, currentConversation ? 'YES' : 'NO');
@@ -15194,7 +15219,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
   app.get("/api/messaging/campaigns", authMiddleware, async (req: TenantRequest, res) => {
     try {
-      const campaigns = await storage.getMessageCampaigns(req.tenant!.id);
+      const campaigns = await storage.getMessageCampaigns(req.tenant!.id, req.user?.id, req.user?.role);
       res.json(campaigns);
     } catch (error) {
       console.error("Error fetching campaigns:", error);
@@ -16044,8 +16069,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const organizationId = req.tenant!.id;
       console.log('📱 Fetching SMS messages for organization:', organizationId);
       
-      // Fetch all messages with messageType = 'sms' for this organization
-      const smsMessages = await storage.getSmsMessages(organizationId);
+      // Fetch messages with messageType = 'sms' for this organization (role-based filtered)
+      const smsMessages = await storage.getSmsMessages(organizationId, req.user?.id, req.user?.role);
       
       console.log(`📱 Found ${smsMessages.length} SMS messages`);
       res.json(smsMessages);

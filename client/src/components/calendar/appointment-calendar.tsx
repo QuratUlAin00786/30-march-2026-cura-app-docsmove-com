@@ -3561,8 +3561,8 @@ Medical License: [License Number]
       <Dialog open={showConfirmationDialog} onOpenChange={setShowConfirmationDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-blue-800">Appointment Summary</DialogTitle>
-            <DialogDescription>Please review the appointment details before confirming</DialogDescription>
+            <DialogTitle className="text-xl font-bold text-blue-800 dark:text-blue-300">Appointment Summary</DialogTitle>
+            <DialogDescription className="text-gray-600 dark:text-gray-300">Please review the appointment details before confirming</DialogDescription>
           </DialogHeader>
           
           <div className="space-y-6 mt-4">
@@ -3572,24 +3572,24 @@ Medical License: [License Number]
               if (!selectedPatient) return null;
               
               return (
-                <div className="border rounded-lg p-4 bg-gray-50">
-                  <h3 className="text-sm font-semibold text-gray-800 mb-3">Patient Information</h3>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-slate-800">
+                  <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">Patient Information</h3>
                   <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-lg">
+                    <div className="w-12 h-12 rounded-full bg-blue-500 dark:bg-blue-600 flex items-center justify-center text-white font-bold text-lg">
                       {selectedPatient.firstName?.charAt(0)}{selectedPatient.lastName?.charAt(0)}
                     </div>
                     <div className="flex-1 space-y-1 text-sm">
-                      <p className="font-semibold text-gray-900">
+                      <p className="font-semibold text-gray-900 dark:text-gray-100">
                         {selectedPatient.firstName} {selectedPatient.lastName}
                       </p>
-                      <p className="text-gray-600 text-xs">{selectedPatient.patientId}</p>
+                      <p className="text-gray-600 dark:text-gray-300 text-xs">{selectedPatient.patientId}</p>
                       {selectedPatient.phone && (
-                        <p className="text-gray-600 text-xs flex items-center gap-1">
+                        <p className="text-gray-600 dark:text-gray-300 text-xs flex items-center gap-1">
                           📞 {selectedPatient.phone}
                         </p>
                       )}
                       {selectedPatient.email && (
-                        <p className="text-gray-600 text-xs flex items-center gap-1">
+                        <p className="text-gray-600 dark:text-gray-300 text-xs flex items-center gap-1">
                           ✉️ {selectedPatient.email}
                         </p>
                       )}
@@ -3600,25 +3600,25 @@ Medical License: [License Number]
             })()}
 
             {/* Booking Summary */}
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <h3 className="text-sm font-semibold text-gray-800 mb-3">Booking Summary</h3>
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-slate-800">
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">Booking Summary</h3>
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-gray-500 text-xs">Role</p>
-                    <p className="font-medium text-gray-900">
+                    <p className="text-gray-500 dark:text-gray-400 text-xs">Role</p>
+                    <p className="font-medium text-gray-900 dark:text-gray-100">
                       {selectedRole ? selectedRole.charAt(0).toUpperCase() + selectedRole.slice(1) : "Not selected"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-gray-500 text-xs">Duration</p>
-                    <p className="font-medium text-gray-900">{selectedDuration} minutes</p>
+                    <p className="text-gray-500 dark:text-gray-400 text-xs">Duration</p>
+                    <p className="font-medium text-gray-900 dark:text-gray-100">{selectedDuration} minutes</p>
                   </div>
                 </div>
                 
                 <div>
-                  <p className="text-gray-500 text-xs">Provider</p>
-                  <p className="font-medium text-gray-900">
+                  <p className="text-gray-500 dark:text-gray-400 text-xs">Provider</p>
+                  <p className="font-medium text-gray-900 dark:text-gray-100">
                     {selectedProviderId && usersData
                       ? (() => {
                           const provider = usersData.find((u: any) => u.id.toString() === selectedProviderId);
@@ -3630,14 +3630,14 @@ Medical License: [License Number]
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-gray-500 text-xs">Date</p>
-                    <p className="font-medium text-gray-900">
+                    <p className="text-gray-500 dark:text-gray-400 text-xs">Date</p>
+                    <p className="font-medium text-gray-900 dark:text-gray-100">
                       {newAppointmentDate ? format(newAppointmentDate, 'MMM dd, yyyy') : "Not selected"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-gray-500 text-xs">Time</p>
-                    <p className="font-medium text-gray-900">
+                    <p className="text-gray-500 dark:text-gray-400 text-xs">Time</p>
+                    <p className="font-medium text-gray-900 dark:text-gray-100">
                       {newSelectedTimeSlot || "Not selected"}
                     </p>
                   </div>
@@ -3647,7 +3647,7 @@ Medical License: [License Number]
           </div>
 
           {/* Action Buttons */}
-          <div className="flex justify-end space-x-2 pt-6 border-t mt-6">
+          <div className="flex justify-end space-x-2 pt-6 border-t border-gray-200 dark:border-gray-700 mt-6">
             <Button
               variant="outline"
               onClick={() => {

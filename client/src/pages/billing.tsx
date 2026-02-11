@@ -601,12 +601,28 @@ function PricingManagementDashboard() {
   });
   const doctorsFees: any[] = doctorsFeesData ?? [];
 
-  const { data: labTestsData = [], isLoading: loadingLabs } = useQuery<any[], Error>({
+  const { data: labTestsData = [], isLoading: loadingLabs, refetch: refetchLabTests } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/lab-tests"],
-    queryFn: () => fetchResource("/api/pricing/lab-tests"),
+    queryFn: async () => {
+      const data = await fetchResource("/api/pricing/lab-tests");
+      console.log('[LAB TESTS] Fetched data:', data, 'Type:', typeof data, 'IsArray:', Array.isArray(data));
+      // Handle different response formats
+      if (Array.isArray(data)) {
+        return data;
+      } else if (data && typeof data === 'object' && 'data' in data && Array.isArray(data.data)) {
+        // Handle wrapped response { data: [...] }
+        return data.data;
+      } else if (data && typeof data === 'object' && Array.isArray(data.items)) {
+        // Handle wrapped response { items: [...] }
+        return data.items;
+      }
+      // Return empty array if data is not in expected format
+      console.warn('[LAB TESTS] Unexpected data format:', data);
+      return [];
+    },
     enabled: pricingTab === "lab-tests"
   });
-  const labTests: any[] = labTestsData ?? [];
+  const labTests: any[] = Array.isArray(labTestsData) ? labTestsData : [];
 
   const { data: imagingData = [], isLoading: loadingImaging } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/imaging"],
@@ -1048,7 +1064,22 @@ function PricingManagementDashboard() {
         }
       }
 
-      queryClient.invalidateQueries({ queryKey: ['/api/pricing/lab-tests'] });
+      // Invalidate and refetch the lab tests query
+      // Add a small delay to ensure database transaction is committed
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      console.log('[LAB TESTS] Invalidating and refetching lab tests query, pricingTab:', pricingTab);
+      
+      // Invalidate the query cache
+      await queryClient.invalidateQueries({ queryKey: ['/api/pricing/lab-tests'] });
+      
+      // Explicitly refetch if we're on the lab-tests tab
+      if (pricingTab === "lab-tests") {
+        const result = await queryClient.refetchQueries({ queryKey: ['/api/pricing/lab-tests'] });
+        console.log('[LAB TESTS] Refetch result:', result);
+      } else {
+        console.log('[LAB TESTS] Not on lab-tests tab, skipping refetch');
+      }
 
       if (alreadyExistsCount > 0 && successCount === 0) {
         setShowTestsExistsModal(true);
@@ -7625,43 +7656,59 @@ export default function BillingPage() {
                 {/* Invoices List */}
                 {isListView ? (
                   /* List View - Table Format */
-                  <Card>
-                    <CardContent className="p-0">
-                      <div className="overflow-x-auto overflow-y-visible">
-                        <table className="w-full min-w-[1200px]">
+                    <Card className="w-full max-w-full overflow-hidden">
+                      <CardContent className="p-0 w-full max-w-full overflow-hidden">
+                        <div className="overflow-hidden w-full max-w-full">
+                          <table className="w-full table-fixed border-collapse">
+                          <colgroup>
+                            <col className="w-[8%]" />
+                            {user?.role !== 'patient' && <col className="w-[9%]" />}
+                            {(user?.role === 'patient' || user?.role === 'admin') && <col className="w-[9%]" />}
+                            {user?.role === 'admin' && <col className="w-[8%]" />}
+                            <col className="w-[9%]" />
+                            <col className="w-[8%]" />
+                            {(user?.role === 'admin' || user?.role === 'doctor' || user?.role === 'nurse' || user?.role === 'patient') && <col className="w-[7%]" />}
+                            {isPatient && <col className="w-[9%]" />}
+                            <col className="w-[8%]" />
+                            <col className="w-[8%]" />
+                            <col className="w-[7%]" />
+                            <col className="w-[7%]" />
+                            <col className="w-[8%]" />
+                            <col className="w-[9%]" />
+                          </colgroup>
                           <thead className="bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Invoice No.</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
                               {user?.role !== 'patient' && (
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Patient Name</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
                               )}
                               {(user?.role === 'patient' || user?.role === 'admin') && (
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Provider/Doctor</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Provider/Doctor</th>
                               )}
                               {user?.role === 'admin' && (
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Doctor Name</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Doctor Name</th>
                               )}
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Payment Method</th>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Service Type</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Payment Method</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Type</th>
                               {(user?.role === 'admin' || user?.role === 'doctor' || user?.role === 'nurse' || user?.role === 'patient') && (
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Service ID</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service ID</th>
                               )}
                               {isPatient && (
-                                <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Created At</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created At</th>
                               )}
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Service Date</th>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Due Date</th>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Total</th>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Outstanding</th>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Status</th>
-                              <th className="px-3 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">Actions</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
                             {filteredInvoices.map((invoice) => (
                               <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-slate-800" data-testid={`invoice-row-${invoice.id}`}>
                                 <td 
-                                  className="px-3 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer hover:text-primary hover:underline whitespace-nowrap" 
+                                  className="px-0.5 py-1 text-xs font-medium text-gray-900 dark:text-gray-100 cursor-pointer hover:text-primary hover:underline truncate" 
                                   onClick={() => {
                                     const invoiceNum = invoice.invoiceNumber || invoice.id;
                                     
@@ -7671,24 +7718,27 @@ export default function BillingPage() {
                                       setSearchQuery(String(invoiceNum));
                                     }
                                   }}
-                                  title="Click to search this invoice"
+                                  title={invoice.invoiceNumber || invoice.id}
                                   data-testid="button-invoice-number-list"
                                 >
-                                  {invoice.invoiceNumber || invoice.id}
+                                  <span className="truncate block">{invoice.invoiceNumber || invoice.id}</span>
                                 </td>
-                                <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{invoice.patientName}</td>
+                                <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={invoice.patientName}>
+                                  {invoice.patientName}
+                                </td>
                                 {(user?.role === 'patient' || user?.role === 'admin') && (
-                                  <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400">
                                     {(() => {
                                       const providerInfo = getProviderInfo(invoice);
                                       if (providerInfo) {
+                                        const displayText = providerInfo.role ? `${providerInfo.name} (${providerInfo.role})` : providerInfo.name;
                                         return (
-                                          <div className="flex flex-col">
-                                            <span className="font-medium text-gray-900 dark:text-gray-100">
+                                          <div className="truncate" title={displayText}>
+                                            <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">
                                               {providerInfo.name}
                                             </span>
                                             {providerInfo.role && (
-                                              <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                                              <span className="text-xs text-gray-500 dark:text-gray-400 capitalize truncate block">
                                                 {providerInfo.role}
                                               </span>
                                             )}
@@ -7700,7 +7750,7 @@ export default function BillingPage() {
                                   </td>
                                 )}
                                 {user?.role === 'admin' && (
-                                  <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 truncate">
                                     {(() => {
                                       // Get doctor name from doctor_id in invoices table
                                       if (invoice.doctorId) {
@@ -7709,54 +7759,63 @@ export default function BillingPage() {
                                           const firstName = doctor.firstName || '';
                                           const lastName = doctor.lastName || '';
                                           const fullName = `${firstName} ${lastName}`.trim();
-                                          return <span className="font-medium text-gray-900 dark:text-gray-100">{fullName || '-'}</span>;
+                                          return <span className="font-medium text-gray-900 dark:text-gray-100 truncate block" title={fullName}>{fullName || '-'}</span>;
                                         }
                                       }
                                       return <span className="text-gray-400">-</span>;
                                     })()}
                                   </td>
                                 )}
-                                <td className="px-3 py-3 text-sm whitespace-nowrap">
-                                  <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">
+                                <td className="px-0.5 py-1 text-xs">
+                                  <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 truncate max-w-full text-xs">
                                     {(() => {
                                       // If status is unpaid and payment method is "Online Payment", show "Not Selected"
                                       // "Online Payment" should only show when payment is actually processed
-                                      if (invoice.status === 'unpaid' && invoice.paymentMethod === 'Online Payment') {
-                                        return 'Not Selected';
-                                      }
-                                      return invoice.paymentMethod || 'Not Selected';
+                                      const paymentMethod = invoice.status === 'unpaid' && invoice.paymentMethod === 'Online Payment' ? 'Not Selected' : (invoice.paymentMethod || 'Not Selected');
+                                      return <span className="truncate block" title={paymentMethod}>{paymentMethod}</span>;
                                     })()}
                                   </Badge>
                                 </td>
-                                <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 truncate" title={invoice.serviceType || invoice.serviceName || invoice.items?.[0]?.description || '-'}>
                                   {invoice.serviceType || invoice.serviceName || invoice.items?.[0]?.description || '-'}
                                 </td>
                                 {(user?.role === 'admin' || user?.role === 'doctor' || user?.role === 'nurse' || user?.role === 'patient') && (
-                                  <td className="px-3 py-3 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap font-mono text-xs">
+                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
                                   {(() => {
                                       // Get service_id directly from invoices table
                                       // Priority: invoice.serviceId (top-level from invoices.service_id column) > invoice.items[0].serviceId
                                       const serviceId = invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId;
+                                      const serviceIdStr = serviceId ? String(serviceId) : '-';
                                       // Display the raw service_id from invoices table
-                                      return serviceId ? String(serviceId) : '-';
+                                      return <span className="truncate block" title={serviceIdStr}>{serviceIdStr}</span>;
                                   })()}
                                 </td>
                                 )}
                                 {isPatient && (
-                                  <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={invoice.createdAt || invoice.created_at 
+                                      ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
+                                      : '-'}>
                                     {invoice.createdAt || invoice.created_at 
                                       ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
                                       : '-'}
                                   </td>
                                 )}
-                                <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{format(new Date(invoice.dateOfService), 'MMM d, yyyy')}</td>
-                                <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{format(new Date(invoice.dueDate), 'MMM d, yyyy')}</td>
-                                <td className="px-3 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">{formatCurrency(invoice.totalAmount)}</td>
-                                <td className="px-3 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">{formatCurrency(invoice.totalAmount - invoice.paidAmount)}</td>
-                                <td className="px-3 py-3 text-sm whitespace-nowrap">
+                                <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={format(new Date(invoice.dateOfService), 'MMM d, yyyy')}>
+                                  {format(new Date(invoice.dateOfService), 'MMM d, yyyy')}
+                                </td>
+                                <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={format(new Date(invoice.dueDate), 'MMM d, yyyy')}>
+                                  {format(new Date(invoice.dueDate), 'MMM d, yyyy')}
+                                </td>
+                                <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(invoice.totalAmount)}>
+                                  {formatCurrency(invoice.totalAmount)}
+                                </td>
+                                <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(invoice.totalAmount - invoice.paidAmount)}>
+                                  {formatCurrency(invoice.totalAmount - invoice.paidAmount)}
+                                </td>
+                                <td className="px-0.5 py-1 text-xs">
                                   {user?.role === 'patient' ? (
-                                    <Badge className={`${getStatusColor(invoice.status)}`}>
-                                      {invoice.status}
+                                    <Badge className={`${getStatusColor(invoice.status)} truncate max-w-full`}>
+                                      <span className="truncate block" title={invoice.status}>{invoice.status}</span>
                                     </Badge>
                                   ) : (
                                     <Select 
@@ -7764,7 +7823,7 @@ export default function BillingPage() {
                                       onValueChange={(value) => handleInlineStatusUpdate(invoice.id, value)}
                                       disabled={updatingStatusId === invoice.id}
                                     >
-                                      <SelectTrigger className={`w-32 h-8 text-xs ${getStatusColor(invoice.status)}`}>
+                                      <SelectTrigger className={`w-full max-w-[90px] h-7 text-xs ${getStatusColor(invoice.status)}`}>
                                         <SelectValue>{invoice.status}</SelectValue>
                                       </SelectTrigger>
                                       <SelectContent>
@@ -7778,10 +7837,10 @@ export default function BillingPage() {
                                     </Select>
                                   )}
                                 </td>
-                                <td className="px-3 py-3 text-sm whitespace-nowrap">
-                                  <div className="flex items-center gap-2">
-                                    <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)} data-testid="button-view-invoice" title="View">
-                                      <Eye className="h-4 w-4" />
+                                <td className="px-0.5 py-1 text-xs">
+                                  <div className="flex items-center gap-0.5">
+                                    <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)} data-testid="button-view-invoice" title="View" className="h-5 w-5 p-0">
+                                      <Eye className="h-3 w-3" />
                                     </Button>
                                     {isPatient && (
                                       <>
@@ -7792,9 +7851,9 @@ export default function BillingPage() {
                                             onClick={() => handleOpenSavedInvoicePdf(invoice)} 
                                             data-testid="button-open-saved-invoice-pdf-patient" 
                                             title="Open Invoice PDF"
-                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300"
+                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 h-5 w-5 p-0"
                                           >
-                                            <FileText className="h-4 w-4" />
+                                            <FileText className="h-3 w-3" />
                                           </Button>
                                         )}
                                         <Button 
@@ -7803,9 +7862,9 @@ export default function BillingPage() {
                                           onClick={() => handleSaveInvoice(invoice.id.toString())} 
                                           data-testid="button-save-invoice-patient" 
                                           title="Save Invoice"
-                                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 h-5 w-5 p-0"
                                         >
-                                          <FileText className="h-4 w-4" />
+                                          <FileText className="h-3 w-3" />
                                         </Button>
                                       </>
                                     )}
@@ -7818,17 +7877,17 @@ export default function BillingPage() {
                                             onClick={() => handleOpenSavedInvoicePdf(invoice)} 
                                             data-testid="button-open-saved-invoice-pdf" 
                                             title="Open Saved PDF"
-                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300"
+                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 h-5 w-5 p-0"
                                           >
-                                            <FileText className="h-4 w-4" />
+                                            <FileText className="h-3 w-3" />
                                           </Button>
                                         )}
-                                        <Button variant="ghost" size="sm" onClick={() => handleDownloadInvoice(invoice.id.toString())} data-testid="button-download-invoice" title="Download">
-                                          <Download className="h-4 w-4" />
+                                        <Button variant="ghost" size="sm" onClick={() => handleDownloadInvoice(invoice.id.toString())} data-testid="button-download-invoice" title="Download" className="h-5 w-5 p-0">
+                                          <Download className="h-3 w-3" />
                                         </Button>
                                         {!isPatient && (
-                                          <Button variant="ghost" size="sm" onClick={() => handleSendInvoice(invoice.id)} data-testid="button-send-invoice" title="Send">
-                                            <Send className="h-4 w-4" />
+                                          <Button variant="ghost" size="sm" onClick={() => handleSendInvoice(invoice.id)} data-testid="button-send-invoice" title="Send" className="h-5 w-5 p-0">
+                                            <Send className="h-3 w-3" />
                                           </Button>
                                         )}
                                       </>
@@ -7844,8 +7903,9 @@ export default function BillingPage() {
                                           color: 'white'
                                         }}
                                         title="Pay Now"
+                                        className="h-7 px-2 text-xs"
                                       >
-                                        <CreditCard className="h-4 w-4 mr-1" />
+                                        <CreditCard className="h-3 w-3 mr-1" />
                                         Pay
                                       </Button>
                                     )}
@@ -8135,9 +8195,9 @@ export default function BillingPage() {
                   {isAdmin && <TabsTrigger value="pricing-management">Pricing Management</TabsTrigger>}
                 </TabsList>
 
-                <TabsContent value="invoices" className="space-y-4 mt-6">
+                <TabsContent value="invoices" className="space-y-4 mt-6 w-full max-w-full overflow-hidden">
                   {/* Filters and Actions */}
-                  <Card>
+                  <Card className="w-full max-w-full overflow-hidden">
                     <CardContent className="p-4">
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
@@ -8309,28 +8369,44 @@ export default function BillingPage() {
                     /* List View - Table Format */
                     <Card>
                       <CardContent className="p-0">
-                        <div className="overflow-x-auto">
+                        <div className="overflow-hidden w-full">
                           <table className="w-full">
+                            <colgroup>
+                              <col style={{ width: '7%' }} />
+                              <col style={{ width: '8%' }} />
+                              <col style={{ width: '9%' }} />
+                              <col style={{ width: '8%' }} />
+                              <col style={{ width: '8%' }} />
+                              {isAdmin && <col style={{ width: '8%' }} />}
+                              {isPatient && <col style={{ width: '9%' }} />}
+                              <col style={{ width: '9%' }} />
+                              <col style={{ width: '8%' }} />
+                              <col style={{ width: '8%' }} />
+                              <col style={{ width: '7%' }} />
+                              <col style={{ width: '7%' }} />
+                              <col style={{ width: '8%' }} />
+                              <col style={{ width: '9%' }} />
+                            </colgroup>
                             <thead className="bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700">
                               <tr>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service ID</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Doctor Name</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Type</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service ID</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Doctor Name</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Type</th>
                                 {isAdmin && (
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created By</th>
+                                  <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created By</th>
                                 )}
                                 {isPatient && (
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created At</th>
+                                  <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created At</th>
                                 )}
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Payment Method</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Payment Method</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                               </tr>
                             </thead>
                             <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -8420,59 +8496,77 @@ export default function BillingPage() {
                                 
                                 return (
                                 <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-slate-800" data-testid={`invoice-row-${invoice.id}`}>
-                                  <td className="px-4 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">{invoice.invoiceNumber || invoice.id}</td>
-                                  {user?.role !== 'patient' && (
-                                  <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">{invoice.patientName}</td>
-                                  )}
-                                  <td className="px-4 py-4 text-sm text-gray-600 dark:text-gray-400">
+                                  <td className="px-0.5 py-1 text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={invoice.invoiceNumber || invoice.id}>
+                                    <span className="truncate block">{invoice.invoiceNumber || invoice.id}</span>
+                                  </td>
+                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 truncate">
                                     {(() => {
-                                      // Get service_id directly from invoices table for patient role
+                                      // Get service_id directly from invoices table
                                       // Priority: invoice.serviceId (top-level from invoices.service_id column) > invoice.items[0].serviceId
                                       const serviceId = invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId;
-                                      // Display the raw service_id from invoices table
-                                      return serviceId ? String(serviceId) : '-';
+                                      const serviceIdStr = serviceId ? String(serviceId) : '-';
+                                      return <span className="truncate block" title={serviceIdStr}>{serviceIdStr}</span>;
                                     })()}
                                   </td>
-                                  <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">{doctorName}</td>
-                                  <td className="px-4 py-4 text-sm">
-                                    <Badge variant="outline" className="text-xs">
-                                      {serviceTypeLabel}
+                                  {user?.role !== 'patient' && (
+                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={invoice.patientName}>
+                                    <div className="truncate">{invoice.patientName}</div>
+                                  </td>
+                                  )}
+                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={doctorName}>
+                                    <div className="truncate">{doctorName}</div>
+                                  </td>
+                                  <td className="px-0.5 py-1 text-xs truncate max-w-0">
+                                    <Badge variant="outline" className="text-xs truncate max-w-full" title={serviceTypeLabel}>
+                                      <span className="truncate block">{serviceTypeLabel}</span>
                                     </Badge>
                                   </td>
                                   {isAdmin && (
-                                    <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">{createdByName}</td>
-                                  )}
-                                  {isPatient && (
-                                    <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">
-                                      {invoice.createdAt || invoice.created_at 
-                                        ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
-                                        : '-'}
+                                    <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={createdByName || '-'}>
+                                      <div className="truncate">{createdByName || '-'}</div>
                                     </td>
                                   )}
-                                  <td className="px-4 py-4 text-sm">
-                                    <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">
+                                  {isPatient && (
+                                    <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={invoice.createdAt || invoice.created_at 
+                                        ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
+                                        : '-'}>
+                                      <div className="truncate">
+                                        {invoice.createdAt || invoice.created_at 
+                                          ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
+                                          : '-'}
+                                      </div>
+                                    </td>
+                                  )}
+                                  <td className="px-0.5 py-1 text-xs truncate max-w-0">
+                                    <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 truncate max-w-full text-xs">
                                       {(() => {
                                         // If status is unpaid and payment method is "Online Payment", show "Not Selected"
                                         // "Online Payment" should only show when payment is actually processed
-                                        if (invoice.status === 'unpaid' && invoice.paymentMethod === 'Online Payment') {
-                                          return 'Not Selected';
-                                        }
-                                        return invoice.paymentMethod || 'Not Selected';
+                                        const paymentMethod = invoice.status === 'unpaid' && invoice.paymentMethod === 'Online Payment' ? 'Not Selected' : (invoice.paymentMethod || 'Not Selected');
+                                        return <span className="truncate block" title={paymentMethod}>{paymentMethod}</span>;
                                       })()}
                                     </Badge>
                                   </td>
-                                  <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">{format(new Date(invoice.dateOfService), 'MMM d, yyyy')}</td>
-                                  <td className="px-4 py-4 text-sm text-gray-900 dark:text-gray-100">{format(new Date(invoice.dueDate), 'MMM d, yyyy')}</td>
-                                  <td className="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(invoice.totalAmount)}</td>
-                                  <td className="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatCurrency(invoice.totalAmount - invoice.paidAmount)}</td>
-                                  <td className="px-4 py-4 text-sm">
+                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={format(new Date(invoice.dateOfService), 'MMM d, yyyy')}>
+                                    <div className="truncate">{format(new Date(invoice.dateOfService), 'MMM d, yyyy')}</div>
+                                  </td>
+                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={format(new Date(invoice.dueDate), 'MMM d, yyyy')}>
+                                    <div className="truncate">{format(new Date(invoice.dueDate), 'MMM d, yyyy')}</div>
+                                  </td>
+                                  <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate max-w-0" title={formatCurrency(invoice.totalAmount)}>
+                                    <div className="truncate">{formatCurrency(invoice.totalAmount)}</div>
+                                  </td>
+                                  <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate max-w-0" title={formatCurrency(invoice.totalAmount - invoice.paidAmount)}>
+                                    <div className="truncate">{formatCurrency(invoice.totalAmount - invoice.paidAmount)}</div>
+                                  </td>
+                                  <td className="px-0.5 py-1 text-xs">
                                     {isAdmin ? (
                                       <Select 
                                         value={invoice.status} 
                                         onValueChange={(value) => handleInlineStatusUpdate(invoice.id, value)}
                                         disabled={updatingStatusId === invoice.id}
                                       >
-                                        <SelectTrigger className={`w-32 h-8 text-xs ${getStatusColor(invoice.status)}`}>
+                                        <SelectTrigger className={`w-full max-w-[90px] h-7 text-xs ${getStatusColor(invoice.status)}`}>
                                           <SelectValue>{invoice.status}</SelectValue>
                                         </SelectTrigger>
                                         <SelectContent>
@@ -8485,15 +8579,15 @@ export default function BillingPage() {
                                         </SelectContent>
                                       </Select>
                                     ) : (
-                                      <Badge className={`${getStatusColor(invoice.status)}`}>
-                                        {invoice.status}
+                                      <Badge className={`${getStatusColor(invoice.status)} truncate max-w-full`}>
+                                        <span className="truncate block" title={invoice.status}>{invoice.status}</span>
                                       </Badge>
                                     )}
                                   </td>
-                                  <td className="px-4 py-4 text-sm">
-                                    <div className="flex items-center gap-2">
-                                      <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)} title="View">
-                                        <Eye className="h-4 w-4" />
+                                  <td className="px-0.5 py-1 text-xs">
+                                    <div className="flex items-center gap-0.5">
+                                      <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)} title="View" className="h-5 w-5 p-0">
+                                        <Eye className="h-3 w-3" />
                                       </Button>
                                       {savedInvoiceIds.has(invoice.id) && (
                                         <>
@@ -8503,15 +8597,15 @@ export default function BillingPage() {
                                             onClick={() => handleOpenSavedInvoicePdf(invoice)} 
                                             data-testid="button-open-saved-invoice-pdf-doctor-table" 
                                             title="Open Saved PDF"
-                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300"
+                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 h-5 w-5 p-0"
                                           >
-                                            <FileText className="h-4 w-4" />
+                                            <FileText className="h-3 w-3" />
                                           </Button>
-                                          <Button variant="ghost" size="sm" onClick={() => handleDownloadInvoice(invoice.id.toString())} title="Download">
-                                            <Download className="h-4 w-4" />
+                                          <Button variant="ghost" size="sm" onClick={() => handleDownloadInvoice(invoice.id.toString())} title="Download" className="h-5 w-5 p-0">
+                                            <Download className="h-3 w-3" />
                                           </Button>
-                                          <Button variant="ghost" size="sm" onClick={() => handleSendInvoice(invoice.id)} title="Send">
-                                            <Send className="h-4 w-4" />
+                                          <Button variant="ghost" size="sm" onClick={() => handleSendInvoice(invoice.id)} title="Send" className="h-5 w-5 p-0">
+                                            <Send className="h-3 w-3" />
                                           </Button>
                                         </>
                                       )}
@@ -8520,10 +8614,10 @@ export default function BillingPage() {
                                           variant="ghost" 
                                           size="sm" 
                                           onClick={() => handleDeleteInvoice(invoice.id)}
-                                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                          className="text-red-600 hover:text-red-700 hover:bg-red-50 h-5 w-5 p-0"
                                           title="Delete"
                                         >
-                                          <Trash2 className="h-4 w-4" />
+                                          <Trash2 className="h-3 w-3" />
                                         </Button>
                                       )}
                                     </div>

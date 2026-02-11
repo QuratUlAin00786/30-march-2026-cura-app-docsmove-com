@@ -37,6 +37,12 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import {
   Pill,
@@ -4173,8 +4179,10 @@ export default function PrescriptionsPage() {
         title="Prescriptions"
         subtitle="Manage patient prescriptions and medications"/>
 
-      <div className="flex-1 overflow-auto p-4 sm:p-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <div className="flex-1 overflow-auto p-4 sm:p-6 w-full max-w-full box-border">
+        <TooltipProvider>
+        <div className="space-y-6 w-full max-w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
           <TabsList className="grid grid-cols-2 gap-2 rounded-2xl border bg-white/80 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-200">
             <TabsTrigger
               value="view-prescriptions"
@@ -4284,9 +4292,9 @@ export default function PrescriptionsPage() {
           </div>
 
           {/* Filters and Actions */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-4">
+          <Card className="w-full max-w-full overflow-hidden">
+            <CardContent className="p-4 w-full max-w-full">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full">
                 {user?.role === 'doctor' ? (
                   <>
                     {/* Doctor: Search by patient name/ID */}
@@ -4365,7 +4373,7 @@ export default function PrescriptionsPage() {
                     )}
                   </>
                 ) : (
-                  <div className="relative flex-1 max-w-sm">
+                  <div className="relative flex-1 min-w-[200px] max-w-full sm:max-w-sm">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                       placeholder="Search prescriptions..."
@@ -4387,7 +4395,7 @@ export default function PrescriptionsPage() {
                     }
                   }}
                 >
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className="w-full sm:w-40 min-w-[120px]">
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -4542,7 +4550,7 @@ export default function PrescriptionsPage() {
           </Card>
 
           {/* Prescriptions List */}
-          <div className="space-y-4 bg-gray-50 dark:bg-gray-900 rounded-xl p-4">
+          <div className="space-y-4 bg-gray-50 dark:bg-gray-900 rounded-xl p-4 w-full max-w-full overflow-hidden">
             {isLoading ? (
               /* Loading State - Show skeleton for prescriptions */
               <div className="space-y-4">
@@ -4580,40 +4588,49 @@ export default function PrescriptionsPage() {
                 return (
                 <Card
                   key={prescription.id || prescription.prescriptionNumber}
-                  className="hover:shadow-md transition-shadow bg-gradient-to-br from-blue-50 to-purple-100 dark:from-slate-800 dark:to-slate-700 border-2 border-blue-200 dark:border-slate-600"
+                  className="hover:shadow-md transition-shadow bg-gradient-to-br from-blue-50 to-purple-100 dark:from-slate-800 dark:to-slate-700 border-2 border-blue-200 dark:border-slate-600 w-full max-w-full overflow-hidden"
                 >
-                  <CardContent className="p-0">
+                  <CardContent className="p-0 w-full max-w-full overflow-hidden">
                     {/* Professional Prescription Header */}
-                    <div className="bg-white dark:bg-slate-700 border-b-2 border-blue-200 dark:border-slate-600 p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="text-center">
-                          <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                    <div className="bg-white dark:bg-slate-700 border-b-2 border-blue-200 dark:border-slate-600 p-4 w-full overflow-hidden">
+                      <div className="flex flex-col sm:flex-row justify-between items-start gap-4 w-full">
+                        <div className="text-center sm:text-left flex-1 min-w-0">
+                          <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-100 break-words">
                             CURA HEALTH EMR
                           </h2>
-                          <p className="text-sm text-gray-600 dark:text-gray-300">
+                          <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 min-w-0">
                             Prescription #:{" "}
-                            {prescription.prescriptionNumber || "N/A"}
+                            <span className="truncate block" title={prescription.prescriptionNumber || "N/A"}>{prescription.prescriptionNumber || "N/A"}</span>
                           </p>
                           {(() => {
                             const providerInfo = allUsers?.find((p: any) => p.id === prescription.doctorId);
                             const creatorInfo = allUsers?.find((p: any) => p.id === prescription.prescriptionCreatedBy);
                             return (
-                              <div className="mt-1 space-y-1">
+                              <div className="mt-1 space-y-1 min-w-0">
                                 {providerInfo && (
-                                  <div>
-                                    <p className="text-xs text-gray-600 dark:text-gray-300">
-                                      <span className="font-medium">Provider:</span> {providerInfo.firstName} {providerInfo.lastName}
+                                  <div className="min-w-0">
+                                    <p className="text-xs text-gray-600 dark:text-gray-300 min-w-0">
+                                      <span className="font-medium">Provider:</span>{" "}
+                                      <span className="truncate block" title={`${providerInfo.firstName} ${providerInfo.lastName}`}>
+                                        {providerInfo.firstName} {providerInfo.lastName}
+                                      </span>
                                     </p>
                                     {providerInfo.department && (
-                                      <p className="text-xs text-gray-600 dark:text-gray-300">
-                                        <span className="font-medium">Specialization:</span> {providerInfo.department}
+                                      <p className="text-xs text-gray-600 dark:text-gray-300 min-w-0">
+                                        <span className="font-medium">Specialization:</span>{" "}
+                                        <span className="truncate block" title={providerInfo.department}>
+                                          {providerInfo.department}
+                                        </span>
                                       </p>
                                     )}
                                   </div>
                                 )}
                                 {creatorInfo && (
-                                  <p className="text-xs text-gray-600 dark:text-gray-300">
-                                    Created by {formatRoleLabel(creatorInfo.role)}: {creatorInfo.firstName} {creatorInfo.lastName}
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 min-w-0">
+                                    Created by {formatRoleLabel(creatorInfo.role)}:{" "}
+                                    <span className="truncate block" title={`${creatorInfo.firstName} ${creatorInfo.lastName}`}>
+                                      {creatorInfo.firstName} {creatorInfo.lastName}
+                                    </span>
                                   </p>
                                 )}
                               </div>
@@ -4732,29 +4749,30 @@ export default function PrescriptionsPage() {
                               }}
                             >
                               <p
-                                className="text-gray-600 dark:text-gray-300 font-bold"
+                                className="text-gray-600 dark:text-gray-300 font-bold truncate"
                                 style={{
                                   fontSize:
                                     clinicHeader?.clinicNameFontSize || "16px",
                                 }}
+                                title={clinicHeader?.clinicName || "emrSoft Health Clinic"}
                               >
                                 {clinicHeader?.clinicName ||
                                   "emrSoft Health Clinic"}
                               </p>
-                              <p className="text-sm text-gray-600 dark:text-gray-300">
+                              <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader?.address || "Unit 2 Drayton Court, Solihull"}>
                                 {clinicHeader?.address ||
                                   "Unit 2 Drayton Court, Solihull"}
                               </p>
-                              <p className="text-sm text-gray-600 dark:text-gray-300">
+                              <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader?.phone || "+44(0)121 827 5531"}>
                                 {clinicHeader?.phone || "+44(0)121 827 5531"}
                               </p>
                               {clinicHeader?.email && (
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader.email}>
                                   {clinicHeader.email}
                                 </p>
                               )}
                               {clinicHeader?.website && (
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader.website}>
                                   {clinicHeader.website}
                                 </p>
                               )}
@@ -4783,6 +4801,7 @@ export default function PrescriptionsPage() {
                             )}
 
                             <div
+                              className="min-w-0"
                               style={{
                                 fontFamily:
                                   clinicHeader?.fontFamily || "inherit",
@@ -4797,29 +4816,30 @@ export default function PrescriptionsPage() {
                               }}
                             >
                               <p
-                                className="text-gray-600 dark:text-gray-300 font-bold"
+                                className="text-gray-600 dark:text-gray-300 font-bold truncate"
                                 style={{
                                   fontSize:
                                     clinicHeader?.clinicNameFontSize || "16px",
                                 }}
+                                title={clinicHeader?.clinicName || "emrSoft Health Clinic"}
                               >
                                 {clinicHeader?.clinicName ||
                                   "emrSoft Health Clinic"}
                               </p>
-                              <p className="text-sm text-gray-600 dark:text-gray-300">
+                              <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader?.address || "Unit 2 Drayton Court, Solihull"}>
                                 {clinicHeader?.address ||
                                   "Unit 2 Drayton Court, Solihull"}
                               </p>
-                              <p className="text-sm text-gray-600 dark:text-gray-300">
+                              <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader?.phone || "+44(0)121 827 5531"}>
                                 {clinicHeader?.phone || "+44(0)121 827 5531"}
                               </p>
                               {clinicHeader?.email && (
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader.email}>
                                   {clinicHeader.email}
                                 </p>
                               )}
                               {clinicHeader?.website && (
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                <p className="text-sm text-gray-600 dark:text-gray-300 truncate" title={clinicHeader.website}>
                                   {clinicHeader.website}
                                 </p>
                               )}
@@ -4830,40 +4850,50 @@ export default function PrescriptionsPage() {
                     </div>
 
                     {/* Patient Information */}
-                    <div className="px-6 py-4 bg-blue-50 dark:bg-slate-600">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
-                            <strong>Name:</strong> {prescription.patientName}
+                    <div className="px-4 sm:px-6 py-4 bg-blue-50 dark:bg-slate-600 w-full overflow-hidden">
+                      <div className="flex flex-col sm:flex-row justify-between items-start gap-4 w-full">
+                        <div className="flex-1 min-w-0 w-full sm:w-auto">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
+                            <strong>Name:</strong>{" "}
+                            <span className="truncate block" title={prescription.patientName}>
+                              {prescription.patientName}
+                            </span>
                           </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
                             <strong>Address:</strong>{" "}
-                            {prescription.patientAddress || "-"}
+                            <span className="truncate block" title={prescription.patientAddress || "-"}>
+                              {prescription.patientAddress || "-"}
+                            </span>
                           </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
                             <strong>Allergies:</strong>{" "}
-                            {prescription.patientAllergies || "-"}
+                            <span className="truncate block" title={prescription.patientAllergies || "-"}>
+                              {prescription.patientAllergies || "-"}
+                            </span>
                           </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
                             <strong>Weight:</strong>{" "}
-                            {prescription.patientWeight || "-"}
+                            <span className="truncate block" title={prescription.patientWeight || "-"}>
+                              {prescription.patientWeight || "-"}
+                            </span>
                           </p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                        <div className="text-left sm:text-right flex-1 min-w-0 w-full sm:w-auto">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 break-words">
                             <strong>DOB:</strong>{" "}
-                            {prescription.patientDob || "-"}
+                            <span className="break-words">{prescription.patientDob || "-"}</span>
                           </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 break-words">
                             <strong>Age:</strong>{" "}
-                            {prescription.patientAge || "-"}
+                            <span className="break-words">{prescription.patientAge || "-"}</span>
                           </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 break-words">
                             <strong>Sex:</strong>{" "}
-                            {prescription.patientSex || "M"}
+                            <span className="break-words">{prescription.patientSex || "M"}</span>
                           </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100">
+                          <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 break-words">
                             <strong>Date:</strong>{" "}
+                            <span className="break-words">
                             {prescription.prescribedAt ||
                             prescription.issuedDate ||
                             prescription.createdAt
@@ -4887,6 +4917,7 @@ export default function PrescriptionsPage() {
                                   return `${day}${suffix} ${month} ${year}`;
                                 })()
                               : "-"}
+                            </span>
                           </p>
                         </div>
                       </div>
@@ -4900,35 +4931,56 @@ export default function PrescriptionsPage() {
                     </div>
 
                     {/* Prescription Content */}
-                    <div className="px-6 py-4 bg-white dark:bg-slate-700 min-h-[200px]">
-                      <div className="space-y-4">
+                    <div className="px-4 sm:px-6 py-4 bg-white dark:bg-slate-700 min-h-[200px] w-full overflow-hidden">
+                      <div className="space-y-4 w-full">
                         {prescription.medications.map(
                           (medication: any, index: number) => (
-                            <div key={index} className="border-l-4 border-blue-500 pl-4">
-                              <p className="font-bold text-sm text-blue-600 dark:text-blue-400 mb-2">
+                            <div key={index} className="border-l-4 border-blue-500 pl-4 min-w-0 w-full">
+                              <p className="font-bold text-xs sm:text-sm text-blue-600 dark:text-blue-400 mb-2 break-words">
                                 Medication {index + 1}
                               </p>
-                              <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Medication Name:</strong> {medication.name}
+                              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 min-w-0">
+                                <strong>Medication Name:</strong>{" "}
+                                <span className="truncate block" title={medication.name}>
+                                  {medication.name}
+                                </span>
                               </p>
-                              <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Dosage:</strong> {medication.dosage}
+                              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 min-w-0">
+                                <strong>Dosage:</strong>{" "}
+                                <span className="truncate block" title={medication.dosage || "-"}>
+                                  {medication.dosage}
+                                </span>
                               </p>
-                              <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Frequency:</strong> {medication.frequency}
+                              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 min-w-0">
+                                <strong>Frequency:</strong>{" "}
+                                <span className="truncate block" title={medication.frequency || "-"}>
+                                  {medication.frequency}
+                                </span>
                               </p>
-                              <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Duration:</strong> {medication.duration}
+                              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 min-w-0">
+                                <strong>Duration:</strong>{" "}
+                                <span className="truncate block" title={medication.duration || "-"}>
+                                  {medication.duration}
+                                </span>
                               </p>
-                              <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Quantity:</strong> {medication.quantity}
+                              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 min-w-0">
+                                <strong>Quantity:</strong>{" "}
+                                <span className="truncate block" title={medication.quantity || "-"}>
+                                  {medication.quantity}
+                                </span>
                               </p>
-                              <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Refills:</strong> {medication.refills}
+                              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 min-w-0">
+                                <strong>Refills:</strong>{" "}
+                                <span className="truncate block" title={medication.refills || "-"}>
+                                  {medication.refills}
+                                </span>
                               </p>
                               {medication.instructions && (
-                                <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
-                                  <strong>Instructions:</strong> {medication.instructions}
+                                <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 mt-1 min-w-0">
+                                  <strong>Instructions:</strong>{" "}
+                                  <span className="truncate block" title={medication.instructions}>
+                                    {medication.instructions}
+                                  </span>
                                 </p>
                               )}
                               {index < prescription.medications.length - 1 && (
@@ -4940,21 +4992,24 @@ export default function PrescriptionsPage() {
                       </div>
 
                       {/* Diagnosis */}
-                      <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
-                        <p className="text-sm text-gray-800 dark:text-gray-100">
-                          <strong>Diagnosis:</strong> {prescription.diagnosis}
+                      <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600 w-full overflow-hidden">
+                        <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
+                          <strong>Diagnosis:</strong>{" "}
+                          <span className="truncate block" title={prescription.diagnosis || "No diagnosis provided"}>
+                            {prescription.diagnosis || "No diagnosis provided"}
+                          </span>
                         </p>
                       </div>
                     </div>
 
                     {/* Prescription Footer */}
-                    <div className="px-6 py-4 bg-blue-50 dark:bg-slate-600 border-t-2 border-blue-200 dark:border-slate-600">
-                      <div className="flex justify-between items-end">
-                        <div>
-                          <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                    <div className="px-4 sm:px-6 py-4 bg-blue-50 dark:bg-slate-600 border-t-2 border-blue-200 dark:border-slate-600 w-full overflow-hidden">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 w-full">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-100 break-words">
                             Resident Physician
                           </p>
-                          <p className="text-xs text-gray-600 dark:text-gray-300">
+                          <p className="text-xs text-gray-600 dark:text-gray-300 break-words">
                             (Signature)
                           </p>
                           {prescription.signature &&
@@ -4988,16 +5043,16 @@ export default function PrescriptionsPage() {
                             <div className="border-b border-gray-400 w-32 mt-2"></div>
                           )}
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                        <div className="text-left sm:text-right min-w-0 flex-1 sm:flex-none">
+                          <p className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-100 break-words">
                             May Substitute
                           </p>
-                          <div className="border-b border-gray-400 w-32 mt-2"></div>
+                          <div className="border-b border-gray-400 w-full sm:w-32 mt-2"></div>
                         </div>
                       </div>
 
-                      <div className="mt-4 text-center">
-                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                      <div className="mt-4 text-center w-full overflow-hidden">
+                        <p className="text-xs text-gray-600 dark:text-gray-300 truncate" title={clinicFooter?.footerText || "Pharmacy: Halo Health - +44(0)121 827 5531"}>
                           {clinicFooter?.footerText || "Pharmacy: Halo Health - +44(0)121 827 5531"}
                         </p>
                       </div>
@@ -5006,17 +5061,17 @@ export default function PrescriptionsPage() {
                     {/* Drug Interactions Warning */}
                     {prescription.interactions &&
                       prescription.interactions.length > 0 && (
-                        <div className="mx-4 mb-4 p-3 bg-red-50 border border-red-200 rounded">
-                          <h4 className="font-medium text-red-800 mb-2 flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4" />
-                            Drug Interactions Warning:
+                        <div className="mx-4 mb-4 p-3 bg-red-50 border border-red-200 rounded w-full overflow-hidden">
+                          <h4 className="font-medium text-red-800 mb-2 flex items-center gap-2 break-words">
+                            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                            <span className="break-words">Drug Interactions Warning:</span>
                           </h4>
-                          <div className="space-y-1">
+                          <div className="space-y-1 w-full">
                             {prescription.interactions.map(
                               (interaction: any, index: number) => (
                                 <div
                                   key={index}
-                                  className="text-xs text-red-700"
+                                  className="text-xs text-red-700 break-words"
                                 >
                                   <Badge
                                     className={
@@ -5027,7 +5082,7 @@ export default function PrescriptionsPage() {
                                   >
                                     {interaction.severity}
                                   </Badge>
-                                  {interaction.description}
+                                  <span className="break-words">{interaction.description}</span>
                                 </div>
                               ),
                             )}
@@ -5131,7 +5186,7 @@ export default function PrescriptionsPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="view-prescriptions" className="space-y-4 sm:space-y-6">
+        <TabsContent value="view-prescriptions" className="space-y-4 sm:space-y-6 w-full max-w-full">
           {/* Quick Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {/* Active Prescriptions Card */}
@@ -5305,8 +5360,8 @@ export default function PrescriptionsPage() {
                       </div>
                     )}
                     {user?.role !== 'patient' && (
-                      <div className="flex flex-1 max-w-xs flex-col gap-1">
-                        <Label className="text-xs uppercase tracking-wide text-gray-500">
+                      <div className="flex flex-1 min-w-[150px] max-w-full sm:max-w-xs flex-col gap-1">
+                        <Label className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                           Status
                         </Label>
                         <select
@@ -5321,19 +5376,19 @@ export default function PrescriptionsPage() {
                               setPatientNameFilter("");
                             }
                           }}
-                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                          className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none"
                         >
-                          <option value="all">All statuses</option>
-                          <option value="pending">Pending</option>
-                          <option value="active">Active</option>
-                          <option value="completed">Completed</option>
-                          <option value="cancelled">Cancelled</option>
-                          <option value="signed">Signed</option>
+                          <option value="all" className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">All statuses</option>
+                          <option value="pending" className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">Pending</option>
+                          <option value="active" className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">Active</option>
+                          <option value="completed" className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">Completed</option>
+                          <option value="cancelled" className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">Cancelled</option>
+                          <option value="signed" className="bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100">Signed</option>
                         </select>
                       </div>
                     )}
                     {user?.role !== 'patient' && (
-                      <div className="flex flex-1 max-w-xs flex-col gap-1">
+                      <div className="flex flex-1 min-w-[150px] max-w-full sm:max-w-xs flex-col gap-1">
                         <Label className="text-xs uppercase tracking-wide text-gray-500">
                           Patient
                         </Label>
@@ -5424,7 +5479,7 @@ export default function PrescriptionsPage() {
                     </div>
                     )}
                     {user?.role !== 'patient' && (
-                      <div className="flex flex-1 max-w-xs flex-col gap-1">
+                      <div className="flex flex-1 min-w-[150px] max-w-full sm:max-w-xs flex-col gap-1">
                         <Label className="text-xs uppercase tracking-wide text-gray-500">
                           Prescription #
                         </Label>
@@ -5503,7 +5558,7 @@ export default function PrescriptionsPage() {
                     </div>
                     )}
                     {user?.role !== 'patient' && (
-                      <div className="flex flex-1 max-w-xs flex-col gap-1">
+                      <div className="flex flex-1 min-w-[150px] max-w-full sm:max-w-xs flex-col gap-1">
                         <Label className="text-xs uppercase tracking-wide text-gray-500">
                           Doctor
                         </Label>
@@ -5859,7 +5914,7 @@ export default function PrescriptionsPage() {
           ) : (
             <div className="space-y-2">
               {displayPrescriptions.length > 0 && (
-                <div className="border-b-2 border-gray-300 dark:border-gray-600 flex items-center gap-4 py-3 font-semibold text-sm text-gray-700 dark:text-gray-300">
+                <div className="border-b-2 border-gray-300 dark:border-gray-600 flex items-center gap-2 py-2 font-semibold text-sm text-gray-700 dark:text-gray-300">
                   <div className={`flex-1 grid ${user?.role === "nurse" || user?.role === "doctor" ? "grid-cols-7" : "grid-cols-8"} gap-4 items-center`}>
                     <div>Prescription ID</div>
                     <div>Patient Name</div>
@@ -5873,14 +5928,14 @@ export default function PrescriptionsPage() {
                     )}
                   </div>
                   {user?.role !== 'patient' ? (
-                    <div className="w-40 text-center">Save/Print/file</div>
+                    <div className="text-center px-1">Save/Print/file</div>
                   ) : (
-                    <div className="w-40 text-center">file</div>
+                    <div className="text-center px-1">file</div>
                   )}
                   {user?.role !== 'patient' && (
-                    <div className="w-32 text-center">Sign/Share/log</div>
+                    <div className="text-center px-1">Sign/Share/log</div>
                   )}
-                  <div className="w-48 text-center">Actions</div>
+                  <div className="text-center px-1">Actions</div>
                 </div>
               )}
               {displayPrescriptions.map((prescription: any) => (
@@ -5890,13 +5945,17 @@ export default function PrescriptionsPage() {
                 >
                   <div className={`flex-1 grid ${user?.role === "nurse" || user?.role === "doctor" ? "grid-cols-7" : "grid-cols-8"} gap-4 items-center text-sm`}>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
-                      {prescription.prescriptionNumber || prescription.id || "N/A"}
+                      <div className="truncate" title={prescription.prescriptionNumber || prescription.id || "N/A"}>
+                        {prescription.prescriptionNumber || prescription.id || "N/A"}
+                      </div>
                     </div>
                     <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0">
-                      {prescription.patientName || "Unknown Patient"}
+                      <div className="truncate" title={prescription.patientName || "Unknown Patient"}>
+                        {prescription.patientName || "Unknown Patient"}
+                      </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
-                      {(() => {
+                      <div className="truncate" title={(() => {
                         const providerInfo = allUsers?.find((p: any) => 
                           p.id === prescription.doctorId || 
                           p.id === prescription.providerId ||
@@ -5905,21 +5964,44 @@ export default function PrescriptionsPage() {
                         return providerInfo 
                           ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
                           : "Unknown Provider";
-                      })()}
+                      })()}>
+                        {(() => {
+                          const providerInfo = allUsers?.find((p: any) => 
+                            p.id === prescription.doctorId || 
+                            p.id === prescription.providerId ||
+                            p.id === prescription.prescriptionCreatedBy
+                          );
+                          return providerInfo 
+                            ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
+                            : "Unknown Provider";
+                        })()}
+                      </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
-                      {prescription.clientCreatedAt
+                      <div className="truncate" title={prescription.clientCreatedAt
                         ? formatTimestampFromSystem(prescription.clientCreatedAt)
                         : prescription.createdAt
                         ? formatTimestampFromSystem(prescription.createdAt)
-                        : "N/A"}
+                        : "N/A"}>
+                        {prescription.clientCreatedAt
+                          ? formatTimestampFromSystem(prescription.clientCreatedAt)
+                          : prescription.createdAt
+                          ? formatTimestampFromSystem(prescription.createdAt)
+                          : "N/A"}
+                      </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
-                      {prescription.clientUpdatedAt
+                      <div className="truncate" title={prescription.clientUpdatedAt
                         ? formatTimestampFromSystem(prescription.clientUpdatedAt)
                         : prescription.updatedAt
                         ? formatTimestampFromSystem(prescription.updatedAt)
-                        : "N/A"}
+                        : "N/A"}>
+                        {prescription.clientUpdatedAt
+                          ? formatTimestampFromSystem(prescription.clientUpdatedAt)
+                          : prescription.updatedAt
+                          ? formatTimestampFromSystem(prescription.updatedAt)
+                          : "N/A"}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-1 min-w-0 max-w-full">
                       {editingStatusId === prescription.id ? (
@@ -6032,79 +6114,78 @@ export default function PrescriptionsPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 w-40 justify-center">
+                  <div className="flex items-center justify-center gap-0.5 px-1">
                     {user?.role !== "patient" && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-8 w-8 p-0"
+                        className="h-6 w-6 p-0 flex-shrink-0"
                         onClick={() => handleSavePrescription(prescription.id)}
                         title="Save prescription as PDF"
                       >
-                        <Save className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                        <Save className="h-3.5 w-3.5 text-yellow-600 dark:text-yellow-400" />
                       </Button>
                     )}
                     {user?.role !== "patient" && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-8 w-8 p-0"
+                        className="h-6 w-6 p-0 flex-shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           handlePrintPrescription(prescription.id || prescription.prescriptionNumber);
                         }}
                         title="Print"
                       >
-                        <Printer className="h-4 w-4" />
+                        <Printer className="h-3.5 w-3.5" />
                       </Button>
                     )}
                     {prescription.savedPdfPath && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-8 w-8 p-0"
+                        className="h-6 w-6 p-0 flex-shrink-0"
                         onClick={() => handleOpenPrescriptionPdf(prescription)}
                         title="Open saved prescription PDF"
                       >
-                        <FileText className="h-4 w-4 text-red-600" />
+                        <FileText className="h-3.5 w-3.5 text-red-600" />
                       </Button>
                     )}
                   </div>
                   {user?.role !== 'patient' && (
-                    <div className="flex items-center gap-1 w-32 justify-center">
+                    <div className="flex items-center justify-center gap-0.5 px-1">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-8 w-8 p-0"
+                        className="h-6 w-6 p-0 flex-shrink-0"
                         onClick={() => {
                           setSelectedPrescription(prescription);
                           setShowESignDialog(true);
                         }}
                         title="E-Sign"
                       >
-                        <PenTool className="h-4 w-4" />
+                        <PenTool className="h-3.5 w-3.5" />
                       </Button>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => handleSendToPharmacy(prescription.id)}
-                          title="Share/Send to Pharmacy"
-                        >
-                          <Share2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={async () => {
-                            setSelectedPrescriptionForShareLog(prescription);
-                            // Fetch share logs for this prescription
-                            try {
-                              const response = await apiRequest(
-                                "GET",
-                                `/api/prescriptions/${prescription.id}/share-logs`
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                        onClick={() => handleSendToPharmacy(prescription.id)}
+                        title="Share/Send to Pharmacy"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                        onClick={async () => {
+                          setSelectedPrescriptionForShareLog(prescription);
+                          // Fetch share logs for this prescription
+                          try {
+                            const response = await apiRequest(
+                              "GET",
+                              `/api/prescriptions/${prescription.id}/share-logs`
                               );
                               if (response.ok) {
                                 const data = await response.json();
@@ -6120,20 +6201,19 @@ export default function PrescriptionsPage() {
                           }}
                           title="View Share History"
                         >
-                          <History className="h-4 w-4" />
+                          <History className="h-3.5 w-3.5" />
                         </Button>
-                      </div>
                     </div>
                   )}
-                  <div className="flex items-center gap-1 w-48 justify-center">
+                  <div className="flex items-center justify-center gap-0.5 px-1">
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 w-8 p-0"
+                      className="h-6 w-6 p-0 flex-shrink-0"
                       onClick={() => handleViewPrescription(prescription)}
                       title="View"
                     >
-                      <Eye className="h-4 w-4" />
+                      <Eye className="h-3.5 w-3.5" />
                     </Button>
                     {user?.role !== "patient" &&
                       prescription.status === "active" &&
@@ -6141,22 +6221,22 @@ export default function PrescriptionsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0"
+                          className="h-6 w-6 p-0 flex-shrink-0"
                           onClick={() => handleEditPrescription(prescription)}
                           title="Edit"
                         >
-                          <Edit className="h-4 w-4" />
+                          <Edit className="h-3.5 w-3.5" />
                         </Button>
                       )}
                     {user?.role !== "patient" && canDelete("prescriptions") && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="h-6 w-6 p-0 flex-shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                         onClick={() => handleDeletePrescription(prescription.id)}
                         title="Delete"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     )}
                   </div>
@@ -6167,7 +6247,9 @@ export default function PrescriptionsPage() {
         </TabsContent>
 
       </Tabs>
-    </div>
+        </div>
+        </TooltipProvider>
+      </div>
 
       {/* Create/Edit Prescription Dialog - Moved outside Tabs for accessibility from both tabs */}
       <Dialog
@@ -6182,9 +6264,9 @@ export default function PrescriptionsPage() {
           }
         }}
       >
-                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
                     <DialogHeader>
-                      <DialogTitle>
+                      <DialogTitle className="dark:text-gray-100">
                         {selectedPrescription
                           ? "Edit Prescription"
                           : "Create New Prescription"}
@@ -7280,9 +7362,9 @@ export default function PrescriptionsPage() {
 
     {/* View Prescription Details Dialog */}
       <Dialog open={showViewDetails} onOpenChange={setShowViewDetails}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
-            <DialogTitle>Prescription Details</DialogTitle>
+            <DialogTitle className="dark:text-gray-100">Prescription Details</DialogTitle>
           </DialogHeader>
           {selectedPrescription && (
             <div className="space-y-6">
@@ -7553,9 +7635,9 @@ export default function PrescriptionsPage() {
 
     {/* View Prescription Details Dialog */}
       <Dialog open={showViewDetails} onOpenChange={setShowViewDetails}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
-            <DialogTitle>Prescription Details</DialogTitle>
+            <DialogTitle className="dark:text-gray-100">Prescription Details</DialogTitle>
           </DialogHeader>
           {selectedPrescription && (
             <div className="space-y-6">
@@ -7826,7 +7908,7 @@ export default function PrescriptionsPage() {
 
     {/* Send to Pharmacy Dialog */}
       <Dialog open={showPharmacyDialog} onOpenChange={setShowPharmacyDialog}>
-        <DialogContent className="max-w-md max-h-[650px] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[650px] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle>Send Prescription to Halo Health Pharmacy</DialogTitle>
           </DialogHeader>
@@ -7864,9 +7946,9 @@ export default function PrescriptionsPage() {
 
     {/* View Prescription Details Dialog */}
       <Dialog open={showViewDetails} onOpenChange={setShowViewDetails}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
-            <DialogTitle>Prescription Details</DialogTitle>
+            <DialogTitle className="dark:text-gray-100">Prescription Details</DialogTitle>
           </DialogHeader>
           {selectedPrescription && (
             <div className="space-y-6">
@@ -8246,7 +8328,7 @@ export default function PrescriptionsPage() {
 
       {/* Send to Pharmacy Dialog */}
       <Dialog open={showPharmacyDialog} onOpenChange={setShowPharmacyDialog}>
-        <DialogContent className="max-w-md max-h-[650px] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[650px] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle>Send Prescription to Halo Health Pharmacy</DialogTitle>
           </DialogHeader>
@@ -8412,36 +8494,36 @@ export default function PrescriptionsPage() {
         <DialogContent className="max-w-md">
           <div className="flex flex-col items-center text-center py-6">
             {/* Green checkmark icon */}
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
-              <Check className="h-12 w-12 text-green-600" />
+            <div className="w-20 h-20 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-6">
+              <Check className="h-12 w-12 text-green-600 dark:text-green-400" />
             </div>
 
             {/* Title */}
-            <h2 className="text-2xl font-bold text-green-600 mb-2">
+            <h2 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">
               Prescription Successful!
             </h2>
 
             {/* Subtitle */}
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
               Your prescription has been processed successfully
             </p>
 
             {/* Prescription Details */}
             {createdPrescriptionDetails && (
-              <div className="w-full bg-gray-50 rounded-lg p-4 mb-6 space-y-3">
+              <div className="w-full bg-gray-50 dark:bg-slate-800 rounded-lg p-4 mb-6 space-y-3">
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Prescription ID:</span>
-                  <span className="text-gray-900">{createdPrescriptionDetails.id || 'N/A'}</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-medium">Prescription ID:</span>
+                  <span className="text-gray-900 dark:text-gray-100">{createdPrescriptionDetails.id || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Patient Name:</span>
-                  <span className="text-gray-900">
+                  <span className="text-gray-600 dark:text-gray-300 font-medium">Patient Name:</span>
+                  <span className="text-gray-900 dark:text-gray-100">
                     {createdPrescriptionDetails.patientName || 'Unknown Patient'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Created At:</span>
-                  <span className="text-gray-900">
+                  <span className="text-gray-600 dark:text-gray-300 font-medium">Created At:</span>
+                  <span className="text-gray-900 dark:text-gray-100">
                     {createdPrescriptionDetails.clientCreatedAt
                       ? formatTimestampFromSystem(createdPrescriptionDetails.clientCreatedAt)
                       : createdPrescriptionDetails.createdAt
@@ -8450,8 +8532,8 @@ export default function PrescriptionsPage() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Status:</span>
-                  <span className="text-gray-900 capitalize">{createdPrescriptionDetails.status || 'N/A'}</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-medium">Status:</span>
+                  <span className="text-gray-900 dark:text-gray-100 capitalize">{createdPrescriptionDetails.status || 'N/A'}</span>
                 </div>
               </div>
             )}
@@ -8473,20 +8555,20 @@ export default function PrescriptionsPage() {
 
       {/* Prescription PDF Save Success Modal */}
       <Dialog open={showSavePdfSuccessModal} onOpenChange={setShowSavePdfSuccessModal}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700">
           <div className="flex flex-col items-center text-center py-6">
             {/* Green checkmark icon */}
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
-              <Check className="h-12 w-12 text-green-600" />
+            <div className="w-20 h-20 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-6">
+              <Check className="h-12 w-12 text-green-600 dark:text-green-400" />
             </div>
 
             {/* Title */}
-            <h2 className="text-2xl font-bold text-green-600 mb-2">
+            <h2 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">
               Prescription PDF saved successfully
             </h2>
 
             {/* Subtitle */}
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
               The prescription PDF has been generated and saved. You can now view or download it using the PDF icon.
             </p>
 
@@ -8503,7 +8585,7 @@ export default function PrescriptionsPage() {
 
       {/* Prescription Send Success Dialog */}
       <Dialog open={showPharmacySuccessDialog} onOpenChange={setShowPharmacySuccessDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle className="sr-only">Prescription Sent Successfully</DialogTitle>
           </DialogHeader>
@@ -8531,7 +8613,7 @@ export default function PrescriptionsPage() {
 
       {/* Generic Success Modal with Green Tick */}
       <Dialog open={showGenericSuccessModal} onOpenChange={setShowGenericSuccessModal}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700">
           <div className="flex flex-col items-center text-center py-6">
             {/* Green checkmark icon */}
             <div className="w-20 h-20 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mb-6">
@@ -8565,7 +8647,7 @@ export default function PrescriptionsPage() {
 
       {/* Signature Details Dialog */}
       <Dialog open={showSignatureDetailsDialog} onOpenChange={setShowSignatureDetailsDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle>Signature Details</DialogTitle>
           </DialogHeader>
@@ -8640,7 +8722,7 @@ export default function PrescriptionsPage() {
         }
         setShowSignatureRequiredDialog(open);
       }}>
-        <DialogContent className="max-w-md" onInteractOutside={(e) => {
+        <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700" onInteractOutside={(e) => {
           // Prevent closing on outside click
           e.preventDefault();
         }}>
@@ -9249,7 +9331,7 @@ export default function PrescriptionsPage() {
 
       {/* Drug Interactions Modal for Patient Role */}
       <Dialog open={showDrugInteractionsModal} onOpenChange={setShowDrugInteractionsModal}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-red-600" />
@@ -9369,7 +9451,7 @@ export default function PrescriptionsPage() {
 
       {/* Share Log Dialog */}
       <Dialog open={showShareLogDialog} onOpenChange={setShowShareLogDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle>Prescription Share History</DialogTitle>
           </DialogHeader>

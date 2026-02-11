@@ -46,6 +46,7 @@ export function AiInsightsPanel() {
   const [, setLocation] = useLocation();
   const [selectedInsight, setSelectedInsight] = useState<AiInsight | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [dismissingInsightId, setDismissingInsightId] = useState<number | null>(null);
   
   // Fetch patient data when selected insight has a patient ID
   const { data: patientData, isLoading: isPatientLoading } = useQuery<Patient>({
@@ -119,6 +120,10 @@ export function AiInsightsPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/ai-insights"] });
+      setDismissingInsightId(null);
+    },
+    onError: () => {
+      setDismissingInsightId(null);
     }
   });
 
@@ -191,7 +196,7 @@ export function AiInsightsPanel() {
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 h-[600px]">
+      <CardContent className="space-y-4 h-[600px] overflow-y-auto">
         {insights.slice(0, 2).map((insight) => {
           const IconComponent = insightIcons[insight.type] || Lightbulb;
           const colors = insightColors[insight.type] || insightColors.risk_alert;
@@ -199,20 +204,24 @@ export function AiInsightsPanel() {
           return (
             <div
               key={insight.id}
-              className={`ai-insight-card ${colors.bg} ${colors.border}`}
+              className={`ai-insight-card ${colors.bg} ${colors.border} overflow-hidden`}
             >
               <div className={`w-8 h-8 ${colors.icon} bg-white rounded-full flex items-center justify-center flex-shrink-0`}>
                 <IconComponent className="w-4 h-4" />
               </div>
-              <div className="flex-1">
-                <h4 className="font-medium text-gray-900">{insight.title}</h4>
-                <p className="text-sm text-gray-600 mt-1">{insight.description}</p>
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <h4 className="font-medium text-gray-900 truncate" title={insight.title}>
+                  {insight.title}
+                </h4>
+                <p className="text-sm text-gray-600 mt-1 line-clamp-2 break-words" title={insight.description}>
+                  {insight.description}
+                </p>
                 {insight.confidence && (
                   <p className="text-xs text-gray-500 mt-1">
                     Confidence: {Math.round(insight.confidence * 100)}%
                   </p>
                 )}
-                <div className="flex items-center space-x-4 mt-3">
+                <div className="flex items-center space-x-4 mt-3 flex-wrap gap-2">
                   <Button
                     variant="link"
                     size="sm"
@@ -229,14 +238,17 @@ export function AiInsightsPanel() {
                     variant="link"
                     size="sm"
                     className="p-0 h-auto text-gray-500 hover:text-gray-600"
-                    onClick={() => updateInsightMutation.mutate({ 
-                      id: insight.id, 
-                      status: 'dismissed' 
-                    })}
-                    disabled={updateInsightMutation.isPending}
+                    onClick={() => {
+                      setDismissingInsightId(insight.id);
+                      updateInsightMutation.mutate({ 
+                        id: insight.id, 
+                        status: 'dismissed' 
+                      });
+                    }}
+                    disabled={dismissingInsightId === insight.id}
                     data-testid="button-dismiss"
                   >
-                    {updateInsightMutation.isPending ? 'Dismissing...' : 'Dismiss'}
+                    {dismissingInsightId === insight.id ? 'Dismissing...' : 'Dismiss'}
                   </Button>
                 </div>
               </div>
@@ -392,16 +404,17 @@ export function AiInsightsPanel() {
                   <Button 
                     variant="destructive"
                     onClick={() => {
+                      setDismissingInsightId(selectedInsight.id);
                       updateInsightMutation.mutate({ 
                         id: selectedInsight.id, 
                         status: 'dismissed' 
                       });
                       setIsDialogOpen(false);
                     }}
-                    disabled={updateInsightMutation.isPending}
+                    disabled={dismissingInsightId === selectedInsight.id}
                     data-testid="button-dismiss-from-dialog"
                   >
-                    {updateInsightMutation.isPending ? 'Dismissing...' : 'Dismiss Insight'}
+                    {dismissingInsightId === selectedInsight.id ? 'Dismissing...' : 'Dismiss Insight'}
                   </Button>
                 </div>
               </div>

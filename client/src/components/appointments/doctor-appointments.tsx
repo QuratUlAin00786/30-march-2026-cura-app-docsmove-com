@@ -852,15 +852,15 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
               <Card 
                 key={day.toString()} 
                 className={`h-96 cursor-pointer transition-colors ${
-                  isSelected ? 'border-blue-500 bg-blue-50' : ''
-                } ${isCurrentDay ? 'border-yellow-400 bg-yellow-50' : ''}`}
+                  isSelected ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400' : ''
+                } ${isCurrentDay ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-600' : ''}`}
                 onClick={() => setSelectedDate(day)}
               >
                 <CardHeader className="pb-1 pt-2 px-2">
-                  <CardTitle className="text-xs font-medium">
+                  <CardTitle className="text-xs font-medium text-gray-900 dark:text-gray-100">
                     {format(day, "EEE")}
                     <br />
-                    <span className={`text-base ${isCurrentDay ? 'text-yellow-800 font-bold' : ''}`}>
+                    <span className={`text-base ${isCurrentDay ? 'text-yellow-800 dark:text-yellow-200 font-bold' : 'text-gray-900 dark:text-gray-100'}`}>
                       {format(day, "d")}
                     </span>
                   </CardTitle>
@@ -869,17 +869,17 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                   {dayAppointments.slice(0, 4).map((appointment: any) => (
                     <div
                       key={appointment.id}
-                      className="p-2 rounded text-xs border-l-4"
+                      className="p-2 rounded text-xs border-l-4 bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700"
                       style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}
                       data-testid={`appointment-${appointment.id}`}
                     >
-                      <div className="font-medium truncate">{formatTime(appointment.scheduledAt)}</div>
-                      <div className="text-gray-600 truncate">{getPatientName(appointment.patientId)}</div>
-                      <div className="text-gray-500 truncate">{appointment.type}</div>
+                      <div className="font-medium truncate text-gray-900 dark:text-gray-100">{formatTime(appointment.scheduledAt)}</div>
+                      <div className="text-gray-600 dark:text-gray-300 truncate">{getPatientName(appointment.patientId)}</div>
+                      <div className="text-gray-500 dark:text-gray-400 truncate">{appointment.type}</div>
                     </div>
                   ))}
                   {dayAppointments.length > 4 && (
-                    <div className="text-xs text-gray-500 text-center py-1">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-1">
                       +{dayAppointments.length - 4} more
                     </div>
                   )}
@@ -894,7 +894,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
       {viewMode === "day" && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between">
+            <CardTitle className="flex items-center justify-between text-gray-900 dark:text-gray-100">
               <div className="flex items-center space-x-4">
                 <Button
                   variant="outline"
@@ -903,7 +903,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                 >
                   Previous Day
                 </Button>
-                <span className="text-lg font-bold">
+                <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
                   {format(selectedDate, "EEEE, MMMM d, yyyy")}
                 </span>
                 <Button
@@ -927,37 +927,37 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                 
                 const appointmentTypeBadge = getAppointmentTypeBadgeInfo(appointment);
                 return (
-                  <Card key={appointment.id} className="border-l-4" style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}>
+                  <Card key={appointment.id} className="border-l-4 bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700" style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}>
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-4">
                           <div>
                             <div className="flex items-center space-x-2">
-                              <Clock className="h-4 w-4 text-gray-400" />
-                              <span className="font-medium">{formatTime(appointment.scheduledAt)}</span>
+                              <Clock className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                              <span className="font-medium text-gray-900 dark:text-gray-100">{formatTime(appointment.scheduledAt)}</span>
                             </div>
                             <div className="flex items-center space-x-2 mt-1">
-                              <User className="h-4 w-4 text-gray-400" />
-                            <span className="text-sm font-medium">{getPatientName(appointment.patientId)}</span>
+                              <User className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{getPatientName(appointment.patientId)}</span>
                             </div>
                           {serviceLabel && (
-                            <p className="text-xs text-gray-500 mt-1">Service: {serviceLabel}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Service: {serviceLabel}</p>
                           )}
                             {patient && (
                               <>
                                 {patient.patientId && (
                                   <div className="flex items-center space-x-2 mt-1">
-                                    <span className="text-xs text-gray-500">Patient ID: {patient.patientId}</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">Patient ID: {patient.patientId}</span>
                                   </div>
                                 )}
                                 {patient.contactNumber && (
                                   <div className="flex items-center space-x-2 mt-1">
-                                    <span className="text-xs text-gray-500">Contact: {patient.contactNumber}</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">Contact: {patient.contactNumber}</span>
                                   </div>
                                 )}
                                 {patient.email && (
                                   <div className="flex items-center space-x-2 mt-1">
-                                    <span className="text-xs text-gray-500">Email: {patient.email}</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">Email: {patient.email}</span>
                                   </div>
                                 )}
                               </>
@@ -965,7 +965,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-medium">{appointment.title}</div>
+                          <div className="font-medium text-gray-900 dark:text-gray-100">{appointment.title}</div>
                           <div className="flex flex-wrap justify-end gap-2 mt-2">
                             <Badge 
                               style={{ backgroundColor: statusColors[appointment.status as keyof typeof statusColors], color: "white" }}
@@ -983,15 +983,15 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                         </div>
                       </div>
                       {appointment.description && (
-                        <p className="text-sm text-gray-600 mt-2">{appointment.description}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">{appointment.description}</p>
                       )}
                     </CardContent>
                   </Card>
                 );
               })}
               {getAppointmentsForDate(selectedDate).length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
                   <p>No appointments scheduled for this day</p>
                 </div>
               )}

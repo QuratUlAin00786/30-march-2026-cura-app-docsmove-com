@@ -320,10 +320,10 @@ export interface IStorage {
   sendMessage(messageData: any, organizationId: number): Promise<any>;
   deleteConversation(conversationId: string, organizationId: number): Promise<boolean>;
   toggleConversationFavorite(conversationId: string, userId: number, organizationId: number): Promise<boolean>;
-  getMessageCampaigns(organizationId: number): Promise<any[]>;
+  getMessageCampaigns(organizationId: number, currentUserId?: number, userRole?: string): Promise<any[]>;
   createMessageCampaign(campaignData: any, organizationId: number): Promise<any>;
   updateMessageCampaign(campaignId: number, campaignData: any, organizationId: number): Promise<any>;
-  getMessageTemplates(organizationId: number): Promise<any[]>;
+  getMessageTemplates(organizationId: number, currentUserId?: number, userRole?: string): Promise<any[]>;
   createMessageTemplate(templateData: any, organizationId: number): Promise<any>;
   updateMessageTemplate(templateId: number, templateData: any, organizationId: number): Promise<any>;
   deleteMessageTemplate(templateId: number, organizationId: number): Promise<boolean>;
@@ -3151,9 +3151,28 @@ export class DatabaseStorage implements IStorage {
 
     console.log(`💬 GET CONVERSATIONS - Database: ${storedConversations.length} found for org ${organizationId}`);
     console.log(`💬 CONVERSATION IDS:`, storedConversations.map(c => c.id));
+    console.log(`💬 CURRENT USER ID: ${currentUserId}`);
+    
+    // CRITICAL: Filter conversations to only include those where current user is a participant
+    // This ensures role-based visibility - users only see conversations they are part of
+    let filteredConversations = storedConversations;
+    if (currentUserId !== undefined && currentUserId !== null) {
+      filteredConversations = storedConversations.filter(conv => {
+        const participants = conv.participants as Array<{id: string | number; name: string; role: string}>;
+        const isParticipant = participants.some(p => {
+          const pId = typeof p.id === 'string' ? parseInt(p.id) : p.id;
+          return pId === currentUserId;
+        });
+        return isParticipant;
+      });
+      console.log(`💬 FILTERED CONVERSATIONS - ${filteredConversations.length} conversations where user ${currentUserId} is a participant (out of ${storedConversations.length} total)`);
+    } else {
+      console.log(`⚠️ WARNING - No currentUserId provided, returning all conversations (security risk!)`);
+    }
 
     // Update participant names with actual user data and calculate real unread count
-    const conversationsWithNames = await Promise.all(storedConversations.map(async (conv) => {
+    // Only process conversations where current user is a participant (already filtered above)
+    const conversationsWithNames = await Promise.all(filteredConversations.map(async (conv) => {
       const updatedParticipants = await Promise.all(conv.participants.map(async (participant: any) => {
         // Try to get user data by ID first
         if (typeof participant.id === 'number') {
@@ -3917,35 +3936,196 @@ export class DatabaseStorage implements IStorage {
     console.log(`✅ Fixed Zahra conversations - consolidated ${duplicateConversations.length} duplicates into ${keepConversation.id}`);
   }
 
+  /**
+   * Find or create a conversation between two users
+   * This ensures only one conversation exists between any two users
+   */
+  async findOrCreateConversation(senderId: number | string, recipientId: number | string, organizationId: number): Promise<string> {
+    console.log(`🔍 Finding or creating conversation between sender ${senderId} and recipient ${recipientId}`);
+    
+    // Normalize IDs to numbers for comparison
+    const senderIdNum = typeof senderId === 'string' ? parseInt(senderId) : senderId;
+    const recipientIdNum = typeof recipientId === 'string' ? parseInt(recipientId) : recipientId;
+    
+    // Get all conversations for this organization
+    const allConversations = await db.select()
+      .from(conversationsTable)
+      .where(eq(conversationsTable.organizationId, organizationId));
+    
+    // Look for existing conversation that includes both participants
+    for (const conv of allConversations) {
+      const participants = conv.participants as Array<{id: string | number; name: string; role: string}>;
+      
+      // Check if both sender and recipient are in this conversation
+      const hasSender = participants.some(p => {
+        const pId = typeof p.id === 'string' ? parseInt(p.id) : p.id;
+        return pId === senderIdNum || p.id == senderId || p.id == senderIdNum;
+      });
+      
+      const hasRecipient = participants.some(p => {
+        const pId = typeof p.id === 'string' ? parseInt(p.id) : p.id;
+        return pId === recipientIdNum || p.id == recipientId || p.id == recipientIdNum ||
+               (typeof recipientId === 'string' && (p.name === recipientId || p.id === recipientId));
+      });
+      
+      if (hasSender && hasRecipient) {
+        console.log(`✅ Found existing conversation: ${conv.id} between sender ${senderId} and recipient ${recipientId}`);
+        return conv.id;
+      }
+    }
+    
+    // No existing conversation found, create a new one
+    const newConversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`🆕 Creating new conversation: ${newConversationId} between sender ${senderId} and recipient ${recipientId}`);
+    
+    // Get sender and recipient details
+    let senderName = 'Unknown Sender';
+    let senderRole = 'user';
+    const sender = await this.getUser(senderIdNum, organizationId);
+    if (sender) {
+      senderName = sender.firstName && sender.lastName 
+        ? `${sender.firstName} ${sender.lastName}`
+        : sender.firstName || sender.email || senderName;
+      senderRole = sender.role || senderRole;
+    }
+    
+    let recipientName = 'Unknown Recipient';
+    let recipientRole = 'patient';
+    
+    // Try to get recipient from users table first
+    if (typeof recipientId === 'number' || !isNaN(parseInt(String(recipientId)))) {
+      const recipientUser = await this.getUser(recipientIdNum, organizationId);
+      if (recipientUser) {
+        recipientName = recipientUser.firstName && recipientUser.lastName 
+          ? `${recipientUser.firstName} ${recipientUser.lastName}`
+          : recipientUser.firstName || recipientUser.email || recipientName;
+        recipientRole = recipientUser.role || recipientRole;
+      } else {
+        // Try patients table
+        const recipientPatient = await this.getPatient(recipientIdNum, organizationId);
+        if (recipientPatient) {
+          recipientName = `${recipientPatient.firstName} ${recipientPatient.lastName}`;
+          recipientRole = 'patient';
+        }
+      }
+    } else if (typeof recipientId === 'string') {
+      // RecipientId is a name, try to find matching user
+      const allUsers = await this.getUsersByOrganization(organizationId);
+      const matchedUser = allUsers.find(user => {
+        const fullName = `${user.firstName} ${user.lastName}`.trim();
+        return fullName === recipientId || 
+               user.firstName === recipientId ||
+               user.email === recipientId;
+      });
+      
+      if (matchedUser) {
+        recipientName = `${matchedUser.firstName} ${matchedUser.lastName}`;
+        recipientRole = matchedUser.role || recipientRole;
+      } else {
+        // Try patients table
+        const allPatients = await this.getPatientsByOrganization(organizationId);
+        const matchedPatient = allPatients.find(patient => {
+          const fullName = `${patient.firstName} ${patient.lastName}`.trim();
+          return fullName === recipientId || 
+                 patient.firstName === recipientId;
+        });
+        
+        if (matchedPatient) {
+          recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
+          recipientRole = 'patient';
+        }
+      }
+    }
+    
+    // Create the conversation
+    const conversationInsertData = {
+      id: newConversationId,
+      organizationId: organizationId,
+      participants: [
+        { id: senderIdNum, name: senderName, role: senderRole },
+        { id: recipientIdNum || recipientId, name: recipientName, role: recipientRole }
+      ],
+      lastMessage: null,
+      unreadCount: 0,
+      isPatientConversation: recipientRole === 'patient'
+    };
+    
+    await db.insert(conversationsTable).values([conversationInsertData]);
+    console.log(`✅ Created new conversation: ${newConversationId}`);
+    
+    return newConversationId;
+  }
+
   async sendMessage(messageData: any, organizationId: number): Promise<any> {
     const messageId = `msg_${Date.now()}`;
     const timestamp = new Date();
     
-    // Use existing conversation ID if provided, otherwise create new one
-    console.log(`🔍 DEBUG - messageData.conversationId: ${messageData.conversationId}`);
-    let conversationId = messageData.conversationId;
+    // CRITICAL: Only create conversations for internal messages (Message type)
+    // External messages (SMS/Email/WhatsApp/Voice) should NOT create conversations
+    const isInternalMessage = messageData.type === 'internal' && (!messageData.messageType || messageData.messageType === 'message');
+    const shouldCreateConversation = isInternalMessage;
     
-    // If conversationId is provided, verify it exists in the database
-    if (conversationId) {
-      const existingConv = await db.select()
-        .from(conversationsTable)
-        .where(and(
-          eq(conversationsTable.id, conversationId),
-          eq(conversationsTable.organizationId, organizationId)
-        ))
-        .limit(1);
-      
-      if (existingConv.length === 0) {
-        console.log(`⚠️ WARNING - Provided conversationId ${conversationId} does not exist, creating new one`);
-        conversationId = `conv_${Date.now()}`;
+    let conversationId: string | null = null;
+    
+    if (shouldCreateConversation) {
+      // Only find or create conversation for internal messages
+      if (messageData.conversationId) {
+        // Verify the provided conversationId exists and is valid
+        const existingConv = await db.select()
+          .from(conversationsTable)
+          .where(and(
+            eq(conversationsTable.id, messageData.conversationId),
+            eq(conversationsTable.organizationId, organizationId)
+          ))
+          .limit(1);
+        
+        if (existingConv.length > 0) {
+          // Verify both participants are in this conversation
+          const participants = existingConv[0].participants as Array<{id: string | number; name: string; role: string}>;
+          const senderIdNum = typeof messageData.senderId === 'string' ? parseInt(messageData.senderId) : messageData.senderId;
+          const hasSender = participants.some(p => {
+            const pId = typeof p.id === 'string' ? parseInt(p.id) : p.id;
+            return pId === senderIdNum || p.id == messageData.senderId;
+          });
+          
+          if (hasSender) {
+            console.log(`✅ Using provided conversation: ${messageData.conversationId}`);
+            conversationId = messageData.conversationId;
+          } else {
+            // Conversation exists but sender is not a participant, find or create correct one
+            console.log(`⚠️ WARNING - Sender not in provided conversation, finding or creating correct one`);
+            conversationId = await this.findOrCreateConversation(
+              messageData.senderId,
+              messageData.recipientId,
+              organizationId
+            );
+          }
+        } else {
+          // ConversationId provided but doesn't exist, find or create correct one
+          console.log(`⚠️ WARNING - Provided conversationId ${messageData.conversationId} does not exist, finding or creating correct one`);
+          conversationId = await this.findOrCreateConversation(
+            messageData.senderId,
+            messageData.recipientId,
+            organizationId
+          );
+        }
       } else {
-        console.log(`✅ Using existing conversation: ${conversationId}`);
+        // No conversationId provided, find or create one
+        console.log(`🔍 No conversationId provided, finding or creating conversation for internal message`);
+        conversationId = await this.findOrCreateConversation(
+          messageData.senderId,
+          messageData.recipientId,
+          organizationId
+        );
       }
     } else {
-      conversationId = `conv_${Date.now()}`;
+      // External message (SMS/Email/WhatsApp/Voice) - don't create conversation
+      // Use a temporary conversationId for database consistency, but don't create conversation record
+      conversationId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`📧 External message (${messageData.messageType}) - using temporary conversationId, no conversation created`);
     }
     
-    console.log(`🔍 DEBUG - Final conversationId: ${conversationId}`);
+    console.log(`🔍 DEBUG - Final conversationId: ${conversationId}, shouldCreateConversation: ${shouldCreateConversation}`);
     
     // Get sender's full name if available
     let senderDisplayName = messageData.senderName || 'Unknown Sender';
@@ -3996,132 +4176,15 @@ export class DatabaseStorage implements IStorage {
       ));
     console.log(`🔍 POST-INSERT VERIFICATION: ${verifyMessages.length} messages exist for conversation ${conversationId}`);
 
-    // Check if conversation exists, if not create it
-    let existingConversation = await db.select()
-      .from(conversationsTable)
-      .where(eq(conversationsTable.id, conversationId))
-      .limit(1);
-
-    // If no conversation found by ID, check if there's already a conversation between these participants
-    if (existingConversation.length === 0 && messageData.recipientId) {
-      console.log(`🔍 Searching for existing conversation between sender ${messageData.senderId} and recipient ${messageData.recipientId}`);
-      
-      const allConversations = await db.select()
-        .from(conversationsTable)
-        .where(eq(conversationsTable.organizationId, organizationId));
-      
-      // Look for conversation that includes both participants
-      for (const conv of allConversations) {
-        const participants = conv.participants as Array<{id: string | number; name: string; role: string}>;
-        const hasSender = participants.some(p => p.id == messageData.senderId);
-        
-        // For recipient matching, check both ID and name since recipientId could be a name
-        const hasRecipient = participants.some(p => 
-          p.id == messageData.recipientId || 
-          p.name == messageData.recipientId ||
-          (typeof p.id === 'string' && p.id === messageData.recipientId)
-        );
-        
-        if (hasSender && hasRecipient) {
-          console.log(`🔍 Found existing conversation: ${conv.id} between these participants`);
-          // Update the conversationId to use the existing one
-          const oldConversationId = conversationId;
-          conversationId = conv.id;
-          
-          // Update the message's conversationId
-          await db.update(messages)
-            .set({ conversationId: conv.id })
-            .where(eq(messages.id, messageId));
-          
-          console.log(`🔍 Updated message ${messageId} from conversation ${oldConversationId} to ${conv.id}`);
-          existingConversation = [conv];
-          break;
-        }
-      }
-    }
-
-    if (existingConversation.length === 0) {
-      // Create new conversation - properly resolve recipient name
-      let recipientDisplayName = messageData.recipientId;
-      let recipientRole = 'patient';
-      
-      // Try to resolve recipient name from user data
-      if (typeof messageData.recipientId === 'number') {
-        const recipientUser = await this.getUser(messageData.recipientId, organizationId);
-        if (recipientUser) {
-          recipientDisplayName = recipientUser.firstName && recipientUser.lastName 
-            ? `${recipientUser.firstName} ${recipientUser.lastName}`
-            : recipientUser.firstName || recipientUser.email || messageData.recipientId;
-          recipientRole = recipientUser.role || 'patient';
-        }
-      } else if (typeof messageData.recipientId === 'string') {
-        // If recipientId is a string (name), try to find matching user first, then patient
-        const allUsers = await this.getUsersByOrganization(organizationId);
-        const matchedUser = allUsers.find(user => {
-          const fullName = `${user.firstName} ${user.lastName}`.trim();
-          return fullName === messageData.recipientId || 
-                 user.firstName === messageData.recipientId ||
-                 user.email === messageData.recipientId;
-        });
-        
-        if (matchedUser) {
-          recipientDisplayName = `${matchedUser.firstName} ${matchedUser.lastName}`;
-          recipientRole = matchedUser.role || 'patient';
-          messageData.recipientId = matchedUser.id; // Update to use actual user ID
-        } else {
-          // Try to find in patients table
-          const allPatients = await this.getPatientsByOrganization(organizationId);
-          const matchedPatient = allPatients.find(patient => {
-            const fullName = `${patient.firstName} ${patient.lastName}`.trim();
-            return fullName === messageData.recipientId || 
-                   fullName.replace(/\s+/g, ' ') === messageData.recipientId ||
-                   patient.firstName === messageData.recipientId;
-          });
-          
-          if (matchedPatient) {
-            recipientDisplayName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
-            recipientRole = 'patient';
-            messageData.recipientId = matchedPatient.id; // Update to use actual patient ID
-          } else {
-            // Keep the original name if no match found
-            recipientDisplayName = messageData.recipientId;
-          }
-        }
-      }
-      
-      const conversationInsertData = {
-        id: conversationId,
-        organizationId: organizationId,
-        participants: [
-          { id: parseInt(messageData.senderId.toString()), name: senderDisplayName, role: messageData.senderRole },
-          { id: messageData.recipientId, name: recipientDisplayName, role: recipientRole }
-        ],
-        lastMessage: {
-          id: messageId,
-          senderId: parseInt(messageData.senderId.toString()),
-          subject: messageData.subject,
-          content: messageData.content,
-          timestamp: timestamp.toISOString(),
-          priority: messageData.priority || 'normal'
-        },
-        unreadCount: 0, // Will be calculated accurately in getConversations
-        isPatientConversation: true
-      };
-      
-      console.log(`🔍 DEBUG - Conversation insert data:`, JSON.stringify(conversationInsertData, null, 2));
-      
-      const [createdConversation] = await db.insert(conversationsTable).values([conversationInsertData]).returning();
-      console.log(`✅ CONVERSATION INSERTED:`, createdConversation?.id);
-      
-      console.log(`✅ Created new conversation: ${conversationId} and message: ${messageId}`);
-    } else {
-      // Update existing conversation (unreadCount will be calculated in getConversations)
+    // Only update conversation if it's an internal message (shouldCreateConversation is true)
+    if (shouldCreateConversation && conversationId && !conversationId.startsWith('temp_')) {
+      // Update conversation's lastMessage (conversation should already exist from findOrCreateConversation)
       await db.update(conversationsTable)
         .set({
           lastMessage: {
             id: messageId,
             senderId: parseInt(messageData.senderId.toString()),
-            subject: messageData.subject,
+            subject: messageData.subject || '',
             content: messageData.content,
             timestamp: timestamp.toISOString(),
             priority: messageData.priority || 'normal'
@@ -4130,7 +4193,9 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(conversationsTable.id, conversationId));
       
-      console.log(`✅ Updated existing conversation: ${conversationId} with message: ${messageId}`);
+      console.log(`✅ Updated conversation: ${conversationId} with message: ${messageId}`);
+    } else {
+      console.log(`📧 External message - conversation not updated (no conversation created)`);
     }
 
     return createdMessage;
@@ -4297,8 +4362,20 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getMessageCampaigns(organizationId: number): Promise<MessageCampaign[]> {
+  async getMessageCampaigns(organizationId: number, currentUserId?: number, userRole?: string): Promise<MessageCampaign[]> {
     try {
+      // CRITICAL: Role-based filtering
+      // Admin can see all campaigns, doctor/nurse can only see their own
+      let whereClause = sql`organization_id = ${organizationId}`;
+      
+      if (currentUserId !== undefined && currentUserId !== null && userRole !== 'admin') {
+        // For non-admin users, only show campaigns they created
+        whereClause = sql`organization_id = ${organizationId} AND created_by = ${currentUserId}`;
+        console.log(`📧 FILTERING CAMPAIGNS - User ${currentUserId} (${userRole}) can only see their own campaigns`);
+      } else if (userRole === 'admin') {
+        console.log(`📧 ADMIN ACCESS - Showing all campaigns for organization ${organizationId}`);
+      }
+      
       // Use raw SQL with recipients column (migration adds it if missing)
       const result = await db.execute(sql`
         SELECT id, organization_id as "organizationId", name, type, status, subject, content, template,
@@ -4308,13 +4385,33 @@ export class DatabaseStorage implements IStorage {
                scheduled_at as "scheduledAt", sent_at as "sentAt",
                created_by as "createdBy", created_at as "createdAt", updated_at as "updatedAt"
         FROM message_campaigns 
-        WHERE organization_id = ${organizationId}
+        WHERE ${whereClause}
         ORDER BY created_at DESC
       `);
       
       const campaigns = result.rows as MessageCampaign[];
-      console.log(`📧 Fetched ${campaigns.length} campaigns for organization ${organizationId}`);
-      return campaigns;
+      
+      // Enrich campaigns with creator information for admin users
+      const enrichedCampaigns = await Promise.all(campaigns.map(async (campaign: any) => {
+        if (campaign.createdBy) {
+          try {
+            const creator = await this.getUser(campaign.createdBy, organizationId);
+            if (creator) {
+              campaign.createdByName = creator.firstName && creator.lastName 
+                ? `${creator.firstName} ${creator.lastName}` 
+                : creator.firstName || creator.email || 'Unknown';
+              campaign.createdByRole = creator.role || 'user';
+            }
+          } catch (error) {
+            console.warn(`Could not fetch creator info for campaign ${campaign.id}:`, error);
+            campaign.createdByName = 'Unknown';
+          }
+        }
+        return campaign;
+      }));
+      
+      console.log(`📧 Fetched ${enrichedCampaigns.length} campaigns for organization ${organizationId} (user: ${currentUserId}, role: ${userRole})`);
+      return enrichedCampaigns;
     } catch (error) {
       console.error("❌ Error fetching campaigns:", error);
       return [];
@@ -4904,15 +5001,51 @@ export class DatabaseStorage implements IStorage {
     return newLabResult;
   }
 
-  async getMessageTemplates(organizationId: number): Promise<MessageTemplate[]> {
+  async getMessageTemplates(organizationId: number, currentUserId?: number, userRole?: string): Promise<MessageTemplate[]> {
     try {
+      // CRITICAL: Role-based filtering
+      // Admin can see all templates, doctor/nurse can only see their own
+      let whereCondition;
+      
+      if (currentUserId !== undefined && currentUserId !== null && userRole !== 'admin') {
+        // For non-admin users, only show templates they created
+        whereCondition = and(
+          eq(messageTemplates.organizationId, organizationId),
+          eq(messageTemplates.createdBy, currentUserId)
+        );
+        console.log(`📝 FILTERING TEMPLATES - User ${currentUserId} (${userRole}) can only see their own templates`);
+      } else {
+        // Admin sees all templates
+        whereCondition = eq(messageTemplates.organizationId, organizationId);
+        console.log(`📝 ADMIN ACCESS - Showing all templates for organization ${organizationId}`);
+      }
+      
       const templates = await db.select()
         .from(messageTemplates)
-        .where(eq(messageTemplates.organizationId, organizationId))
+        .where(whereCondition)
         .orderBy(desc(messageTemplates.createdAt));
       
-      console.log(`📝 Fetched ${templates.length} templates for organization ${organizationId}`);
-      return templates;
+      // Enrich templates with creator information for admin users
+      const enrichedTemplates = await Promise.all(templates.map(async (template: any) => {
+        if (template.createdBy) {
+          try {
+            const creator = await this.getUser(template.createdBy, organizationId);
+            if (creator) {
+              template.createdByName = creator.firstName && creator.lastName 
+                ? `${creator.firstName} ${creator.lastName}` 
+                : creator.firstName || creator.email || 'Unknown';
+              template.createdByRole = creator.role || 'user';
+            }
+          } catch (error) {
+            console.warn(`Could not fetch creator info for template ${template.id}:`, error);
+            template.createdByName = 'Unknown';
+          }
+        }
+        return template;
+      }));
+      
+      console.log(`📝 Fetched ${enrichedTemplates.length} templates for organization ${organizationId} (user: ${currentUserId}, role: ${userRole})`);
+      return enrichedTemplates;
     } catch (error) {
       console.error("❌ Error fetching templates:", error);
       return [];
@@ -5028,14 +5161,32 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getSmsMessages(organizationId: number): Promise<any[]> {
+  async getSmsMessages(organizationId: number, currentUserId?: number, userRole?: string): Promise<any[]> {
     try {
-      const smsMessagesList = await db.select()
-        .from(messages)
-        .where(and(
+      // CRITICAL: Role-based filtering
+      // Admin can see all SMS messages, doctor/nurse can only see their own
+      let whereCondition;
+      
+      if (currentUserId !== undefined && currentUserId !== null && userRole !== 'admin') {
+        // For non-admin users, only show SMS messages they sent
+        whereCondition = and(
+          eq(messages.organizationId, organizationId),
+          eq(messages.messageType, 'sms'),
+          eq(messages.senderId, currentUserId)
+        );
+        console.log(`📱 FILTERING SMS - User ${currentUserId} (${userRole}) can only see their own SMS messages`);
+      } else {
+        // Admin sees all SMS messages
+        whereCondition = and(
           eq(messages.organizationId, organizationId),
           eq(messages.messageType, 'sms')
-        ))
+        );
+        console.log(`📱 ADMIN ACCESS - Showing all SMS messages for organization ${organizationId}`);
+      }
+      
+      const smsMessagesList = await db.select()
+        .from(messages)
+        .where(whereCondition)
         .orderBy(desc(messages.createdAt));
       
       // Enrich messages with patient names by looking up each recipient
@@ -5067,6 +5218,7 @@ export class DatabaseStorage implements IStorage {
         };
       }));
       
+      console.log(`📱 Fetched ${enrichedMessages.length} SMS messages for organization ${organizationId} (user: ${currentUserId}, role: ${userRole})`);
       return enrichedMessages;
     } catch (error) {
       console.error("Error fetching SMS messages:", error);

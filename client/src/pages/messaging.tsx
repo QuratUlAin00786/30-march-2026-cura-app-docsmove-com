@@ -223,22 +223,38 @@ interface Campaign {
   template: string;
 }
 
-// Format timestamp showing local time when message was sent (no timezone conversion)
+// Format timestamp for display - converts server's UTC timestamp to local time
+// Server stores timestamps in UTC (ISO format) to avoid timezone confusion
+// This function displays the UTC timestamp in the user's local timezone
+// JavaScript Date automatically converts UTC to local time when using getHours(), getDate(), etc.
 const formatTimestampNoConversion = (timestamp: string): string => {
   if (!timestamp) return "";
   
   try {
-    // Parse the timestamp - JavaScript Date automatically handles timezone
-    const date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return "";
+    // Parse the timestamp - handle both ISO strings and other formats
+    let date: Date;
+    
+    // If timestamp is already a Date object, use it directly
+    if (timestamp instanceof Date) {
+      date = timestamp;
+    } else {
+      // Parse the timestamp string - JavaScript Date automatically handles timezone conversion
+      date = new Date(timestamp);
+    }
+    
+    // Validate the date
+    if (Number.isNaN(date.getTime())) {
+      console.warn('Invalid timestamp:', timestamp);
+      return "";
+    }
     
     // Use local time methods to display the time as it appears in user's timezone
-    // These methods automatically convert UTC to local timezone
+    // These methods (getHours(), getDate(), etc.) automatically convert UTC to local timezone
     const month = date.getMonth();
     const day = date.getDate();
     const year = date.getFullYear();
-    const hour = date.getHours();
-    const minute = date.getMinutes();
+    const hour = date.getHours(); // Already in local timezone
+    const minute = date.getMinutes(); // Already in local timezone
     
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthName = monthNames[month];
@@ -247,19 +263,33 @@ const formatTimestampNoConversion = (timestamp: string): string => {
     const period = hour >= 12 ? 'pm' : 'am';
     const displayHour = hour % 12 || 12;
     
-    // Check if date is today
+    // Always show date with time for clarity
+    // Format: "Jan 15, 2024 2:30 pm" or "Today 2:30 pm" for today's messages
     const today = new Date();
     const isToday = date.getDate() === today.getDate() && 
                     date.getMonth() === today.getMonth() && 
                     date.getFullYear() === today.getFullYear();
     
-    // If today, show just time. Otherwise show date and time
-    if (isToday) {
-      return `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
-    }
+    // Check if date is yesterday
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = date.getDate() === yesterday.getDate() && 
+                        date.getMonth() === yesterday.getMonth() && 
+                        date.getFullYear() === yesterday.getFullYear();
     
-    return `${monthName} ${day} ${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
-  } catch {
+    // Format time
+    const timeStr = `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
+    
+    if (isToday) {
+      return `Today ${timeStr}`;
+    } else if (isYesterday) {
+      return `Yesterday ${timeStr}`;
+    } else {
+      // Show full date: "Jan 15, 2024 2:30 pm"
+      return `${monthName} ${day}, ${year} ${timeStr}`;
+    }
+  } catch (error) {
+    console.error('Error formatting timestamp:', error, 'timestamp:', timestamp);
     return "";
   }
 };
@@ -267,11 +297,13 @@ const formatTimestampNoConversion = (timestamp: string): string => {
 export default function MessagingPage() {
   const { canCreate, canEdit, canDelete } = useRolePermissions();
   
-  // Helper function to show success dialog
+  // Helper function to show toast notification (auto-dismiss)
   const showSuccess = (title: string, message: string) => {
-    setSuccessTitle(title);
-    setSuccessMessage(message);
-    setShowSuccessDialog(true);
+    toast({
+      title: title,
+      description: message,
+      duration: 3000, // Auto-dismiss after 3 seconds
+    });
   };
   const [, setLocation] = useLocation();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -291,6 +323,7 @@ export default function MessagingPage() {
   const [newMessageContent, setNewMessageContent] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [messageFilter, setMessageFilter] = useState("all");
+  const [activeMessagingTab, setActiveMessagingTab] = useState("conversations");
   const [showCreateCampaign, setShowCreateCampaign] = useState(false);
   const [campaignNamePopoverOpen, setCampaignNamePopoverOpen] = useState(false);
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
@@ -411,7 +444,7 @@ export default function MessagingPage() {
     priority: "normal" as "low" | "normal" | "high" | "urgent",
     type: "internal" as "internal" | "patient" | "broadcast",
     phoneNumber: "",
-    messageType: "sms" as "sms" | "whatsapp" | "email" | "voice"
+    messageType: "message" as "message" | "sms" | "whatsapp" | "email" | "voice"
   });
   const [videoCall, setVideoCall] = useState({
     participant: "",
@@ -459,6 +492,13 @@ export default function MessagingPage() {
     }
   });
 
+  // Update currentUser when user data is available
+  useEffect(() => {
+    if (user) {
+      setCurrentUser(user);
+    }
+  }, [user]);
+
   // Check if user is a doctor role
   const isDoctor = isDoctorLike(user?.role);
 
@@ -483,7 +523,7 @@ export default function MessagingPage() {
       const data = await response.json();
       return data;
     },
-    enabled: user?.role === 'admin' || user?.role === 'patient' // Fetch when user is admin or patient
+    enabled: user?.role === 'admin' || user?.role === 'patient' || user?.role === 'doctor' || user?.role === 'nurse' // Fetch when user is admin, patient, doctor, or nurse
   });
 
   // Fetch roles from the roles table filtered by organization_id
@@ -765,42 +805,93 @@ export default function MessagingPage() {
       console.log('🔥 DIRECT FETCH COMPLETED:', data.length, 'messages');
       console.log('🔥 MESSAGE IDS:', data.map((m: any) => m.id));
       
-      // Normalize timestamp field - server may return createdAt or timestamp
-      // Ensure all messages have a consistent timestamp field and preserve any
-      // existing timestamps for messages already in state to avoid visible jumps
-      setMessages(prev => {
+      // Normalize timestamp field - server returns timestamps in UTC (ISO format)
+      // Server stores timestamps in UTC to avoid timezone confusion, work globally,
+      // prevent daylight saving issues, and keep database time consistent
+      // We preserve the UTC timestamp and let JavaScript Date convert to local time for display
+        setMessages(prev => {
         const prevById = new Map(prev.map(m => [m.id, m]));
 
         const normalized = (data as any[]).map((m: any) => {
           const existing = prevById.get(m.id);
+          // Server returns timestamp in UTC (ISO format) - prioritize timestamp over createdAt
           const serverTs = m.timestamp || m.createdAt || null;
+          
+          // CRITICAL: Always use server's UTC timestamp for received messages
+          // This ensures consistency and proper timezone handling
+          let finalTimestamp: string;
+          
+          if (existing) {
+            // Message already exists - preserve its timestamp to avoid flicker
+            // For sent messages, this might be an optimistic timestamp (local time)
+            // For received messages, this should be the server's UTC timestamp
+            finalTimestamp = existing.timestamp;
+          } else if (serverTs) {
+            // New message from server - ALWAYS use server's UTC timestamp
+            // Server stores timestamps in UTC, we preserve them as-is
+            // JavaScript Date will automatically convert UTC to local time when displayed
+            const serverDate = new Date(serverTs);
+            if (!isNaN(serverDate.getTime())) {
+              // Use server's UTC timestamp (ISO format) - will be converted to local time for display
+              finalTimestamp = serverTs;
+              console.log('📨 Using server UTC timestamp:', serverTs, '-> Local time:', serverDate.toLocaleString());
+            } else {
+              // Invalid server timestamp - this should not happen, but fallback to current UTC time
+              console.warn('⚠️ Invalid server timestamp:', serverTs, 'using current UTC time');
+              finalTimestamp = new Date().toISOString(); // Current time in UTC
+            }
+          } else {
+            // No server timestamp - this should not happen for real messages
+            // Fallback to current UTC time (not local time)
+            console.warn('⚠️ No server timestamp found for message:', m.id, 'using current UTC time');
+            finalTimestamp = new Date().toISOString(); // Current time in UTC
+          }
+          
           return {
             ...m,
-            // Prefer existing timestamp (e.g. optimistic timestamp) if present,
-            // fall back to server timestamp, then to \"now\".
-            timestamp: existing?.timestamp || serverTs || new Date().toISOString(),
+            timestamp: finalTimestamp, // UTC timestamp from server
           };
         });
 
         if (preserveExisting) {
           // Merge: keep any messages that are not in the latest payload (defensive),
-          // then sort by timestamp.
+          // then sort by timestamp (ascending - oldest first, newest last).
           const incomingIds = new Set(normalized.map(m => m.id));
           const leftovers = prev.filter(m => !incomingIds.has(m.id));
           const merged = [...leftovers, ...normalized].sort((a, b) => {
             const timeA = new Date(a.timestamp).getTime();
             const timeB = new Date(b.timestamp).getTime();
+            // Ascending order: oldest messages first, newest messages last (at bottom)
             return timeA - timeB;
           });
+          
+          // Log for debugging
+          console.log('📋 MERGED MESSAGES - Count:', merged.length);
+          if (merged.length > 0) {
+            console.log('📋 First message timestamp:', merged[0].timestamp, 'Content:', merged[0].content);
+            console.log('📋 Last message timestamp:', merged[merged.length - 1].timestamp, 'Content:', merged[merged.length - 1].content);
+          }
+          
           return merged;
         }
 
-        // Non-preserving path: just use normalized server data, sorted by timestamp.
-        return normalized.sort((a, b) => {
+        // Non-preserving path: just use normalized server data, sorted by timestamp (ascending - oldest first, newest last).
+        // Ensure proper chronological order: messages with earlier timestamps come first
+        const sorted = normalized.sort((a, b) => {
           const timeA = new Date(a.timestamp).getTime();
           const timeB = new Date(b.timestamp).getTime();
+          // Ascending order: oldest messages first, newest messages last (at bottom)
           return timeA - timeB;
         });
+        
+        // Log for debugging
+        console.log('📋 MESSAGES SORTED - Count:', sorted.length);
+        if (sorted.length > 0) {
+          console.log('📋 First message timestamp:', sorted[0].timestamp, 'Content:', sorted[0].content?.substring(0, 20));
+          console.log('📋 Last message timestamp:', sorted[sorted.length - 1].timestamp, 'Content:', sorted[sorted.length - 1].content?.substring(0, 20));
+        }
+        
+        return sorted;
       });
       
       // Refresh conversations list to update unread counts after marking messages as read
@@ -837,14 +928,14 @@ export default function MessagingPage() {
 
   // Auto-scroll to bottom when messages change or new message is sent
   useEffect(() => {
-    if (messagesEndRef.current) {
-      // Small delay to ensure DOM is updated
+    if (messagesEndRef.current && messages.length > 0) {
+      // Small delay to ensure DOM is updated and messages are rendered in correct order
       const timer = setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }, 150);
+      }, 200);
       return () => clearTimeout(timer);
     }
-  }, [messages, selectedConversation]);
+  }, [messages.length, selectedConversation]); // Trigger on message count change or conversation change
 
   const { data: campaigns = [], isLoading: campaignsLoading, error: campaignsError } = useQuery({
     queryKey: ['/api/messaging/campaigns'],
@@ -919,7 +1010,7 @@ export default function MessagingPage() {
   });
 
   const [smsRefreshLoading, setSmsRefreshLoading] = useState(false);
-  
+
   const { data: smsMessages = [], isLoading: smsLoading, refetch: refetchSmsMessages } = useQuery({
     queryKey: ['/api/messaging/sms-messages'],
     queryFn: async () => {
@@ -947,7 +1038,7 @@ export default function MessagingPage() {
       priority: "normal",
       type: "internal",
       phoneNumber: "",
-      messageType: "email"
+      messageType: "message"
     });
     setValidationErrors({});
     setSelectedRecipientRole("");
@@ -980,7 +1071,15 @@ export default function MessagingPage() {
       return response.json();
     },
     onSuccess: (data, variables) => {
-      console.log('🎯 MESSAGE SENT SUCCESS - updating conversations cache immediately');
+      console.log('🎯 MESSAGE SENT SUCCESS - messageType:', variables.createConversation ? 'message' : variables.messageType);
+      
+      // CRITICAL: Only create/update conversations if "Message" type was selected
+      // Other types (SMS/Email/WhatsApp/Voice) should NOT create conversations
+      const isMessageType = variables.createConversation === true;
+      
+      if (isMessageType) {
+        // Message type: create/update conversation and open it
+        console.log('💬 MESSAGE TYPE - creating/updating conversation');
       
       // Force immediate UI update for conversations list
       const currentConversations = queryClient.getQueryData(['/api/messaging/conversations']) as any[] || [];
@@ -993,10 +1092,6 @@ export default function MessagingPage() {
         console.log('🔄 NEW CONVERSATION DETECTED - forcing complete refresh');
         queryClient.removeQueries({ queryKey: ['/api/messaging/conversations'] });
         queryClient.invalidateQueries({ queryKey: ['/api/messaging/conversations'] });
-        // Force immediate refetch
-        // setTimeout(() => {
-        //   refetchConversations();
-        // }, 100);
       } else {
         // Existing conversation - update the last message info immediately
         const updatedConversations = currentConversations.map(conv => {
@@ -1019,23 +1114,41 @@ export default function MessagingPage() {
         
         // Update the cache immediately
         queryClient.setQueryData(['/api/messaging/conversations'], updatedConversations);
-        
-        // Force invalidation and refetch to ensure consistency
         queryClient.invalidateQueries({ queryKey: ['/api/messaging/conversations'] });
-        // setTimeout(() => {
-        //   console.log('🔄 EXISTING CONVERSATION UPDATED - forcing refetch');
-        //   refetchConversations();
-        // }, 50);
-      }
+        }
+        
+        // Close dialog and reset form
+        setShowNewMessage(false);
+        resetNewMessage();
+        
+        // Open the conversation in Conversations tab
+        if (data.conversationId) {
+          console.log('💬 Opening conversation:', data.conversationId);
+          
+          // Switch to Conversations tab
+          setActiveMessagingTab("conversations");
+          
+          // Wait a moment for conversations to refresh, then select and open the conversation
+          setTimeout(() => {
+            setSelectedConversation(data.conversationId);
+            // Fetch messages for the conversation
+            if (fetchMessages) {
+              fetchMessages(data.conversationId, false);
+            }
+          }, 300);
+        }
+        
+        showSuccess("Message Sent", "Your message has been sent and conversation started successfully.");
+      } else {
+        // Non-message types: don't create/update conversations, just send the message
+        console.log('📧 NON-MESSAGE TYPE - no conversation created');
       
       // Invalidate SMS messages query if an SMS was sent
       if (variables.messageType === 'sms') {
         queryClient.invalidateQueries({ queryKey: ['/api/messaging/sms-messages'] });
       }
       
-      // Only handle new message dialog closing here
-      if (!variables.conversationId) {
-        // It's a new message, so close the dialog and reset the form
+        // Close dialog and reset form
         setShowNewMessage(false);
         resetNewMessage();
         
@@ -1057,9 +1170,12 @@ export default function MessagingPage() {
           description = `Voice call with text-to-speech message initiated successfully to ${variables.phoneNumber || 'recipient'}.`;
         }
         
-        showSuccess(title, description);
+        toast({
+          title: title,
+          description: description,
+          duration: 3000,
+        });
       }
-      // Conversation message success is handled in handleSendConversationMessage
     },
     onError: (error: any) => {
       console.error('Message sending failed:', error);
@@ -2600,11 +2716,63 @@ export default function MessagingPage() {
           const messageConversationId = data.data?.conversationId || data.message?.conversationId || data.conversationId;
           console.log('🔍 Extracted conversationId for WebSocket:', messageConversationId);
           
+          // If we have the message data directly, add it with server's UTC timestamp
+          // Server stores timestamps in UTC - we preserve them and convert to local time for display
+          if (data.message && selectedConversation && messageConversationId === selectedConversation) {
+            const receivedMessage = data.message;
+            
+            // CRITICAL: Always use server's UTC timestamp (not current local time)
+            // Server stores timestamps in UTC to avoid timezone confusion
+            const serverUtcTimestamp = receivedMessage.timestamp || receivedMessage.createdAt;
+            
+            if (!serverUtcTimestamp) {
+              console.warn('⚠️ WebSocket message missing UTC timestamp:', receivedMessage);
+            }
+            
+            // Add the message with server's UTC timestamp
+            setMessages(prev => {
+              // Check if message already exists
+              const exists = prev.some(m => m.id === receivedMessage.id);
+              if (exists) {
+                return prev; // Don't add duplicate
+              }
+              
+              // Add new message - ALWAYS use server's UTC timestamp
+              // If server timestamp is missing, use current UTC time (not local time)
+              const newMessage = {
+                ...receivedMessage,
+                timestamp: serverUtcTimestamp || new Date().toISOString() // UTC timestamp from server
+              };
+              
+              // Validate the timestamp
+              const timestampDate = new Date(newMessage.timestamp);
+              if (isNaN(timestampDate.getTime())) {
+                console.error('❌ Invalid UTC timestamp in WebSocket message:', newMessage.timestamp);
+                // Fallback to current UTC time
+                newMessage.timestamp = new Date().toISOString();
+              }
+              
+              // Sort by timestamp
+              const updated = [...prev, newMessage].sort((a, b) => {
+                const timeA = new Date(a.timestamp).getTime();
+                const timeB = new Date(b.timestamp).getTime();
+                return timeA - timeB;
+              });
+              
+              console.log('📨 Added real-time message with server UTC timestamp:', newMessage.timestamp, 
+                          '-> Local time:', timestampDate.toLocaleString());
+              return updated;
+            });
+          }
+          
           // Force immediate refresh of current conversation if it matches
           // Use preserveExisting=true to avoid flicker and preserve optimistic timestamps
           if (selectedConversation && messageConversationId === selectedConversation && fetchMessages) {
             console.log('🔥 IMMEDIATE REFETCH - Current conversation matches WebSocket message');
-            fetchMessages(selectedConversation, true); // preserveExisting=true to maintain timestamps
+            // Small delay to ensure message was added above
+            setTimeout(() => {
+              fetchMessages(selectedConversation, true); // preserveExisting=true to maintain timestamps
+            }, 100);
           }
           
           // Always refresh conversations to update sidebar
@@ -2678,6 +2846,11 @@ export default function MessagingPage() {
       errors.content = "Please enter message content";
     }
 
+    // Validate message type is selected
+    if (!newMessage.messageType || newMessage.messageType.trim() === '') {
+      errors.recipientName = "Please select a message type";
+    }
+
     // Validate phone number for SMS/WhatsApp/Voice
     if ((newMessage.messageType === 'sms' || newMessage.messageType === 'whatsapp' || newMessage.messageType === 'voice') && !newMessage.phoneNumber.trim()) {
       errors.phoneNumber = "Please enter a phone number";
@@ -2691,10 +2864,13 @@ export default function MessagingPage() {
       return;
     }
 
-    // Determine the message type - if sending via SMS/WhatsApp/Email/Voice externally, type should be "patient" not "internal"
-    const effectiveType = (newMessage.messageType === 'email' || newMessage.messageType === 'sms' || newMessage.messageType === 'whatsapp' || newMessage.messageType === 'voice') 
-      ? 'patient' 
-      : newMessage.type;
+    // CRITICAL: Determine behavior based on message type
+    // If "Message" is selected: create conversation (internal message)
+    // If other types are selected: send only that type without creating conversation
+    const isMessageType = newMessage.messageType === 'message';
+    const effectiveType = isMessageType 
+      ? 'internal'  // Message type creates internal conversation
+      : 'patient';  // Other types (SMS/Email/WhatsApp/Voice) are external, no conversation
 
     sendMessageMutation.mutate({
       recipientId: newMessage.recipient,
@@ -2703,7 +2879,8 @@ export default function MessagingPage() {
       priority: newMessage.priority,
       type: effectiveType,
       phoneNumber: newMessage.phoneNumber,
-      messageType: newMessage.messageType
+      messageType: isMessageType ? undefined : newMessage.messageType, // Only send messageType for non-message types
+      createConversation: isMessageType // Flag to indicate if conversation should be created
     });
   };
 
@@ -2726,9 +2903,36 @@ export default function MessagingPage() {
       return;
     }
 
+    if (!currentUser) {
+      toast({
+        title: "Error",
+        description: "User not authenticated.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     const messageContent = newMessageContent.trim();
-    console.log('Sending message to conversation:', selectedConversation);
-    console.log('Message content:', messageContent);
+    console.log('📨 Sending message to conversation:', selectedConversation);
+    console.log('📨 Message content:', messageContent);
+    
+    // Find the other participant to ensure we have the correct recipientId
+    const currentConversation = conversations.find((c: Conversation) => c.id === selectedConversation);
+    const otherParticipant = currentConversation?.participants?.find((p: any) => 
+      p.id !== currentUser.id && String(p.id) !== String(currentUser.id)
+    );
+    
+    if (!otherParticipant) {
+      toast({
+        title: "Error",
+        description: "Could not find recipient in conversation.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    console.log('📨 Other participant:', otherParticipant);
+    console.log('📨 Current user ID:', currentUser.id);
     
     // Store a temporary message ID for optimistic update
     const tempMessageId = `temp-${Date.now()}`;
@@ -2755,12 +2959,6 @@ export default function MessagingPage() {
     setNewMessageContent(""); // Clear input immediately
     
     try {
-      // Find the other participant (patient) in the conversation
-      const currentConversation = conversations.find((c: Conversation) => c.id === selectedConversation);
-      const otherParticipant = currentConversation?.participants?.find((p: any) => 
-        p.id !== currentUser?.id
-      );
-      
       // For patient conversations, get phone from stored messages or participant
       const phoneNumber = messages?.[0]?.phoneNumber || otherParticipant?.phone;
       const messageType = 'sms'; // Default to SMS for external messages
@@ -2775,8 +2973,11 @@ export default function MessagingPage() {
       console.log('  Message type:', messageType);
       console.log('  Is external:', isExternalMessage);
       
+      // CRITICAL: Ensure recipientId is included in message data
+      // This ensures the backend can find or create the correct conversation
       const messageData = {
         conversationId: selectedConversation,
+        recipientId: otherParticipant.id, // Include recipientId for proper conversation lookup
         content: messageContent,
         priority: 'normal',
         type: isExternalMessage ? 'patient' : 'internal',
@@ -2815,7 +3016,7 @@ export default function MessagingPage() {
         
         // Always preserve the optimistic timestamp to avoid timezone conversion issues
         // The optimistic timestamp was created when user sent the message and displayed correctly
-        // Server timestamp might be in UTC and cause timezone conversion that changes the display
+          // Server timestamp might be in UTC and cause timezone conversion that changes the display
         const optimisticTimestamp = optimisticMsg?.timestamp;
         
         // Check for both timestamp and createdAt fields from server
@@ -3174,7 +3375,23 @@ export default function MessagingPage() {
     deleteConversationMutation.mutate(conversationId);
   };
 
+  // CRITICAL: Filter conversations to only show those where current user is a participant
+  // This ensures role-based visibility - users only see conversations they are part of
+  // Backend already filters, but this adds an extra security layer on the frontend
   const filteredConversations = (conversations || []).filter((conv: Conversation) => {
+    // Security check: Only show conversations where current user is a participant
+    if (currentUser && currentUser.id) {
+      const isParticipant = conv.participants.some(p => {
+        const pId = typeof p.id === 'string' ? parseInt(p.id) : p.id;
+        return pId === currentUser.id;
+      });
+      if (!isParticipant) {
+        console.log(`🚫 FILTERED OUT - User ${currentUser.id} is not a participant in conversation ${conv.id}`);
+        return false;
+      }
+    }
+    
+    // Apply message filters
     if (messageFilter === "unread" && conv.unreadCount === 0) return false;
     if (messageFilter === "patients" && !conv.isPatientConversation) return false;
     if (messageFilter === "staff" && conv.isPatientConversation) return false;
@@ -3584,30 +3801,34 @@ export default function MessagingPage() {
               </Button>
             </DialogTrigger>
             )}
-            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Compose New Message</DialogTitle>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader className="pb-3">
+                <DialogTitle className="text-xl font-semibold">Compose New Message</DialogTitle>
+                <DialogDescription className="text-sm text-gray-500 dark:text-gray-400">
+                  Send a message to start a conversation or communicate directly
+                </DialogDescription>
               </DialogHeader>
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {/* From/Sender Field */}
-                <div className="space-y-2">
-                  <Label htmlFor="message-sender">From</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="message-sender" className="text-sm font-medium">From</Label>
                   {isDoctor ? (
-                    <div className="h-10 px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-800 flex items-center text-sm">
+                    <div className="h-9 px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-800 flex items-center text-sm text-gray-700 dark:text-gray-300">
                       {formatRoleLabel(user?.role)} {user?.firstName} {user?.lastName}
                     </div>
                   ) : (
-                    <div className="h-10 px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-800 flex items-center text-sm">
+                    <div className="h-9 px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-800 flex items-center text-sm text-gray-700 dark:text-gray-300">
                       {user?.firstName} {user?.lastName}
                     </div>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  {(user?.role === 'admin' || user?.role === 'patient') ? (
+                {/* Role and Name Selection - Show for admin, patient, doctor, and nurse */}
+                <div className="grid grid-cols-2 gap-3">
+                  {(user?.role === 'admin' || user?.role === 'patient' || user?.role === 'doctor' || user?.role === 'nurse') ? (
                     <>
-                      <div className="space-y-2">
-                        <Label htmlFor="selectRole">Select Role *</Label>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="selectRole" className="text-sm font-medium">Select Role *</Label>
                         <Select 
                           value={selectedRecipientRole} 
                           onValueChange={(value) => {
@@ -3617,7 +3838,7 @@ export default function MessagingPage() {
                             setValidationErrors(prev => ({ ...prev, recipientRole: undefined }));
                           }}
                         >
-                          <SelectTrigger data-testid="select-recipient-role" className={validationErrors.recipientRole ? "border-red-500" : ""}>
+                          <SelectTrigger data-testid="select-recipient-role" className={`h-9 ${validationErrors.recipientRole ? "border-red-500" : ""}`}>
                             <SelectValue placeholder="Select a role..." />
                           </SelectTrigger>
                           <SelectContent>
@@ -3629,11 +3850,11 @@ export default function MessagingPage() {
                           </SelectContent>
                         </Select>
                         {validationErrors.recipientRole && (
-                          <p className="text-sm text-red-500">{validationErrors.recipientRole}</p>
+                          <p className="text-xs text-red-500 mt-1">{validationErrors.recipientRole}</p>
                         )}
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="selectName">Select Name *</Label>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="selectName" className="text-sm font-medium">Select Name *</Label>
                         <Select 
                           value={selectedRecipientUser} 
                           onValueChange={(value) => {
@@ -3655,7 +3876,7 @@ export default function MessagingPage() {
                           }}
                           disabled={!selectedRecipientRole}
                         >
-                          <SelectTrigger data-testid="select-recipient-name" className={validationErrors.recipientName ? "border-red-500" : ""}>
+                          <SelectTrigger data-testid="select-recipient-name" className={`h-9 ${validationErrors.recipientName ? "border-red-500" : ""}`}>
                             <SelectValue placeholder={selectedRecipientRole ? "Select a name..." : "Select role first..."} />
                           </SelectTrigger>
                           <SelectContent>
@@ -3667,20 +3888,20 @@ export default function MessagingPage() {
                               >
                                 <div className="flex flex-col">
                                   <span className="font-medium">{recipient.firstName} {recipient.lastName}</span>
-                                  <span className="text-sm text-gray-500">{recipient.email}</span>
+                                  <span className="text-xs text-gray-500">{recipient.email}</span>
                                 </div>
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                         {validationErrors.recipientName && (
-                          <p className="text-sm text-red-500">{validationErrors.recipientName}</p>
+                          <p className="text-xs text-red-500 mt-1">{validationErrors.recipientName}</p>
                         )}
                       </div>
                     </>
                   ) : (
-                    <div className="space-y-2">
-                      <Label htmlFor="messageRecipient">Recipient *</Label>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="messageRecipient" className="text-sm font-medium">Recipient *</Label>
                       <Select 
                         value={selectedMessagePatient} 
                         onValueChange={(value) => {
@@ -3696,7 +3917,7 @@ export default function MessagingPage() {
                           }
                         }}
                       >
-                        <SelectTrigger data-testid="select-patient-recipient" className={validationErrors.recipientName ? "border-red-500" : ""}>
+                        <SelectTrigger data-testid="select-patient-recipient" className={`h-9 ${validationErrors.recipientName ? "border-red-500" : ""}`}>
                           <SelectValue placeholder="Select a patient..." />
                         </SelectTrigger>
                         <SelectContent>
@@ -3708,22 +3929,22 @@ export default function MessagingPage() {
                             >
                               <div className="flex flex-col">
                                 <span className="font-medium">{patient.firstName} {patient.lastName}</span>
-                                <span className="text-sm text-gray-500">{patient.email} • {patient.patientId}</span>
+                                <span className="text-xs text-gray-500">{patient.email} • {patient.patientId}</span>
                               </div>
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       {validationErrors.recipientName && (
-                        <p className="text-sm text-red-500">{validationErrors.recipientName}</p>
+                        <p className="text-xs text-red-500 mt-1">{validationErrors.recipientName}</p>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="messageSubject">Subject *</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="messageSubject" className="text-sm font-medium">Subject *</Label>
                     <Input
                       id="messageSubject"
                       placeholder="Enter message subject"
@@ -3732,21 +3953,21 @@ export default function MessagingPage() {
                         setNewMessage(prev => ({ ...prev, subject: e.target.value }));
                         setValidationErrors(prev => ({ ...prev, subject: undefined }));
                       }}
-                      className={validationErrors.subject ? "border-red-500" : ""}
+                      className={`h-9 ${validationErrors.subject ? "border-red-500" : ""}`}
                     />
                     {validationErrors.subject && (
-                      <p className="text-sm text-red-500">{validationErrors.subject}</p>
+                      <p className="text-xs text-red-500 mt-1">{validationErrors.subject}</p>
                     )}
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="messagePriority">Priority</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="messagePriority" className="text-sm font-medium">Priority</Label>
                     <Select 
                       value={newMessage.priority} 
                       onValueChange={(value: "low" | "normal" | "high" | "urgent") => 
                         setNewMessage(prev => ({ ...prev, priority: value }))
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -3759,29 +3980,47 @@ export default function MessagingPage() {
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="messageType">Message Type</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="messageType" className="text-sm font-medium">Message Type *</Label>
                     <Select 
                       value={newMessage.messageType} 
-                      onValueChange={(value: "sms" | "email" | "whatsapp" | "voice") => 
-                        setNewMessage(prev => ({ ...prev, messageType: value }))
-                      }
+                      onValueChange={(value: "message" | "sms" | "email" | "whatsapp" | "voice") => {
+                        setNewMessage(prev => ({ ...prev, messageType: value }));
+                        // Clear phone number when switching away from phone-based types
+                        if (value === 'message' || value === 'email') {
+                          setNewMessage(prev => ({ ...prev, phoneNumber: "" }));
+                        }
+                      }}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select message type..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="email">Email</SelectItem>
-                        <SelectItem value="sms">SMS</SelectItem>
-                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                        <SelectItem value="voice">Phone Call</SelectItem>
+                        <SelectItem value="message">Message (Start Conversation)</SelectItem>
+                        <SelectItem value="email">Email Only</SelectItem>
+                        <SelectItem value="sms">SMS Only</SelectItem>
+                        <SelectItem value="whatsapp">WhatsApp Only</SelectItem>
+                        <SelectItem value="voice">Phone Call Only</SelectItem>
                       </SelectContent>
                     </Select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {newMessage.messageType === 'message' 
+                        ? "Creates a conversation in the Conversations tab"
+                        : newMessage.messageType === 'email'
+                        ? "Sends email only, no conversation created"
+                        : newMessage.messageType === 'sms'
+                        ? "Sends SMS only, no conversation created"
+                        : newMessage.messageType === 'whatsapp'
+                        ? "Sends WhatsApp only, no conversation created"
+                        : newMessage.messageType === 'voice'
+                        ? "Makes phone call only, no conversation created"
+                        : "Select a message type"}
+                    </p>
                   </div>
                   {(newMessage.messageType === 'sms' || newMessage.messageType === 'whatsapp' || newMessage.messageType === 'voice') && (
-                    <div className="space-y-2">
-                      <Label htmlFor="phoneNumber">Phone Number *</Label>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="phoneNumber" className="text-sm font-medium">Phone Number *</Label>
                       <Input 
                         id="phoneNumber"
                         placeholder="Enter phone number (e.g., +44 7123 456789)"
@@ -3790,46 +4029,48 @@ export default function MessagingPage() {
                           setNewMessage(prev => ({ ...prev, phoneNumber: e.target.value }));
                           setValidationErrors(prev => ({ ...prev, phoneNumber: undefined }));
                         }}
-                        className={validationErrors.phoneNumber ? "border-red-500" : ""}
+                        className={`h-9 ${validationErrors.phoneNumber ? "border-red-500" : ""}`}
                       />
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                         Sample: +44 7123 456789 (UK) or +1 555 123 4567 (US)
                       </p>
                       {validationErrors.phoneNumber && (
-                        <p className="text-sm text-red-500">{validationErrors.phoneNumber}</p>
+                        <p className="text-xs text-red-500 mt-1">{validationErrors.phoneNumber}</p>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="messageContent">Message Content *</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="messageContent" className="text-sm font-medium">Message Content *</Label>
                   <Textarea
                     id="messageContent"
                     placeholder="Enter your message content..."
-                    rows={8}
+                    rows={6}
                     value={newMessage.content}
                     onChange={(e) => {
                       setNewMessage(prev => ({ ...prev, content: e.target.value }));
                       setValidationErrors(prev => ({ ...prev, content: undefined }));
                     }}
-                    className={validationErrors.content ? "border-red-500" : ""}
+                    className={`resize-none ${validationErrors.content ? "border-red-500" : ""}`}
                   />
                   {validationErrors.content && (
-                    <p className="text-sm text-red-500">{validationErrors.content}</p>
+                    <p className="text-xs text-red-500 mt-1">{validationErrors.content}</p>
                   )}
                 </div>
 
-                <div className="flex justify-end gap-3">
+                <div className="flex justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                   <Button 
                     variant="outline" 
                     onClick={() => setShowNewMessage(false)}
+                    className="h-9"
                   >
                     Cancel
                   </Button>
                   <Button 
                     onClick={handleSendNewMessage}
                     disabled={sendMessageMutation.isPending}
+                    className="h-9 bg-blue-600 hover:bg-blue-700"
                   >
                     {sendMessageMutation.isPending ? "Sending..." : "Send Message"}
                   </Button>
@@ -3867,7 +4108,7 @@ export default function MessagingPage() {
 
       {/* Messaging Content */}
       <div className="flex-1 overflow-hidden h-[calc(100vh-180px)] p-[30px]">
-      <Tabs defaultValue="conversations" className="w-full h-full flex flex-col">
+      <Tabs value={activeMessagingTab} onValueChange={setActiveMessagingTab} className="w-full h-full flex flex-col">
         <TabsList className="w-full grid grid-cols-4 flex-shrink-0">
           <TabsTrigger value="conversations">Conversations</TabsTrigger>
           <TabsTrigger value="sms">SMS</TabsTrigger>
@@ -3881,19 +4122,19 @@ export default function MessagingPage() {
               <div className="p-4 border-b border-gray-200 dark:border-slate-600 flex-shrink-0">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">All Messages</h2>
-                  <Select value={messageFilter} onValueChange={setMessageFilter}>
+                <Select value={messageFilter} onValueChange={setMessageFilter}>
                     <SelectTrigger className="w-[140px] h-9">
                       <SelectValue />
                       <ChevronDown className="h-4 w-4 ml-2" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Messages</SelectItem>
-                      <SelectItem value="unread">Unread</SelectItem>
-                      <SelectItem value="patients">Patients</SelectItem>
-                      <SelectItem value="staff">Staff Only</SelectItem>
-                      <SelectItem value="starred">Starred</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Messages</SelectItem>
+                    <SelectItem value="unread">Unread</SelectItem>
+                    <SelectItem value="patients">Patients</SelectItem>
+                    <SelectItem value="staff">Staff Only</SelectItem>
+                    <SelectItem value="starred">Starred</SelectItem>
+                  </SelectContent>
+                </Select>
                 </div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 h-4 w-4" />
@@ -3923,62 +4164,59 @@ export default function MessagingPage() {
                               ? `User ${otherParticipant.id}`
                               : 'Unknown User';
                             const participantRole = otherParticipant?.role || 'user';
-                            const lastMessageDate = conversation.lastMessage?.timestamp 
-                              ? new Date(conversation.lastMessage.timestamp).toLocaleDateString('en-US', { 
-                                  month: 'numeric', 
-                                  day: 'numeric', 
-                                  year: 'numeric' 
-                                })
-                              : '';
+                            // Use the same timestamp formatting function for consistency
+                            const lastMessageTimestamp = conversation.lastMessage?.timestamp 
+                              ? formatTimestampNoConversion(conversation.lastMessage.timestamp)
+                              : null;
                             
                             return (
-                              <div
-                                key={conversation.id}
+                          <div
+                            key={conversation.id}
                                 className={`p-4 rounded-lg cursor-pointer transition-all duration-200 ${
-                                  selectedConversation === conversation.id
+                              selectedConversation === conversation.id
                                     ? 'border-2 border-blue-500 bg-blue-50/50 dark:bg-blue-900/20'
                                     : 'border border-green-200 dark:border-green-700 bg-white dark:bg-slate-700 hover:border-green-300 dark:hover:border-green-600 hover:shadow-sm'
-                                }`}
-                                onClick={() => {
-                                  console.log('🔥 CONVERSATION SELECTED:', conversation.id);
-                                  console.log('🔥 Setting selectedConversation to:', conversation.id);
-                                  setSelectedConversation(conversation.id);
-                                }}
-                              >
+                            }`}
+                            onClick={() => {
+                              console.log('🔥 CONVERSATION SELECTED:', conversation.id);
+                              console.log('🔥 Setting selectedConversation to:', conversation.id);
+                              setSelectedConversation(conversation.id);
+                            }}
+                          >
                                 <div className="flex items-start gap-3">
                                   {/* Avatar */}
-                                  <div className="relative flex-shrink-0">
+                              <div className="relative flex-shrink-0">
                                     <Avatar className="h-10 w-10">
                                       <AvatarFallback className="bg-green-500 text-white text-sm font-semibold">
                                         {String(participantName).charAt(0).toUpperCase()}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    {conversation.unreadCount > 0 && (
+                                  </AvatarFallback>
+                                </Avatar>
+                                {conversation.unreadCount > 0 && (
                                       <Badge variant="destructive" className="absolute -top-1 -right-1 text-xs min-w-[18px] h-5 flex items-center justify-center p-0.5">
-                                        {conversation.unreadCount}
-                                      </Badge>
-                                    )}
-                                  </div>
+                                    {conversation.unreadCount}
+                                  </Badge>
+                                )}
+                              </div>
                                   
                                   {/* Content */}
-                                  <div className="flex-1 min-w-0">
+                              <div className="flex-1 min-w-0">
                                     {/* Name and Delete Button */}
                                     <div className="flex items-start justify-between mb-1">
                                       <h4 className="font-semibold text-base text-gray-900 dark:text-gray-100 truncate">
                                         {participantName}
-                                      </h4>
+                                    </h4>
                                       <button
                                         className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-600 flex-shrink-0 ml-2 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                           if (window.confirm(`Delete conversation with ${participantName}? This action cannot be undone.`)) {
-                                            handleDeleteConversation(conversation.id);
-                                          }
-                                        }}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
+                                        handleDeleteConversation(conversation.id);
+                                      }
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
                                       </button>
-                                    </div>
+                                </div>
                                     
                                     {/* Role Badge and Date */}
                                     <div className="flex items-center gap-2 mb-2">
@@ -3988,20 +4226,20 @@ export default function MessagingPage() {
                                       >
                                         {participantRole}
                                       </Badge>
-                                      {lastMessageDate && (
+                                      {lastMessageTimestamp && (
                                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                                          {lastMessageDate}
+                                          {lastMessageTimestamp}
                                         </span>
                                       )}
                                     </div>
                                     
                                     {/* Last Message */}
                                     <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-1">
-                                      {conversation.lastMessage?.content || "No messages yet"}
-                                    </p>
-                                  </div>
-                                </div>
+                                  {conversation.lastMessage?.content || "No messages yet"}
+                                </p>
                               </div>
+                            </div>
+                          </div>
                             );
                           })}
                         </div>
@@ -4057,12 +4295,19 @@ export default function MessagingPage() {
                             return conv ? getOtherParticipant(conv)?.name : '';
                           })()}
                         </h3>
+                        <div className="flex items-center gap-2">
                         <p className="text-sm text-gray-600 dark:text-gray-300">
                           {(() => {
                             const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
                             return conv ? getOtherParticipant(conv)?.role : '';
                           })()}
                         </p>
+                          {/* Online/Offline Status */}
+                          <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                            Online
+                          </span>
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -4124,6 +4369,17 @@ export default function MessagingPage() {
                     </div>
                   </div>
 
+                  {/* Typing Indicator */}
+                  {(() => {
+                    // TODO: Implement real typing indicator based on WebSocket events
+                    const isTyping = false; // Placeholder
+                    return isTyping ? (
+                      <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400 italic">
+                        <span>Raja shams averoc is typing...</span>
+                      </div>
+                    ) : null;
+                  })()}
+
                   {/* Messages */}
                   <ScrollArea className="flex-1 overflow-y-auto">
                     <div ref={messagesContainerRef} className="space-y-4 p-4">
@@ -4158,9 +4414,9 @@ export default function MessagingPage() {
                               {!isSentByCurrentUser && (
                                 <Avatar className="h-8 w-8 flex-shrink-0">
                                   <AvatarFallback className="text-xs bg-gray-400 text-white">
-                                    {message.senderName?.charAt(0) || 'U'}
-                                  </AvatarFallback>
-                                </Avatar>
+                                  {message.senderName?.charAt(0) || 'U'}
+                                </AvatarFallback>
+                              </Avatar>
                               )}
                               
                               {/* Message Container */}
@@ -4170,9 +4426,9 @@ export default function MessagingPage() {
                                   <div className="flex items-center gap-2 mb-1 px-1">
                                     <span className="font-medium text-xs text-gray-600 dark:text-gray-400">{message.senderName}</span>
                                     <span className="text-xs text-gray-400 dark:text-gray-500">
-                                      {formatTimestampNoConversion(message.timestamp)}
-                                    </span>
-                                  </div>
+                                    {formatTimestampNoConversion(message.timestamp)}
+                                  </span>
+                                </div>
                                 )}
                                 
                                 {/* Message Bubble */}
@@ -4297,8 +4553,8 @@ export default function MessagingPage() {
                                 
                                 {/* Dropdown Menu - positioned relative to message bubble */}
                                 <div className={`mt-1 ${isSentByCurrentUser ? 'self-end' : 'self-start'}`}>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
                                       <Button 
                                         variant="ghost" 
                                         size="sm" 
@@ -4307,8 +4563,8 @@ export default function MessagingPage() {
                                         }`}
                                       >
                                         <MoreVertical className="h-3 w-3" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
+                                    </Button>
+                                  </DropdownMenuTrigger>
                                   <DropdownMenuContent align={isSentByCurrentUser ? "end" : "start"}>
                                     <DropdownMenuItem 
                                       onSelect={(e) => {
@@ -4416,7 +4672,11 @@ export default function MessagingPage() {
                                           
                                           console.log('🗑️ REFETCH COMPLETED - deleted message should disappear immediately');
                                           
-                                          showSuccess("Message Deleted", "Message has been deleted successfully");
+                                          toast({
+                                            title: "Message Deleted",
+                                            description: "Message has been deleted successfully",
+                                            duration: 3000,
+                                          });
                                         } catch (error) {
                                           console.error('Delete error:', error);
                                           toast({ 
@@ -5525,21 +5785,23 @@ export default function MessagingPage() {
           {/* All Campaigns Tab */}
           {campaignSubTab === "all" && (
           <div className="bg-white dark:bg-slate-900 rounded-lg h-[550px] overflow-y-auto p-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {!campaigns || campaigns.length === 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {!campaigns || campaigns.length === 0 ? (
                 <Card className="col-span-2 bg-white dark:bg-slate-900">
-                  <CardContent className="p-8 text-center">
-                    <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <h3 className="text-lg font-medium mb-2">No campaigns yet</h3>
-                    <p className="text-sm text-gray-600">Create your first messaging campaign to engage patients and staff.</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                campaigns.map((campaign: Campaign) => (
-                  <Card key={campaign.id} className="bg-white dark:bg-slate-900">
+                <CardContent className="p-8 text-center">
+                  <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-lg font-medium mb-2">No campaigns yet</h3>
+                  <p className="text-sm text-gray-600">Create your first messaging campaign to engage patients and staff.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              campaigns.map((campaign: Campaign) => (
+                  <Card key={campaign.id} className="bg-white dark:bg-slate-900 overflow-hidden">
                   <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">{campaign.name}</CardTitle>
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <CardTitle className="text-lg truncate min-w-0 flex-1" title={campaign.name}>
+                        {campaign.name}
+                      </CardTitle>
                       <Badge className={getCampaignStatusColor(campaign.status)}>
                         {campaign.status}
                       </Badge>
@@ -5547,29 +5809,44 @@ export default function MessagingPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        {campaign.type === 'email' ? <Mail className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
-                        <span className="text-sm font-medium">{campaign.subject}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {campaign.type === 'email' ? <Mail className="h-4 w-4 flex-shrink-0" /> : <Smartphone className="h-4 w-4 flex-shrink-0" />}
+                        <span className="text-sm font-medium truncate min-w-0" title={campaign.subject}>
+                          {campaign.subject}
+                        </span>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-gray-600">Recipients:</span>
+                        <div className="min-w-0">
+                          <span className="text-gray-600 dark:text-gray-400">Recipients:</span>
                           <span className="ml-2 font-medium">{campaign.recipientCount}</span>
                         </div>
-                        <div>
-                          <span className="text-gray-600">Sent:</span>
+                        <div className="min-w-0">
+                          <span className="text-gray-600 dark:text-gray-400">Sent:</span>
                           <span className="ml-2 font-medium">{campaign.sentCount}</span>
                         </div>
-                        <div>
-                          <span className="text-gray-600">Open Rate:</span>
+                        <div className="min-w-0">
+                          <span className="text-gray-600 dark:text-gray-400">Open Rate:</span>
                           <span className="ml-2 font-medium">{campaign.openRate}%</span>
                         </div>
-                        <div>
-                          <span className="text-gray-600">Click Rate:</span>
+                        <div className="min-w-0">
+                          <span className="text-gray-600 dark:text-gray-400">Click Rate:</span>
                           <span className="ml-2 font-medium">{campaign.clickRate}%</span>
                         </div>
                       </div>
+                      
+                      {/* Show creator info for admin users */}
+                      {user?.role === 'admin' && campaign.createdByName && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 pt-2 border-t">
+                          <span>Created by: </span>
+                          <span className="font-medium">{campaign.createdByName}</span>
+                          {campaign.createdByRole && (
+                            <Badge variant="outline" className="ml-2 text-xs">
+                              {campaign.createdByRole}
+                            </Badge>
+                          )}
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-2 pt-3 border-t flex-wrap">
                         <Button 
@@ -5647,20 +5924,20 @@ export default function MessagingPage() {
           {/* SMS Campaign History Tab */}
           {campaignSubTab === "history" && (
             <div className="bg-white dark:bg-slate-900 rounded-lg h-[550px] overflow-y-auto p-4">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <Smartphone className="h-5 w-5 text-primary" />
-                  <h3 className="text-lg font-semibold">SMS Campaign History</h3>
-                </div>
-
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Smartphone className="h-5 w-5 text-primary" />
+                <h3 className="text-lg font-semibold">SMS Campaign History</h3>
+              </div>
+              
                 {!campaigns ||
                 campaigns.filter(
                   (c: Campaign) =>
                     c.status === "sent" && (c.type === "sms" || c.type === "both"),
                 ).length === 0 ? (
-                  <Card>
-                    <CardContent className="p-8 text-center">
-                      <Smartphone className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <Smartphone className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <h3 className="text-lg font-medium mb-2">
                         No SMS campaigns sent yet
                       </h3>
@@ -5668,64 +5945,69 @@ export default function MessagingPage() {
                         SMS campaigns you send will appear here with their complete
                         history.
                       </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="space-y-4">
-                    {campaigns
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {campaigns
                       .filter(
                         (c: Campaign) =>
                           c.status === "sent" &&
                           (c.type === "sms" || c.type === "both"),
                       )
-                      .sort((a: Campaign, b: Campaign) => {
+                    .sort((a: Campaign, b: Campaign) => {
                         const dateA = a.sentAt
                           ? new Date(a.sentAt).getTime()
                           : 0;
                         const dateB = b.sentAt
                           ? new Date(b.sentAt).getTime()
                           : 0;
-                        return dateB - dateA;
-                      })
-                      .map((campaign: Campaign) => (
+                      return dateB - dateA;
+                    })
+                    .map((campaign: Campaign) => (
                         <Card
                           key={campaign.id}
-                          className="border-l-4 border-l-green-500"
+                          className="border-l-4 border-l-green-500 overflow-hidden"
                         >
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between">
-                              <div className="space-y-2 flex-1">
-                                <div className="flex items-center gap-3">
-                                  <h4 className="font-semibold text-lg">
+                        <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-2 min-w-0">
+                              <div className="space-y-2 flex-1 min-w-0">
+                                <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                                  <h4 className="font-semibold text-lg truncate min-w-0" title={campaign.name}>
                                     {campaign.name}
                                   </h4>
                                   <Badge
                                     variant="secondary"
-                                    className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                    className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 flex-shrink-0"
                                   >
-                                    <CheckCircle className="h-3 w-3 mr-1" />
-                                    Sent
-                                  </Badge>
-                                  <Badge variant="outline">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Sent
+                                </Badge>
+                                  <Badge variant="outline" className="flex-shrink-0">
                                     {campaign.type === "email" ? (
                                       <Mail className="h-3 w-3 mr-1" />
                                     ) : (
                                       <Smartphone className="h-3 w-3 mr-1" />
                                     )}
-                                    {campaign.type.toUpperCase()}
-                                  </Badge>
-                                </div>
-
-                                <p className="text-sm text-muted-foreground">
+                                  {campaign.type.toUpperCase()}
+                                </Badge>
+                              </div>
+                              
+                                <p className="text-sm text-muted-foreground truncate min-w-0" title={campaign.subject}>
                                   {campaign.subject}
                                 </p>
-
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                              
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Sent At
                                     </div>
-                                    <div className="font-medium">
+                                    <div className="font-medium truncate" title={campaign.sentAt
+                                        ? format(
+                                            new Date(campaign.sentAt),
+                                            "MMM dd, yyyy HH:mm",
+                                          )
+                                        : "N/A"}>
                                       {campaign.sentAt
                                         ? format(
                                             new Date(campaign.sentAt),
@@ -5734,82 +6016,87 @@ export default function MessagingPage() {
                                         : "N/A"}
                                     </div>
                                   </div>
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Recipients
                                     </div>
-                                    <div className="font-medium">
+                                  <div className="font-medium">
                                       {campaign.recipientCount}
-                                    </div>
                                   </div>
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                </div>
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Delivered
-                                    </div>
-                                    <div className="font-medium text-green-600">
+                                </div>
+                                    <div className="font-medium text-green-600 dark:text-green-400">
                                       {campaign.sentCount}
-                                    </div>
+                                </div>
                                   </div>
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Open Rate
                                     </div>
                                     <div className="font-medium">
                                       {campaign.openRate}%
                                     </div>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
-                                  <Calendar className="h-3 w-3" />
-                                  Created:{" "}
-                                  {format(
-                                    new Date(campaign.createdAt),
-                                    "MMM dd, yyyy HH:mm",
-                                  )}
                                 </div>
                               </div>
-
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleViewCampaign(campaign)}
-                                  data-testid={`button-view-history-campaign-${campaign.id}`}
-                                >
-                                  View Details
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    e.preventDefault();
-                                    handleSendExistingCampaign(campaign, e);
-                                  }}
-                                  disabled={sendingCampaignId === campaign.id}
-                                  data-testid={`button-resend-history-campaign-${campaign.id}`}
-                                >
+                              
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2 min-w-0">
+                                  <Calendar className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate min-w-0" title={`Created: ${format(
+                                    new Date(campaign.createdAt),
+                                    "MMM dd, yyyy HH:mm",
+                                  )}`}>
+                                    Created:{" "}
+                                    {format(
+                                      new Date(campaign.createdAt),
+                                      "MMM dd, yyyy HH:mm",
+                                    )}
+                                  </span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleViewCampaign(campaign)}
+                                data-testid={`button-view-history-campaign-${campaign.id}`}
+                              >
+                                View Details
+                              </Button>
+                              <Button 
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  handleSendExistingCampaign(campaign, e);
+                                }}
+                                disabled={sendingCampaignId === campaign.id}
+                                data-testid={`button-resend-history-campaign-${campaign.id}`}
+                              >
                                   {sendingCampaignId === campaign.id
                                     ? "Sending..."
                                     : "Resend Campaign"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
                                   onClick={() =>
                                     handleDuplicateCampaign(campaign)
                                   }
-                                  data-testid={`button-duplicate-history-campaign-${campaign.id}`}
-                                >
-                                  Duplicate
-                                </Button>
-                              </div>
+                                data-testid={`button-duplicate-history-campaign-${campaign.id}`}
+                              >
+                                Duplicate
+                              </Button>
                             </div>
-                          </CardContent>
-                        </Card>
+                          </div>
+                        </CardContent>
+                      </Card>
                       ))}
-                  </div>
-                )}
+                </div>
+              )}
               </div>
             </div>
           )}
@@ -5817,21 +6104,21 @@ export default function MessagingPage() {
           {/* Email Campaign History Tab */}
           {campaignSubTab === "email_history" && (
             <div className="bg-white dark:bg-slate-900 rounded-lg h-[550px] overflow-y-auto p-4">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <Mail className="h-5 w-5 text-primary" />
-                  <h3 className="text-lg font-semibold">Email Campaign History</h3>
-                </div>
-
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Mail className="h-5 w-5 text-primary" />
+                <h3 className="text-lg font-semibold">Email Campaign History</h3>
+              </div>
+              
                 {!campaigns ||
                 campaigns.filter(
                   (c: Campaign) =>
                     c.status === "sent" &&
                     (c.type === "email" || c.type === "both"),
                 ).length === 0 ? (
-                  <Card>
-                    <CardContent className="p-8 text-center">
-                      <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <h3 className="text-lg font-medium mb-2">
                         No email campaigns sent yet
                       </h3>
@@ -5839,60 +6126,65 @@ export default function MessagingPage() {
                         Email campaigns you send will appear here with their
                         complete history.
                       </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="space-y-4">
-                    {campaigns
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {campaigns
                       .filter(
                         (c: Campaign) =>
                           c.status === "sent" &&
                           (c.type === "email" || c.type === "both"),
                       )
-                      .sort((a: Campaign, b: Campaign) => {
+                    .sort((a: Campaign, b: Campaign) => {
                         const dateA = a.sentAt
                           ? new Date(a.sentAt).getTime()
                           : 0;
                         const dateB = b.sentAt
                           ? new Date(b.sentAt).getTime()
                           : 0;
-                        return dateB - dateA;
-                      })
-                      .map((campaign: Campaign) => (
+                      return dateB - dateA;
+                    })
+                    .map((campaign: Campaign) => (
                         <Card
                           key={campaign.id}
-                          className="border-l-4 border-l-blue-500"
+                          className="border-l-4 border-l-blue-500 overflow-hidden"
                         >
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between">
-                              <div className="space-y-2 flex-1">
-                                <div className="flex items-center gap-3">
-                                  <h4 className="font-semibold text-lg">
+                        <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-2 min-w-0">
+                              <div className="space-y-2 flex-1 min-w-0">
+                                <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                                  <h4 className="font-semibold text-lg truncate min-w-0" title={campaign.name}>
                                     {campaign.name}
                                   </h4>
                                   <Badge
                                     variant="secondary"
-                                    className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                    className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 flex-shrink-0"
                                   >
-                                    <CheckCircle className="h-3 w-3 mr-1" />
-                                    Sent
-                                  </Badge>
-                                  <Badge variant="outline">
-                                    <Mail className="h-3 w-3 mr-1" />
-                                    {campaign.type.toUpperCase()}
-                                  </Badge>
-                                </div>
-
-                                <p className="text-sm text-muted-foreground">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Sent
+                                </Badge>
+                                  <Badge variant="outline" className="flex-shrink-0">
+                                  <Mail className="h-3 w-3 mr-1" />
+                                  {campaign.type.toUpperCase()}
+                                </Badge>
+                              </div>
+                              
+                                <p className="text-sm text-muted-foreground truncate min-w-0" title={campaign.subject}>
                                   {campaign.subject}
                                 </p>
-
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                              
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Sent At
                                     </div>
-                                    <div className="font-medium">
+                                    <div className="font-medium truncate" title={campaign.sentAt
+                                        ? format(
+                                            new Date(campaign.sentAt),
+                                            "MMM dd, yyyy HH:mm",
+                                          )
+                                        : "N/A"}>
                                       {campaign.sentAt
                                         ? format(
                                             new Date(campaign.sentAt),
@@ -5901,82 +6193,96 @@ export default function MessagingPage() {
                                         : "N/A"}
                                     </div>
                                   </div>
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Recipients
                                     </div>
-                                    <div className="font-medium">
+                                  <div className="font-medium">
                                       {campaign.recipientCount}
-                                    </div>
                                   </div>
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                </div>
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Delivered
-                                    </div>
-                                    <div className="font-medium text-green-600">
+                                </div>
+                                    <div className="font-medium text-green-600 dark:text-green-400">
                                       {campaign.sentCount}
-                                    </div>
+                                </div>
                                   </div>
-                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                  <div className="bg-gray-50 dark:bg-gray-800 p-2 rounded min-w-0">
                                     <div className="text-muted-foreground text-xs">
                                       Open Rate
                                     </div>
                                     <div className="font-medium">
                                       {campaign.openRate}%
                                     </div>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
-                                  <Calendar className="h-3 w-3" />
-                                  Created:{" "}
-                                  {format(
-                                    new Date(campaign.createdAt),
-                                    "MMM dd, yyyy HH:mm",
-                                  )}
                                 </div>
                               </div>
-
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleViewCampaign(campaign)}
-                                  data-testid={`button-view-email-history-campaign-${campaign.id}`}
-                                >
-                                  View Details
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    e.preventDefault();
-                                    handleSendExistingCampaign(campaign, e);
-                                  }}
-                                  disabled={sendingCampaignId === campaign.id}
-                                  data-testid={`button-resend-email-history-campaign-${campaign.id}`}
-                                >
+                              
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2 min-w-0 flex-wrap">
+                                  <Calendar className="h-3 w-3 flex-shrink-0" />
+                                  <span className="truncate min-w-0" title={`Created: ${format(
+                                    new Date(campaign.createdAt),
+                                    "MMM dd, yyyy HH:mm",
+                                  )}`}>
+                                    Created:{" "}
+                                    {format(
+                                      new Date(campaign.createdAt),
+                                      "MMM dd, yyyy HH:mm",
+                                    )}
+                                  </span>
+                                  {/* Show creator info for admin users */}
+                                  {user?.role === 'admin' && campaign.createdByName && (
+                                    <>
+                                      <span className="text-gray-400">•</span>
+                                      <span className="truncate min-w-0" title={`Created by: ${campaign.createdByName}`}>
+                                        By: {campaign.createdByName}
+                                      </span>
+                                    </>
+                                  )}
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleViewCampaign(campaign)}
+                                data-testid={`button-view-email-history-campaign-${campaign.id}`}
+                              >
+                                View Details
+                              </Button>
+                              <Button 
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  handleSendExistingCampaign(campaign, e);
+                                }}
+                                disabled={sendingCampaignId === campaign.id}
+                                data-testid={`button-resend-email-history-campaign-${campaign.id}`}
+                              >
                                   {sendingCampaignId === campaign.id
                                     ? "Sending..."
                                     : "Resend Campaign"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
                                   onClick={() =>
                                     handleDuplicateCampaign(campaign)
                                   }
-                                  data-testid={`button-duplicate-email-history-campaign-${campaign.id}`}
-                                >
-                                  Duplicate
-                                </Button>
-                              </div>
+                                data-testid={`button-duplicate-email-history-campaign-${campaign.id}`}
+                              >
+                                Duplicate
+                              </Button>
                             </div>
-                          </CardContent>
-                        </Card>
+                          </div>
+                        </CardContent>
+                      </Card>
                       ))}
-                  </div>
-                )}
+                </div>
+              )}
               </div>
             </div>
           )}
@@ -6712,32 +7018,32 @@ export default function MessagingPage() {
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-lg h-[550px] overflow-y-auto p-4">
-            {templatesLoading ? (
-              <Card>
-                <CardContent className="p-6">
-                  <div className="text-center py-8 text-gray-500">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p>Loading templates...</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : !templates || templates.length === 0 ? (
-              <Card>
-                <CardContent className="p-6">
-                  <div className="text-center py-8 text-gray-500">
-                    <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <h3 className="text-lg font-medium mb-2">No Announcements Yet</h3>
-                    <p className="mb-4">Create your first message announcement to get started.</p>
-                    <Button onClick={() => setShowCreateTemplate(true)}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Announcement
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {templates.map((template: any) => (
+          {templatesLoading ? (
+            <Card>
+              <CardContent className="p-6">
+                <div className="text-center py-8 text-gray-500">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p>Loading templates...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : !templates || templates.length === 0 ? (
+            <Card>
+              <CardContent className="p-6">
+                <div className="text-center py-8 text-gray-500">
+                  <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-lg font-medium mb-2">No Announcements Yet</h3>
+                  <p className="mb-4">Create your first message announcement to get started.</p>
+                  <Button onClick={() => setShowCreateTemplate(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Announcement
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {templates.map((template: any) => (
                   <Card key={template.id} className="bg-white dark:bg-slate-900 hover:shadow-md transition-shadow">
                   <CardHeader>
                     <div className="flex items-start justify-between">
@@ -6761,10 +7067,22 @@ export default function MessagingPage() {
                         {template.content.substring(0, 100)}...
                       </p>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 flex-wrap gap-2">
                       <span>Used {template.usageCount || 0} times</span>
                       <span>Updated {new Date(template.updatedAt).toLocaleDateString()}</span>
                     </div>
+                    {/* Show creator info for admin users */}
+                    {user?.role === 'admin' && template.createdByName && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 pt-2 border-t mt-2">
+                        <span>Created by: </span>
+                        <span className="font-medium">{template.createdByName}</span>
+                        {template.createdByRole && (
+                          <Badge variant="outline" className="ml-2 text-xs">
+                            {template.createdByRole}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 pt-3 border-t mt-3">
                       <Button 
                         variant="outline" 
@@ -6809,7 +7127,7 @@ export default function MessagingPage() {
                 </Card>
               ))}
             </div>
-            )}
+          )}
           </div>
 
           {/* Use Template Dialog */}

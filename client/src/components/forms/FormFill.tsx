@@ -146,12 +146,12 @@ export function FormFill({
 
   if (isLoading) {
     return (
-      <Card>
+      <Card className="dark:bg-slate-800 dark:border-slate-700">
         <CardHeader>
-          <CardTitle>Loading form…</CardTitle>
+          <CardTitle className="dark:text-slate-100">Loading form…</CardTitle>
         </CardHeader>
         <CardContent>
-          <p>Please wait while we verify the link.</p>
+          <p className="dark:text-slate-400">Please wait while we verify the link.</p>
         </CardContent>
       </Card>
     );
@@ -159,12 +159,12 @@ export function FormFill({
 
   if (!data?.form) {
     return (
-      <Card>
+      <Card className="dark:bg-slate-800 dark:border-slate-700">
         <CardHeader>
-          <CardTitle>Form unavailable</CardTitle>
+          <CardTitle className="dark:text-slate-100">Form unavailable</CardTitle>
         </CardHeader>
         <CardContent>
-          <p>This link is invalid or expired.</p>
+          <p className="dark:text-slate-400">This link is invalid or expired.</p>
         </CardContent>
       </Card>
     );
@@ -174,17 +174,17 @@ export function FormFill({
     <>
       {showSuccessModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="mx-4 max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
-        <CheckCircle className="mx-auto h-12 w-12 text-emerald-500" />
-        <h3 className="mt-4 text-lg font-semibold text-slate-900">
+      <div className="mx-4 max-w-sm rounded-2xl bg-white dark:bg-slate-800 p-6 text-center shadow-xl">
+        <CheckCircle className="mx-auto h-12 w-12 text-emerald-500 dark:text-emerald-400" />
+        <h3 className="mt-4 text-lg font-semibold text-slate-900 dark:text-slate-100">
           Form submitted
         </h3>
-        <p className="mt-2 text-sm text-slate-500">
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
           We created a secured PDF and notified the care team.
         </p>
         <button
           type="button"
-          className="mt-6 inline-flex min-w-[120px] items-center justify-center rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-700 hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+          className="mt-6 inline-flex min-w-[120px] items-center justify-center rounded-full border border-slate-200 dark:border-slate-700 px-5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:focus-visible:ring-slate-500"
           onClick={() => {
             window.location.href = "https://app.curaemr.ai/";
           }}
@@ -196,17 +196,17 @@ export function FormFill({
       )}
       {showAlreadySubmitted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="mx-4 max-w-md rounded-2xl bg-white p-6 text-center shadow-xl">
-            <CheckCircle className="mx-auto h-12 w-12 text-slate-900" />
-            <h3 className="mt-4 text-lg font-semibold text-slate-900">
+          <div className="mx-4 max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 text-center shadow-xl">
+            <CheckCircle className="mx-auto h-12 w-12 text-slate-900 dark:text-slate-100" />
+            <h3 className="mt-4 text-lg font-semibold text-slate-900 dark:text-slate-100">
               Form already submitted
             </h3>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               Form is already filled and sent to Cura HealthCare.
             </p>
             <button
               type="button"
-              className="mt-6 inline-flex min-w-[140px] items-center justify-center rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-700 hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              className="mt-6 inline-flex min-w-[140px] items-center justify-center rounded-full border border-slate-200 dark:border-slate-700 px-5 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:focus-visible:ring-slate-500"
               onClick={() => {
                 window.location.href = "https://app.curaemr.ai/";
               }}
@@ -216,21 +216,21 @@ export function FormFill({
           </div>
         </div>
       )}
-      <Card className={cn("space-y-4", className)}>
+      <Card className={cn("space-y-4 dark:bg-slate-800 dark:border-slate-700", className)}>
       <CardHeader>
-        <CardTitle>{data.form.title}</CardTitle>
-        <p className="text-sm text-muted-foreground">{data.form.description}</p>
+        <CardTitle className="dark:text-slate-100">{data.form.title}</CardTitle>
+        <p className="text-sm text-muted-foreground dark:text-slate-400">{data.form.description}</p>
       </CardHeader>
       <CardContent className="space-y-6">
         {showClinicHeader && header && (
-          <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm">
             <div className="flex items-center gap-4">
               {header.logoBase64 && (
                 <img src={header.logoBase64} alt="Clinic logo" className="h-16 w-auto object-contain" />
               )}
               <div>
-                <p className="text-lg font-semibold">{header.clinicName}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-lg font-semibold dark:text-slate-100">{header.clinicName}</p>
+                <p className="text-xs text-muted-foreground dark:text-slate-400">
                   {header.address}
                   {(header.address && (header.phone || header.email)) && " · "}
                   {header.phone && `Phone: ${header.phone}`}
@@ -244,14 +244,14 @@ export function FormFill({
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           {data.form.sections.map((section: any) => (
             <div key={section.id} className="space-y-4">
-              <h3 className="text-lg font-semibold">{section.title}</h3>
+              <h3 className="text-lg font-semibold dark:text-slate-100">{section.title}</h3>
               {section.fields.map((field: any) => {
                 const fieldName = String(field.id);
                 return (
                   <div key={field.id} className="space-y-2">
-                    <Label className="text-sm font-medium">
+                    <Label className="text-sm font-medium dark:text-slate-200">
                       {field.label}
-                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                      {field.required && <span className="text-red-500 dark:text-red-400 ml-1">*</span>}
                     </Label>
                     {(() => {
                       switch (field.fieldType) {
@@ -355,7 +355,7 @@ export function FormFill({
             </div>
           ))}
           {showClinicFooter && footer && (
-            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 text-sm text-muted-foreground dark:text-slate-400">
               {footer.footerText}
             </div>
           )}

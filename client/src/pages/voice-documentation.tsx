@@ -829,13 +829,15 @@ export default function VoiceDocumentation() {
   // Recording timer effect
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isRecording) {
+    if (isRecording && !isPaused) {
       interval = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
     }
-    return () => clearInterval(interval);
-  }, [isRecording]);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isRecording, isPaused]);
 
   const startRecording = async () => {
     try {
@@ -2095,7 +2097,9 @@ export default function VoiceDocumentation() {
                       {formatTime(recordingTime)}
                     </div>
                     <div className="text-sm text-gray-500">
-                      {isRecording ? "Recording..." : "Ready to record"}
+                      {isRecording 
+                        ? (isPaused ? "Paused" : "Recording...") 
+                        : "Ready to record"}
                     </div>
                   </div>
 
@@ -2118,38 +2122,117 @@ export default function VoiceDocumentation() {
                       variant="outline" 
                       disabled={!isRecording}
                       onClick={() => {
+                        if (!mediaRecorderRef.current) {
+                          console.error("MediaRecorder not initialized");
+                          toast({
+                            title: "Error",
+                            description: "Recording not initialized. Please start recording first.",
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+
                         if (isPaused) {
                           // Resume recording
-                          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
-                            mediaRecorderRef.current.resume();
+                          try {
+                            const recorderState = mediaRecorderRef.current.state;
+                            console.log("Resume: Current MediaRecorder state:", recorderState);
+                            
+                            if (recorderState === 'paused') {
+                              mediaRecorderRef.current.resume();
+                              console.log("MediaRecorder resumed");
+                            } else if (recorderState === 'inactive') {
+                              // If recorder is inactive, we need to restart it
+                              console.warn("MediaRecorder is inactive, cannot resume");
+                              toast({
+                                title: "Cannot resume",
+                                description: "Recording has stopped. Please start a new recording.",
+                                variant: "destructive",
+                              });
+                              setIsPaused(false);
+                              return;
+                            } else {
+                              console.log("MediaRecorder is not paused, state:", recorderState);
+                            }
+
+                            // Resume speech recognition if available
                             if (speechRecognitionRef.current) {
                               try {
-                                speechRecognitionRef.current.start();
-                              } catch (e) {
-                                console.error("Failed to resume speech recognition:", e);
+                                // Check if speech recognition is already running
+                                const speechState = (speechRecognitionRef.current as any)._isActive;
+                                if (!speechState) {
+                                  speechRecognitionRef.current.start();
+                                  (speechRecognitionRef.current as any)._isActive = true;
+                                  console.log("Speech recognition resumed");
+                                } else {
+                                  console.log("Speech recognition already active");
+                                }
+                              } catch (e: any) {
+                                // If already started, that's fine
+                                if (e.message && e.message.includes('already started')) {
+                                  console.log("Speech recognition already running");
+                                  (speechRecognitionRef.current as any)._isActive = true;
+                                } else {
+                                  console.error("Failed to resume speech recognition:", e);
+                                }
                               }
                             }
+
                             setIsPaused(false);
                             toast({
                               title: "Recording resumed",
                               description: "Recording has been resumed",
                             });
+                          } catch (error: any) {
+                            console.error("Error resuming recording:", error);
+                            toast({
+                              title: "Failed to resume",
+                              description: error.message || "Could not resume recording",
+                              variant: "destructive",
+                            });
                           }
                         } else {
                           // Pause recording
-                          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                            mediaRecorderRef.current.pause();
+                          try {
+                            const recorderState = mediaRecorderRef.current.state;
+                            console.log("Pause: Current MediaRecorder state:", recorderState);
+                            
+                            if (recorderState === 'recording') {
+                              mediaRecorderRef.current.pause();
+                              console.log("MediaRecorder paused");
+                            } else {
+                              console.warn("MediaRecorder is not recording, state:", recorderState);
+                              toast({
+                                title: "Cannot pause",
+                                description: `Recording is in ${recorderState} state. Cannot pause.`,
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+
+                            // Pause speech recognition if available
                             if (speechRecognitionRef.current) {
                               try {
                                 speechRecognitionRef.current.stop();
-                              } catch (e) {
+                                (speechRecognitionRef.current as any)._isActive = false;
+                                console.log("Speech recognition stopped");
+                              } catch (e: any) {
                                 console.error("Failed to pause speech recognition:", e);
+                                // Continue even if speech recognition fails to stop
                               }
                             }
+
                             setIsPaused(true);
                             toast({
                               title: "Recording paused",
                               description: "Recording has been paused",
+                            });
+                          } catch (error: any) {
+                            console.error("Error pausing recording:", error);
+                            toast({
+                              title: "Failed to pause",
+                              description: error.message || "Could not pause recording",
+                              variant: "destructive",
                             });
                           }
                         }

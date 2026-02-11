@@ -86,11 +86,47 @@ export function getTenantSubdomain(): string {
   return 'demo';
 }
 
+// Session timeout configuration
+const SESSION_TIMEOUT_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
+const LAST_ACTIVITY_KEY = 'lastActivityTime';
+
+// Check and update session timeout
+function checkSessionTimeout(): void {
+  const lastActivity = localStorage.getItem(LAST_ACTIVITY_KEY);
+  if (!lastActivity) {
+    return; // No session, skip check
+  }
+
+  const now = Date.now();
+  const lastActivityTime = parseInt(lastActivity, 10);
+  const timeSinceActivity = now - lastActivityTime;
+
+  if (timeSinceActivity >= SESSION_TIMEOUT_DURATION) {
+    // Session expired
+    console.log('🔐 SESSION: Session expired on API request');
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_subdomain');
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
+    localStorage.removeItem('sessionStartTime');
+    
+    // Redirect to login
+    const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+    window.location.href = `/${subdomain}/login?expired=true`;
+    throw new Error('Session expired due to inactivity');
+  }
+
+  // Update last activity time
+  localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  // Check session timeout before making request
+  checkSessionTimeout();
+
   const token = localStorage.getItem('auth_token');
   const headers: Record<string, string> = {
     'X-Tenant-Subdomain': getTenantSubdomain()
@@ -111,6 +147,18 @@ export async function apiRequest(
     credentials: "include",
   });
 
+  // Update last activity on successful request
+  if (res.ok) {
+    const now = Date.now();
+    localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
+  } else if (res.status === 401) {
+    // Unauthorized - clear session
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_subdomain');
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
+    localStorage.removeItem('sessionStartTime');
+  }
+
   await throwIfResNotOk(res);
   return res;
 }
@@ -121,6 +169,9 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    // Check session timeout before making request
+    checkSessionTimeout();
+
     const token = localStorage.getItem('auth_token');
     const headers: Record<string, string> = {
       'X-Tenant-Subdomain': getTenantSubdomain()
@@ -145,6 +196,18 @@ export const getQueryFn: <T>(options: {
     });
 
     console.log("Query response status:", res.status);
+    
+    // Update last activity on successful request
+    if (res.ok) {
+      const now = Date.now();
+      localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
+    } else if (res.status === 401) {
+      // Unauthorized - clear session
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user_subdomain');
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+      localStorage.removeItem('sessionStartTime');
+    }
     
     if (!res.ok) {
       const errorText = await res.text();

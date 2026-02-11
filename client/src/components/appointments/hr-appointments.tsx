@@ -381,13 +381,13 @@ export default function HRAppointments({ onNewAppointment }: { onNewAppointment?
               return (
                 <Card 
                   key={day.toString()} 
-                  className={`h-64 ${isTodays ? 'border-blue-500 bg-blue-50' : ''}`}
+                  className={`h-64 ${isTodays ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400' : ''}`}
                 >
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">
+                    <CardTitle className="text-sm font-medium text-gray-900 dark:text-gray-100">
                       {format(day, "EEE")}
                       <br />
-                      <span className={`text-lg ${isTodays ? 'text-blue-800 font-bold' : ''}`}>
+                      <span className={`text-lg ${isTodays ? 'text-blue-800 dark:text-blue-200 font-bold' : 'text-gray-900 dark:text-gray-100'}`}>
                         {format(day, "d")}
                       </span>
                     </CardTitle>
@@ -396,16 +396,16 @@ export default function HRAppointments({ onNewAppointment }: { onNewAppointment?
                     {dayAppointments.slice(0, 3).map((appointment: any) => (
                       <div
                         key={appointment.id}
-                        className="p-2 rounded text-xs border-l-4"
+                        className="p-2 rounded text-xs border-l-4 bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700"
                         style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}
                       >
-                        <div className="font-medium truncate">{formatTime(appointment.scheduledAt)}</div>
-                        <div className="text-gray-600 truncate">{getPatientName(appointment.patientId)}</div>
-                        <div className="text-gray-500 truncate">{getDoctorName(appointment.providerId)}</div>
+                        <div className="font-medium truncate text-gray-900 dark:text-gray-100">{formatTime(appointment.scheduledAt)}</div>
+                        <div className="text-gray-600 dark:text-gray-300 truncate">{getPatientName(appointment.patientId)}</div>
+                        <div className="text-gray-500 dark:text-gray-400 truncate">{getDoctorName(appointment.providerId)}</div>
                       </div>
                     ))}
                     {dayAppointments.length > 3 && (
-                      <div className="text-xs text-gray-500 text-center py-1">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-1">
                         +{dayAppointments.length - 3} more
                       </div>
                     )}

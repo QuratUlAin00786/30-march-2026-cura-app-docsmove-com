@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,17 @@ const curaLogoPath = "/cura-logo-chatbot.png";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Check for session expiration message
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('expired') === 'true') {
+      setSessionExpired(true);
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -59,6 +70,12 @@ export default function LoginPage() {
 
       // Store token in localStorage (same key as auth context uses)
       localStorage.setItem("auth_token", data.token);
+
+      // Initialize session timeout
+      const now = Date.now();
+      localStorage.setItem('lastActivityTime', now.toString());
+      localStorage.setItem('sessionStartTime', now.toString());
+      console.log('🔐 SESSION: Session initialized on universal login at', new Date(now).toISOString());
 
       // Store subdomain for tenant context
       const subdomain = data.organization.subdomain;
@@ -138,9 +155,11 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              {error && (
+              {(error || sessionExpired) && (
                 <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>
+                    {sessionExpired ? 'Session expired due to inactivity. Please log in again.' : error}
+                  </AlertDescription>
                 </Alert>
               )}
 

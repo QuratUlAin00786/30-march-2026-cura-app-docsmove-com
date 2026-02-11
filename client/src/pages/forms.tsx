@@ -86,6 +86,7 @@ import {
   ChevronUp,
   Edit,
   AlertCircle,
+  AlertTriangle,
   CheckCircle,
   RefreshCw,
   ChevronsUpDown,
@@ -924,6 +925,8 @@ export default function Forms() {
   const [formSharedSuccessfully, setFormSharedSuccessfully] = useState(false);
   const [showTemplateSaveSuccessModal, setShowTemplateSaveSuccessModal] = useState(false);
   const [savedTemplateName, setSavedTemplateName] = useState("");
+  const [showShareFormErrorModal, setShowShareFormErrorModal] = useState(false);
+  const [shareFormErrorMessage, setShareFormErrorMessage] = useState("");
   const [selectedDoctorId, setSelectedDoctorId] = useState("");
   const [shareFormData, setShareFormData] = useState({
     subject: "",
@@ -2511,11 +2514,40 @@ Coverage Details: [Insurance Coverage]`;
       // closeFormShareDialog();
     },
     onError(error) {
-      toast({
-        title: "Share failed",
-        description: error instanceof Error ? error.message : "Unable to share the form",
-        variant: "destructive",
-      });
+      let errorMessage = "Unable to share the form. Please try again.";
+      
+      if (error instanceof Error) {
+        const errorText = error.message;
+        
+        // Check for foreign key constraint error
+        if (errorText.includes("foreign key constraint") && errorText.includes("patient_id")) {
+          errorMessage = "The selected patient is not found in the system. Please select a different patient or contact support if this issue persists.";
+        } else if (errorText.includes("404") || errorText.includes("not found")) {
+          errorMessage = "The selected patient could not be found. Please select a different patient.";
+        } else if (errorText.includes("500")) {
+          // Try to parse JSON error from 500 response
+          try {
+            const jsonMatch = errorText.match(/\{.*\}/);
+            if (jsonMatch) {
+              const errorObj = JSON.parse(jsonMatch[0]);
+              if (errorObj.error?.includes("foreign key constraint") && errorObj.error?.includes("patient_id")) {
+                errorMessage = "The selected patient is not found in the system. Please select a different patient or contact support if this issue persists.";
+              } else {
+                errorMessage = errorObj.error || "An error occurred while sharing the form. Please try again.";
+              }
+            } else {
+              errorMessage = "A server error occurred. Please try again or contact support if the problem persists.";
+            }
+          } catch {
+            errorMessage = "An error occurred while sharing the form. Please try again.";
+          }
+        } else {
+          errorMessage = errorText;
+        }
+      }
+      
+      setShareFormErrorMessage(errorMessage);
+      setShowShareFormErrorModal(true);
     },
   });
 
@@ -6333,7 +6365,7 @@ const formIds = useMemo(
                             <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
-                            className="px-3 py-1 rounded-md bg-gray-200 text-black shadow-sm border border-transparent hover:bg-gray-300"
+                            className="px-3 py-1 rounded-md bg-gray-200 dark:bg-slate-700 text-black dark:text-white shadow-sm border border-transparent hover:bg-gray-300 dark:hover:bg-slate-600"
                             onClick={() => openFormShareDialog(form)}
                             disabled={patientsLoading}
                           >
@@ -7386,13 +7418,6 @@ const formIds = useMemo(
                     : "Select a patient to see their contact email."}
                 </p>
               </div>
-              {shareFormMutation.error && (
-                <p className="text-xs text-red-500">
-                  {shareFormMutation.error instanceof Error
-                    ? shareFormMutation.error.message
-                    : "Unable to share the form"}
-                </p>
-              )}
               <div className="flex justify-end gap-2">
                 <Button
                   variant="outline"
@@ -7433,6 +7458,45 @@ const formIds = useMemo(
             </div>
           </DialogContent>
         </Dialog>
+
+      {/* Share Form Error Modal */}
+      <Dialog open={showShareFormErrorModal} onOpenChange={setShowShareFormErrorModal}>
+        <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+              <AlertTriangle className="h-5 w-5" />
+              Unable to Share Form
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              {shareFormErrorMessage}
+            </p>
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+              <p className="text-xs text-yellow-800 dark:text-yellow-200 font-medium mb-1">
+                What you can do:
+              </p>
+              <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside space-y-1">
+                <li>Try selecting a different patient</li>
+                <li>Refresh the page and try again</li>
+                <li>Contact support if the problem persists</li>
+              </ul>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-6">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowShareFormErrorModal(false);
+                setShareFormErrorMessage("");
+              }}
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     <Dialog
       open={responseDialogOpen}
       onOpenChange={(open) => {

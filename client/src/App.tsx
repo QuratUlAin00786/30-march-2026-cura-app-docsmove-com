@@ -20,6 +20,7 @@ import { PermissionDeniedDialog } from "@/components/ui/permission-denied-dialog
 import { setPermissionDeniedCallback } from "@/lib/permission-error-handler";
 import { GlobalIncomingCallBar } from "@/components/telemedicine/GlobalIncomingCallBar";
 import { getFirstAccessiblePage } from "@/lib/get-first-accessible-page";
+import { useSessionTimeout, SessionTimeoutWarning } from "@/hooks/use-session-timeout";
 
 const curaLogoPath = "/cura-logo.png";
 
@@ -152,6 +153,14 @@ function ProtectedApp() {
   const [location, setLocation] = useLocation();
   const { user } = useAuth();
   const { canView, isLoading: permissionsLoading } = useRolePermissions();
+  
+  // Setup session timeout
+  const {
+    showWarning,
+    timeRemaining,
+    handleStayLoggedIn,
+    handleLogoutNow,
+  } = useSessionTimeout();
   
   // Setup global permission denied handler
   useEffect(() => {
@@ -320,6 +329,12 @@ function ProtectedApp() {
       <PermissionDeniedDialog 
         open={permissionDeniedOpen} 
         onOpenChange={setPermissionDeniedOpen}
+      />
+      <SessionTimeoutWarning
+        show={showWarning}
+        timeRemaining={timeRemaining}
+        onStayLoggedIn={handleStayLoggedIn}
+        onLogoutNow={handleLogoutNow}
       />
       <div className="flex h-screen bg-neutral-50 dark:bg-background">
         <Sidebar />

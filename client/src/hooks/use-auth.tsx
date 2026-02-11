@@ -111,6 +111,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // First clear any existing token and cache
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user_subdomain');
+      localStorage.removeItem('lastActivityTime');
+      localStorage.removeItem('sessionStartTime');
       queryClient.clear();
       setUser(null);
       
@@ -124,6 +126,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Set new token and user
       localStorage.setItem('auth_token', data.token);
       setUser(data.user);
+      
+      // Initialize session timeout
+      const now = Date.now();
+      localStorage.setItem('lastActivityTime', now.toString());
+      localStorage.setItem('sessionStartTime', now.toString());
+      console.log('🔐 SESSION: Session initialized on login at', new Date(now).toISOString());
       
       // Store user's organization subdomain from the response
       if (data.organization && data.organization.subdomain) {
@@ -166,11 +174,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    // Clear session data
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_subdomain');
+    localStorage.removeItem('lastActivityTime');
+    localStorage.removeItem('sessionStartTime');
     setUser(null);
     // Clear React Query cache when logging out
     queryClient.clear();
+    console.log('🔐 SESSION: Session cleared on logout');
   };
 
   return (

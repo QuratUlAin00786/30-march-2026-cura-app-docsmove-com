@@ -1293,7 +1293,7 @@ export default function SaaSCustomers() {
                             </Button>
                           </DialogTrigger>
                           <DialogContent className="max-w-2xl">
-                            <DialogHeader className="flex items-start justify-between gap-4">
+                            <DialogHeader className="flex items-start justify-between gap-4 flex-shrink-0">
                               <DialogTitle>Customer Details - {customer.name}</DialogTitle>
                               <DialogClose asChild>
                                 <button
@@ -1309,7 +1309,8 @@ export default function SaaSCustomers() {
                                 <div className="h-10 w-10 animate-spin rounded-full border-4 border-dashed border-blue-300 border-t-blue-600" />
                               </div>
                             ) : viewingCustomer ? (
-                              <div className="space-y-6 text-sm text-gray-700">
+                              <div className="h-[550px] overflow-y-auto pr-2">
+                                <div className="space-y-6 text-sm text-gray-700">
                                 <section className="space-y-2">
                                   <p className="text-xs uppercase tracking-wide text-gray-500">
                                     Organization summary
@@ -1504,6 +1505,7 @@ export default function SaaSCustomers() {
                                     </div>
                                   </div>
                                 </section>
+                                </div>
                               </div>
                             ) : (
                               <p className="text-center text-sm text-gray-500 py-6">
@@ -1538,6 +1540,9 @@ export default function SaaSCustomers() {
                               const response = await saasApiRequest('GET', `/api/saas/customers/${customer.id}`);
                               const customerDetails = await response.json();
                               
+                              // Get billingPackageId from either billingPackageId or packageId field
+                              const packageId = customerDetails.billingPackageId || customerDetails.packageId;
+                              
                               setEditingCustomer({
                                 id: customerDetails.id,
                                 name: customerDetails.name,
@@ -1551,10 +1556,12 @@ export default function SaaSCustomers() {
                                 paymentStatus: customerDetails.paymentStatus || customerDetails.subscriptionPaymentStatus || 'trial',
                                 organizationPaymentStatus: customerDetails.organizationPaymentStatus || 'trial',
                                 subscriptionPaymentStatus: customerDetails.subscriptionPaymentStatus || customerDetails.paymentStatus || 'trial',
-                                billingPackageId: customerDetails.billingPackageId ? String(customerDetails.billingPackageId) : '',
+                                billingPackageId: packageId ? String(packageId) : '',
                                 packageName: customerDetails.packageName || '',
                                 packagePrice: customerDetails.packagePrice || null,
                                 packageBillingCycle: customerDetails.packageBillingCycle || '',
+                                packageDescription: customerDetails.packageDescription || '',
+                                packageFeatures: customerDetails.packageFeatures || customerDetails.features || {},
                                 details: customerDetails.details || '',
                                 expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
                                 features: customerDetails.features ? (typeof customerDetails.features === 'string' ? JSON.parse(customerDetails.features) : customerDetails.features) : {
@@ -1566,12 +1573,15 @@ export default function SaaSCustomers() {
                                   analyticsEnabled: true,
                                 }
                               });
+                              // Get billingPackageId from either billingPackageId or packageId field for original values
+                              const originalPackageId = customerDetails.billingPackageId || customerDetails.packageId;
+                              
                               setOriginalCustomerValues({
                                 subscriptionStatus: customerDetails.subscriptionStatus || 'trial',
                                 paymentStatus: customerDetails.paymentStatus || customerDetails.subscriptionPaymentStatus || 'trial',
                                 organizationPaymentStatus: customerDetails.organizationPaymentStatus || 'trial',
                                 subscriptionPaymentStatus: customerDetails.subscriptionPaymentStatus || customerDetails.paymentStatus || 'trial',
-                                billingPackageId: customerDetails.billingPackageId ? String(customerDetails.billingPackageId) : '',
+                                billingPackageId: originalPackageId ? String(originalPackageId) : '',
                                 details: customerDetails.details || '',
                                 expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
                               });
@@ -1708,11 +1718,52 @@ export default function SaaSCustomers() {
                                     <select 
                                       className="w-full px-3 py-2 border rounded"
                                       value={editingCustomer.billingPackageId || ''}
-                                      onChange={(e) => setEditingCustomer({...editingCustomer, billingPackageId: e.target.value})}
+                                      onChange={(e) => {
+                                        const selectedPkgId = e.target.value;
+                                        const selectedPkg = billingPackages?.find((pkg: any) => String(pkg.id) === selectedPkgId);
+                                        
+                                        // Calculate expiresAt based on billing cycle
+                                        let expiresAt = editingCustomer.expiresAt; // Keep existing value if no package selected
+                                        if (selectedPkg && selectedPkg.billingCycle) {
+                                          const now = new Date();
+                                          const billingCycle = selectedPkg.billingCycle.toLowerCase();
+                                          
+                                          if (billingCycle === 'monthly') {
+                                            // Add 1 month for monthly billing
+                                            const expiryDate = new Date(now);
+                                            expiryDate.setMonth(expiryDate.getMonth() + 1);
+                                            expiresAt = expiryDate.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
+                                          } else if (billingCycle === 'yearly' || billingCycle === 'annual') {
+                                            // Add 12 months (1 year) for yearly billing
+                                            const expiryDate = new Date(now);
+                                            expiryDate.setMonth(expiryDate.getMonth() + 12);
+                                            expiresAt = expiryDate.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
+                                          } else {
+                                            // Default to 1 month for unknown cycles
+                                            const expiryDate = new Date(now);
+                                            expiryDate.setMonth(expiryDate.getMonth() + 1);
+                                            expiresAt = expiryDate.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
+                                          }
+                                        } else if (!selectedPkgId) {
+                                          // If package is cleared, keep existing expiresAt value
+                                          expiresAt = editingCustomer.expiresAt;
+                                        }
+                                        
+                                        setEditingCustomer({
+                                          ...editingCustomer, 
+                                          billingPackageId: selectedPkgId,
+                                          packageName: selectedPkg?.name || '',
+                                          packagePrice: selectedPkg?.price || null,
+                                          packageBillingCycle: selectedPkg?.billingCycle || '',
+                                          packageDescription: selectedPkg?.description || '',
+                                          packageFeatures: selectedPkg?.features || {},
+                                          expiresAt: expiresAt,
+                                        });
+                                      }}
                                     >
                                       <option value="">Select a billing package (optional)</option>
                                       {Array.isArray(billingPackages) && billingPackages.map((pkg: any) => (
-                                        <option key={pkg.id} value={pkg.id}>
+                                        <option key={pkg.id} value={String(pkg.id)}>
                                           {pkg.name} - £{pkg.price}/{pkg.billingCycle}
                                         </option>
                                       ))}
@@ -1720,6 +1771,51 @@ export default function SaaSCustomers() {
                                     <p className="text-xs text-gray-500 mt-1">
                                       Assign or change billing package for this customer
                                     </p>
+                                    
+                                    {/* Display selected package details */}
+                                    {editingCustomer.billingPackageId && editingCustomer.packageName && (
+                                      <div className="mt-4 p-4 bg-white border border-gray-200 rounded-lg">
+                                        <h4 className="font-semibold text-sm text-gray-900 mb-2">
+                                          {editingCustomer.packageName} - £{editingCustomer.packagePrice}/{editingCustomer.packageBillingCycle}
+                                        </h4>
+                                        {editingCustomer.packageDescription && (
+                                          <p className="text-xs text-gray-600 mb-3">{editingCustomer.packageDescription}</p>
+                                        )}
+                                        <p className="text-xs font-medium text-gray-700 mb-2">Features:</p>
+                                        <ul className="text-xs text-gray-600 space-y-1">
+                                          {editingCustomer.packageFeatures?.maxUsers && (
+                                            <li>• Max Users: {editingCustomer.packageFeatures.maxUsers}</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.maxPatients && (
+                                            <li>• Max Patients: {editingCustomer.packageFeatures.maxPatients}</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.aiEnabled && (
+                                            <li>• AI Features Enabled</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.telemedicineEnabled && (
+                                            <li>• Telemedicine Enabled</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.billingEnabled && (
+                                            <li>• Billing Module Enabled</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.analyticsEnabled && (
+                                            <li>• Analytics & Reports Enabled</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.customBranding && (
+                                            <li>• Custom Branding</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.prioritySupport && (
+                                            <li>• Priority Support</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.storageGB && (
+                                            <li>• Storage: {editingCustomer.packageFeatures.storageGB} GB</li>
+                                          )}
+                                          {editingCustomer.packageFeatures?.apiCallsPerMonth && (
+                                            <li>• API Calls: {editingCustomer.packageFeatures.apiCallsPerMonth}/month</li>
+                                          )}
+                                        </ul>
+                                      </div>
+                                    )}
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-4">
@@ -1730,10 +1826,29 @@ export default function SaaSCustomers() {
                                         value={editingCustomer.subscriptionStatus}
                                         onChange={(e) => setEditingCustomer({...editingCustomer, subscriptionStatus: e.target.value})}
                                       >
-                                        <option value="trial">Trial</option>
-                                        <option value="active">Active</option>
-                                        <option value="expired">Expired</option>
-                                        <option value="cancelled">Cancelled</option>
+                                        {(() => {
+                                          // Check if selected package is Trial package
+                                          const selectedPkg = editingCustomer.billingPackageId 
+                                            ? billingPackages?.find((pkg: any) => String(pkg.id) === String(editingCustomer.billingPackageId))
+                                            : null;
+                                          const isTrialPackage = selectedPkg && 
+                                            selectedPkg.name.toLowerCase().includes('trial') &&
+                                            (parseFloat(selectedPkg.price || '0') === 0 || selectedPkg.price === '0.00' || selectedPkg.price === 0);
+                                          
+                                          // If Trial package is selected, only show "Active" option
+                                          if (isTrialPackage) {
+                                            return <option value="active">Active</option>;
+                                          }
+                                          
+                                          // Otherwise, show all options except Trial
+                                          return (
+                                            <>
+                                              <option value="active">Active</option>
+                                              <option value="expired">Expired</option>
+                                              <option value="cancelled">Cancelled</option>
+                                            </>
+                                          );
+                                        })()}
                                       </select>
                                     </div>
 
@@ -1744,11 +1859,30 @@ export default function SaaSCustomers() {
                                         value={editingCustomer.paymentStatus}
                                         onChange={(e) => setEditingCustomer({...editingCustomer, paymentStatus: e.target.value})}
                                       >
-                                        <option value="trial">Trial</option>
-                                        <option value="paid">Paid</option>
-                                        <option value="unpaid">Unpaid</option>
-                                        <option value="failed">Failed</option>
-                                        <option value="pending">Pending</option>
+                                        {(() => {
+                                          // Check if selected package is Trial package
+                                          const selectedPkg = editingCustomer.billingPackageId 
+                                            ? billingPackages?.find((pkg: any) => String(pkg.id) === String(editingCustomer.billingPackageId))
+                                            : null;
+                                          const isTrialPackage = selectedPkg && 
+                                            selectedPkg.name.toLowerCase().includes('trial') &&
+                                            (parseFloat(selectedPkg.price || '0') === 0 || selectedPkg.price === '0.00' || selectedPkg.price === 0);
+                                          
+                                          // If Trial package is selected, only show "Trial" option
+                                          if (isTrialPackage) {
+                                            return <option value="trial">Trial</option>;
+                                          }
+                                          
+                                          // Otherwise, show all options except Trial
+                                          return (
+                                            <>
+                                              <option value="paid">Paid</option>
+                                              <option value="unpaid">Unpaid</option>
+                                              <option value="failed">Failed</option>
+                                              <option value="pending">Pending</option>
+                                            </>
+                                          );
+                                        })()}
                                       </select>
                                     <div className="text-xs text-gray-500 space-y-1 mt-1">
                                       <div>
