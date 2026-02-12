@@ -226,6 +226,7 @@ export interface IStorage {
   // Invoices
   getInvoice(id: number, organizationId: number): Promise<Invoice | undefined>;
   getInvoiceByNumber(invoiceNumber: string, organizationId: number): Promise<Invoice | undefined>;
+  getInvoiceByService(organizationId: number, serviceType: string, serviceIds: string[]): Promise<Invoice | undefined>;
   getInvoicesByOrganization(organizationId: number, status?: string): Promise<Invoice[]>;
   getInvoicesByPatient(patientId: string, organizationId: number): Promise<Invoice[]>;
   createPatientInvoice(invoice: InsertInvoice): Promise<Invoice>;
@@ -1769,6 +1770,20 @@ export class DatabaseStorage implements IStorage {
   async getInvoiceByNumber(invoiceNumber: string, organizationId: number): Promise<Invoice | undefined> {
     const [invoice] = await db.select().from(invoices)
       .where(and(eq(invoices.invoiceNumber, invoiceNumber), eq(invoices.organizationId, organizationId)));
+    return invoice || undefined;
+  }
+
+  async getInvoiceByService(organizationId: number, serviceType: string, serviceIds: string[]): Promise<Invoice | undefined> {
+    if (serviceIds.length === 0) return undefined;
+    const trimmed = serviceIds.map((id) => String(id).trim()).filter(Boolean);
+    if (trimmed.length === 0) return undefined;
+    const [invoice] = await db.select().from(invoices)
+      .where(and(
+        eq(invoices.organizationId, organizationId),
+        eq(invoices.serviceType, serviceType),
+        or(...trimmed.map((id) => eq(invoices.serviceId, id)))
+      ))
+      .limit(1);
     return invoice || undefined;
   }
 

@@ -12,7 +12,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Check, ChevronsUpDown, AlertTriangle, CreditCard, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { Calendar, Clock, MapPin, User, Users, Video, Stethoscope, FileText, Plus, Save, X, Mic, Square, Edit, Trash2 } from "lucide-react";
+import { Calendar, Clock, MapPin, User, Users, Video, Stethoscope, FileText, Plus, Save, X, Mic, Square, Edit, Trash2, Receipt, ExternalLink } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday, startOfWeek, endOfWeek } from "date-fns";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -1149,6 +1149,27 @@ Medical License: [License Number]
     },
   });
 
+  // Fetch invoice for selected appointment (admin only; match by appointment_id only - do not use numeric id for service_id)
+  const aptId = selectedAppointment?.appointmentId ?? (selectedAppointment as any)?.appointment_id;
+  const appointmentIdStr = (aptId != null && String(aptId).trim()) ? String(aptId).trim() : null;
+  const { data: appointmentInvoice, isLoading: appointmentInvoiceLoading } = useQuery({
+    queryKey: ["/api/invoices/by-service", "appointments", appointmentIdStr],
+    enabled: !!showAppointmentDetails && !!selectedAppointment && !!appointmentIdStr && user?.role === "admin",
+    retry: false,
+    queryFn: async () => {
+      if (!appointmentIdStr) return null;
+      try {
+        const params = new URLSearchParams({ serviceType: "appointments", appointmentId: appointmentIdStr });
+        const response = await apiRequest("GET", `/api/invoices/by-service?${params.toString()}`);
+        const data = await response.json();
+        return data;
+      } catch (err: any) {
+        if (err?.message?.includes("404") || err?.message?.includes("not found")) return null;
+        throw err;
+      }
+    },
+  });
+
   const { data: treatmentsList = [], isLoading: isTreatmentsLoading } = useQuery({
     queryKey: ["/api/pricing/treatments"],
     enabled: showNewAppointment || user?.role === "admin",
@@ -2194,6 +2215,9 @@ Medical License: [License Number]
                       selectedAppointment.appointmentDate ||
                       format(new Date(selectedAppointment.scheduledAt), "EEEE, MMMM d, yyyy")}
                   </DialogDescription>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mt-1">
+                    ID: {selectedAppointment.appointmentId || `APT-${selectedAppointment.id}`}
+                  </p>
               </DialogHeader>
               
                 <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 mt-4 shadow-sm">
@@ -2239,6 +2263,72 @@ Medical License: [License Number]
                     </p>
                   </div>
                 </div>
+
+              {user?.role === "admin" && (
+                <div className="mt-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-slate-800/50">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                    <Receipt className="h-4 w-4" />
+                    Invoice
+                  </p>
+                  {appointmentInvoiceLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading invoice…
+                    </div>
+                  ) : appointmentInvoice ? (
+                    <div className="space-y-2 text-sm">
+                      <p className="text-gray-700 dark:text-gray-300">
+                        <span className="text-gray-500 dark:text-gray-400">Invoice No.:</span>{" "}
+                        {appointmentInvoice.invoiceNumber ?? `#${appointmentInvoice.id}`}
+                      </p>
+                      <p className="text-gray-700 dark:text-gray-300">
+                        <span className="text-gray-500 dark:text-gray-400">Status:</span>{" "}
+                        <Badge variant="secondary" className="capitalize">
+                          {String(appointmentInvoice.status ?? "—").toLowerCase()}
+                        </Badge>
+                      </p>
+                      {(appointmentInvoice.dueDate != null || (appointmentInvoice as any).due_date != null) && (
+                        <p className="text-gray-700 dark:text-gray-300">
+                          <span className="text-gray-500 dark:text-gray-400">Due date:</span>{" "}
+                          {format(new Date((appointmentInvoice.dueDate ?? (appointmentInvoice as any).due_date) as string | Date), "dd MMM yyyy")}
+                        </p>
+                      )}
+                      {(appointmentInvoice.createdBy != null || (appointmentInvoice as any).created_by != null) && (
+                        <p className="text-gray-700 dark:text-gray-300">
+                          <span className="text-gray-500 dark:text-gray-400">Created by:</span>{" "}
+                          {(() => {
+                            const createdById = appointmentInvoice.createdBy ?? (appointmentInvoice as any).created_by;
+                            const creator = getCreatedByUser(createdById);
+                            return creator ? `${creator.name} (${creator.role})` : `User #${createdById}`;
+                          })()}
+                        </p>
+                      )}
+                      {appointmentInvoice.totalAmount != null && (
+                        <p className="text-gray-700 dark:text-gray-300">
+                          <span className="text-gray-500 dark:text-gray-400">Total:</span>{" "}
+                          £{Number(appointmentInvoice.totalAmount).toFixed(2)}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">No invoice created.</p>
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                        onClick={() => {
+                          const sub = getActiveSubdomain() || getTenantSubdomain() || "demo";
+                          setLocation(`/${sub}/billing?tab=invoices`);
+                          setShowAppointmentDetails(false);
+                        }}
+                      >
+                        Click here to add invoice
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-4 mt-6">
                 {selectedAppointment.description?.trim() ? (

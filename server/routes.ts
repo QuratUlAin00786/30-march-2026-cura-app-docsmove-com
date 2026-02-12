@@ -2742,6 +2742,39 @@ The Cura EMR Team`,
     }
   });
 
+  // QuickBooks OAuth - get authorization URL to open in popup (requires auth so we have org for state)
+  app.get("/api/quickbooks/auth/url", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const clientId = process.env.QUICKBOOKS_CLIENT_ID;
+      if (!clientId) {
+        return res.status(503).json({
+          error: "QuickBooks is not configured",
+          message: "Missing QUICKBOOKS_CLIENT_ID. Add QuickBooks credentials in environment variables.",
+        });
+      }
+      const organizationId = req.tenant?.id ?? req.user?.organizationId;
+      if (!organizationId) {
+        return res.status(400).json({ error: "Organization context required" });
+      }
+      const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI
+        || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000") + "/api/quickbooks/auth/callback";
+      const scope = "com.intuit.quickbooks.accounting";
+      const state = Buffer.from(JSON.stringify({ orgId: organizationId })).toString("base64");
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: "code",
+        scope,
+        state,
+      });
+      const url = `https://appcenter.intuit.com/connect/oauth2?${params.toString()}`;
+      return res.json({ url });
+    } catch (err: any) {
+      console.error("[QUICKBOOKS] Auth URL error:", err);
+      return res.status(500).json({ error: err.message || "Failed to build QuickBooks authorization URL" });
+    }
+  });
+
   // QuickBooks OAuth callback - MUST be before authMiddleware since OAuth popup has no session
   app.get("/api/quickbooks/auth/callback", tenantMiddleware, async (req: TenantRequest, res) => {
     try {
@@ -6155,7 +6188,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }],
         insuranceProvider: requestData.invoice.insuranceProvider || null,
         notes: requestData.invoice.notes || null,
-        serviceId: appointment.id.toString()
+        serviceId: (appointment as any).appointmentId || appointment.id.toString()
       };
 
       const newInvoice = await db
@@ -9087,8 +9120,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         department: z.string().optional(),
         medicalSpecialtyCategory: z.string().optional(),
         subSpecialty: z.string().optional(),
-        // Patient-specific fields
+        workingDays: z.array(z.string()).optional(),
+        workingHours: z.object({ start: z.string().optional(), end: z.string().optional() }).optional(),
+        // Date of Birth and Gender at Birth (stored on users table for all roles)
         dateOfBirth: z.string().optional(),
+        genderAtBirth: z.string().optional(),
+        // Patient-specific fields
         phone: z.string().optional(),
         nhsNumber: z.string().optional(),
         address: z.object({
@@ -9390,6 +9427,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           userUpdates[key] = value;
         }
       }
+
+      // dateOfBirth and genderAtBirth are stored on the user record for all roles (so Edit User can fetch/display them)
+      if (updates.dateOfBirth !== undefined) userUpdates.dateOfBirth = updates.dateOfBirth;
+      if (updates.genderAtBirth !== undefined) userUpdates.genderAtBirth = updates.genderAtBirth;
 
       // If user is a patient and we're changing the email, also update patient email
       const isEmailChanging = userUpdates.email && userUpdates.email !== currentUser.email;
@@ -12266,26 +12307,155 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  // Get invoice by service type and service ID
+  // Get invoice by service type and service ID and/or appointment_id (matches invoice row or any line item)
   app.get("/api/invoices/by-service", authMiddleware, async (req: TenantRequest, res) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: "User not authenticated" });
       }
 
-      const { serviceType, serviceId } = req.query;
-      if (!serviceType || !serviceId) {
-        return res.status(400).json({ error: "serviceType and serviceId are required" });
+      const { serviceType, serviceId, appointmentId, appointment_id } = req.query;
+      if (!serviceType) {
+        return res.status(400).json({ error: "serviceType is required" });
+      }
+      const appointmentIdParam = appointmentId ?? appointment_id;
+      const idsToMatch: string[] = [];
+      // For appointments: match only by appointment_id (APT string), not numeric id - invoices.service_id stores appointment_id
+      if (String(serviceType).toLowerCase() === "appointments") {
+        if (appointmentIdParam != null && String(appointmentIdParam).trim() !== "") {
+          idsToMatch.push(String(appointmentIdParam).trim());
+        }
+      } else {
+        if (serviceId != null && String(serviceId).trim() !== "") idsToMatch.push(String(serviceId).trim());
+        if (appointmentIdParam != null && String(appointmentIdParam).trim() !== "") {
+          const aptId = String(appointmentIdParam).trim();
+          if (!idsToMatch.includes(aptId)) idsToMatch.push(aptId);
+        }
+      }
+      if (idsToMatch.length === 0) {
+        return res.status(400).json({ error: "At least one of serviceId or appointmentId is required" });
       }
 
       const organizationId = req.tenant!.id;
-      const invoices = await storage.getInvoicesByOrganization(organizationId);
-      
-      const invoice = invoices.find(inv => 
-        inv.serviceType === serviceType && inv.serviceId === serviceId
-      );
+      let invoice: Awaited<ReturnType<typeof storage.getInvoiceByService>> = undefined;
+
+      const mapRowToInvoice = (r: Record<string, unknown>) => ({
+        id: r.id as number,
+        organizationId: r.organization_id as number,
+        invoiceNumber: r.invoice_number as string,
+        patientId: r.patient_id as string,
+        patientName: r.patient_name as string,
+        nhsNumber: (r.nhs_number as string | null) ?? null,
+        serviceType: (r.service_type as string | null) ?? null,
+        serviceId: (r.service_id as string | null) ?? null,
+        dateOfService: r.date_of_service as Date,
+        invoiceDate: r.invoice_date as Date,
+        dueDate: r.due_date as Date,
+        status: r.status as string,
+        invoiceType: r.invoice_type as string,
+        paymentMethod: (r.payment_method as string | null) ?? null,
+        insuranceProvider: (r.insurance_provider as string | null) ?? null,
+        doctorId: (r.doctor_id as number | null) ?? null,
+        subtotal: r.subtotal as string,
+        tax: r.tax as string,
+        discount: r.discount as string,
+        totalAmount: r.total_amount as string,
+        paidAmount: r.paid_amount as string,
+        items: r.items as Invoice["items"],
+        insurance: r.insurance as Invoice["insurance"],
+        payments: r.payments as Invoice["payments"],
+        notes: (r.notes as string | null) ?? null,
+        createdBy: (r.created_by as number | null) ?? null,
+        createdAt: r.created_at as Date,
+        updatedAt: (r.updated_at as Date | null) ?? null
+      });
+
+      // 1) Unqualified "invoices" (uses connection search_path: public then curauser24nov25)
+      if (idsToMatch.length > 0) {
+        const placeholders = idsToMatch.map((_, i) => `$${i + 3}`).join(", ");
+        try {
+          const { rows } = await pool.query(
+            `SELECT * FROM invoices WHERE organization_id = $1 AND service_type = $2 AND service_id IN (${placeholders}) LIMIT 1`,
+            [organizationId, String(serviceType), ...idsToMatch]
+          );
+          if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
+        } catch (_) { /* ignore */ }
+        // 1b) Same with TRIM(service_id) in case of leading/trailing spaces
+        if (!invoice && idsToMatch.length === 1) {
+          try {
+            const { rows } = await pool.query(
+              `SELECT * FROM invoices WHERE organization_id = $1 AND service_type = $2 AND TRIM(service_id) = TRIM($3) LIMIT 1`,
+              [organizationId, String(serviceType), idsToMatch[0]]
+            );
+            if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
+          } catch (_) { /* ignore */ }
+        }
+        // 1c) For appointments: also match rows where service_type IS NULL (legacy data)
+        if (!invoice && String(serviceType).toLowerCase() === "appointments" && idsToMatch.length === 1) {
+          try {
+            const { rows } = await pool.query(
+              `SELECT * FROM invoices WHERE organization_id = $1 AND (service_type = $2 OR service_type IS NULL) AND TRIM(COALESCE(service_id, '')) = TRIM($3) LIMIT 1`,
+              [organizationId, String(serviceType), idsToMatch[0]]
+            );
+            if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
+          } catch (_) { /* ignore */ }
+        }
+      }
+
+      // 2) Explicit tenant schema (e.g. curauser24nov25.invoices)
+      if (!invoice && idsToMatch.length > 0) {
+        const schemaName = process.env.INVOICES_SCHEMA || "curauser24nov25";
+        try {
+          const placeholders = idsToMatch.map((_, i) => `$${i + 3}`).join(", ");
+          const { rows } = await pool.query(
+            `SELECT * FROM "${schemaName}".invoices WHERE organization_id = $1 AND service_type = $2 AND service_id IN (${placeholders}) LIMIT 1`,
+            [organizationId, String(serviceType), ...idsToMatch]
+          );
+          if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
+        } catch (schemaErr: any) {
+          console.warn("[by-service] Tenant schema query failed:", schemaErr?.message || schemaErr);
+        }
+      }
+
+      if (!invoice && idsToMatch.length > 0) {
+        const client = await pool.connect();
+        try {
+          await client.query({ text: "SET LOCAL search_path TO curauser24nov25, public" });
+          const placeholders = idsToMatch.map((_, i) => `$${i + 3}`).join(", ");
+          const { rows } = await client.query(
+            `SELECT * FROM invoices WHERE organization_id = $1 AND service_type = $2 AND service_id IN (${placeholders}) LIMIT 1`,
+            [organizationId, String(serviceType), ...idsToMatch]
+          );
+          if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
+        } finally {
+          client.release();
+        }
+      }
 
       if (!invoice) {
+        invoice = await storage.getInvoiceByService(organizationId, String(serviceType), idsToMatch);
+      }
+
+      if (!invoice) {
+        const invoices = await storage.getInvoicesByOrganization(organizationId);
+        const match = (val: string | number | null | undefined) =>
+          val != null && idsToMatch.includes(String(val).trim());
+        const getInvServiceType = (inv: any) => inv.serviceType ?? inv.service_type ?? null;
+        const getInvServiceId = (inv: any) => {
+          const v = inv.serviceId ?? inv.service_id ?? null;
+          return v != null ? String(v).trim() : null;
+        };
+        invoice = invoices.find(inv => {
+          if (getInvServiceType(inv) !== serviceType) return false;
+          if (match(getInvServiceId(inv))) return true;
+          const items = inv.items as Array<{ serviceType?: string; serviceId?: string | number; service_id?: string }> | null | undefined;
+          if (Array.isArray(items) && items.some((i) => i && match(i.serviceId ?? (i as any).service_id))) return true;
+          return false;
+        }) ?? undefined;
+      }
+
+      if (!invoice) {
+        console.warn("[by-service] 404 invoice not found", { organizationId, serviceType, idsToMatch });
         return res.status(404).json({ error: "Invoice not found" });
       }
 
@@ -27856,6 +28026,29 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       } : null;
 
       const serviceIds = invoiceData.serviceIds || invoiceData.lineItems.map((item) => item.serviceId).filter(Boolean).map(String);
+      let invoiceServiceId: string | null = serviceIds[0] || null;
+      // For appointments: store appointment_id (APT string) in service_id, not numeric id
+      if (invoiceData.serviceType === "appointments" && invoiceServiceId && /^\d+$/.test(invoiceServiceId)) {
+        const apt = await storage.getAppointment(parseInt(invoiceServiceId, 10), req.tenant!.id);
+        if (apt && (apt as any).appointmentId) {
+          invoiceServiceId = (apt as any).appointmentId;
+        }
+      }
+      const itemsWithServiceId = invoiceData.lineItems.map((item: any) => {
+        let sid = item.serviceId;
+        if (item.serviceType === "appointments" && sid != null && /^\d+$/.test(String(sid)) && invoiceServiceId && !/^\d+$/.test(invoiceServiceId)) {
+          sid = invoiceServiceId;
+        }
+        return {
+          code: item.code,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.total,
+          serviceType: item.serviceType,
+          serviceId: sid
+        };
+      });
 
       const invoiceToCreate = enforceCreatedBy(req, {
         organizationId: req.tenant!.id,
@@ -27880,19 +28073,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         totalAmount: computedTotal,
         // Set paidAmount to totalAmount when Cash payment method (immediate payment)
         paidAmount: (invoiceData.paymentMethod === "Cash") ? computedTotal : 0,
-        items: invoiceData.lineItems.map((item) => ({
-          code: item.code,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: item.total,
-          serviceType: item.serviceType,
-          serviceId: item.serviceId
-        })),
+        items: itemsWithServiceId,
         notes: invoiceData.notes || null,
         insurance: insuranceData,
         payments: [],
-        serviceId: serviceIds[0] || null,
+        serviceId: invoiceServiceId,
         serviceType: invoiceData.serviceType,
         doctorId: invoiceData.doctorId || null
       });

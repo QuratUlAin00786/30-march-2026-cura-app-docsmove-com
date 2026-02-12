@@ -4203,7 +4203,6 @@ export default function MessagingPage() {
                 <Select value={messageFilter} onValueChange={setMessageFilter}>
                     <SelectTrigger className="w-[140px] h-9">
                       <SelectValue />
-                      <ChevronDown className="h-4 w-4 ml-2" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Messages</SelectItem>

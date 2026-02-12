@@ -415,10 +415,38 @@ const validatePasswordValue = (value: string, ctx: z.RefinementCtx) => {
   });
 };
 
+/**
+ * Validates First Name or Last Name:
+ * 1. Only letters (A-Z, a-z), spaces, hyphens (-), apostrophes (')
+ * 2. Between 2 and 50 characters
+ * 3. No more than 2 identical characters in a row
+ * 4. No numbers, symbols, or nonsense (e.g. "hhhhhh", "aaaaaa")
+ */
+function validateUserName(name: string): { valid: true } | { valid: false; reason: string } {
+  const trimmed = name.trim();
+  if (trimmed.length < 2) return { valid: false, reason: "Invalid – must be at least 2 characters." };
+  if (trimmed.length > 50) return { valid: false, reason: "Invalid – must be between 2 and 50 characters." };
+  if (!/^[A-Za-z\s\-']+$/.test(trimmed)) return { valid: false, reason: "Invalid – must contain only letters, spaces, hyphens, or apostrophes." };
+  if (/(.)\1{2,}/.test(trimmed)) return { valid: false, reason: "Invalid – contains excessive repeated characters." };
+  return { valid: true };
+}
+
 const userSchema = z.object({
   email: z.string().min(1, "Email address is required").email("Please enter a valid email address"),
-  firstName: z.string().min(2, "First name must be at least 2 characters").max(30, "First name must not exceed 30 characters"),
-  lastName: z.string().min(2, "Last name must be at least 2 characters").max(30, "Last name must not exceed 30 characters"),
+  firstName: z.string().trim().min(1, "First name is required").refine(
+    (val) => validateUserName(val).valid,
+    (val) => {
+      const r = validateUserName(val);
+      return { message: r.valid ? "" : r.reason };
+    }
+  ),
+  lastName: z.string().trim().min(1, "Last name is required").refine(
+    (val) => validateUserName(val).valid,
+    (val) => {
+      const r = validateUserName(val);
+      return { message: r.valid ? "" : r.reason };
+    }
+  ),
   role: z.string().min(1, "Role is required"),
   department: z.string().optional(),
   medicalSpecialtyCategory: z.string().optional(),
@@ -1240,10 +1268,11 @@ export default function UserManagement() {
     }
   };
 
+  // Fetch subscription limit on page load so Add New User doesn't trigger a fetch (only Edit User loads existing data)
   const { data: subscriptionLimitData, isLoading: isLoadingSubscriptionLimit } = useQuery({
     queryKey: ["/api/users/check-subscription-limit"],
     queryFn: fetchSubscriptionLimit,
-    enabled: isCreateModalOpen && !editingUser, // Only fetch when creating new user
+    enabled: true,
   });
 
   const [showSubscribeRequiredModal, setShowSubscribeRequiredModal] = useState(false);
@@ -1455,6 +1484,7 @@ export default function UserManagement() {
     setDobDay(value);
     form.setValue("dobDay", value);
     validateDOB(value, dobMonth, dobYear);
+    if (value && dobMonth && dobYear) form.clearErrors("dobDay");
   };
 
   const handleDobMonthChange = (value: string) => {
@@ -1471,6 +1501,7 @@ export default function UserManagement() {
     }
     
     validateDOB(dobDay, value, dobYear);
+    if (dobDay && value && dobYear) form.clearErrors("dobDay");
   };
 
   const handleDobYearChange = (value: string) => {
@@ -1486,6 +1517,7 @@ export default function UserManagement() {
     }
     
     validateDOB(dobDay, dobMonth, value);
+    if (dobDay && dobMonth && value) form.clearErrors("dobDay");
   };
   
   // Auto-lookup city and state from postcode based on selected country
@@ -1706,55 +1738,93 @@ export default function UserManagement() {
     fetchUsers();
   }, []);
 
+  // Explicit defaults for "Add New User" – used so form.reset(values) always clears to empty after Edit User
+  const addNewUserDefaultValues: UserFormData = {
+    email: "",
+    firstName: "",
+    lastName: "",
+    role: "doctor",
+    department: "",
+    workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+    workingHours: { start: "09:00", end: "17:00" },
+    password: "",
+    dateOfBirth: "",
+    dobDay: "",
+    dobMonth: "",
+    dobYear: "",
+    phone: "",
+    nhsNumber: "",
+    genderAtBirth: "",
+    address: {
+      street: "",
+      city: "",
+      state: "",
+      building: "",
+      postcode: "",
+      country: "United Kingdom",
+    },
+    emergencyContact: {
+      name: "",
+      relationship: "",
+      phone: "",
+      email: "",
+    },
+    insuranceInfo: {
+      provider: "",
+      policyNumber: "",
+      memberNumber: "",
+      planType: "",
+      effectiveDate: "",
+    },
+  };
+
   const form = useForm<UserFormData>({
     resolver: zodResolver(userSchema),
-    mode: "onSubmit",
+    mode: "onChange",
     reValidateMode: "onChange",
     shouldFocusError: true,
-    defaultValues: {
-      email: "",
-      firstName: "",
-      lastName: "",
-      role: "doctor",
-      department: "",
-      workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-      workingHours: { start: "09:00", end: "17:00" },
-      password: "",
-      // Patient defaults
-      dateOfBirth: "",
-      dobDay: "",
-      dobMonth: "",
-      dobYear: "",
-      phone: "",
-      nhsNumber: "",
-      genderAtBirth: "",
-      address: {
-        street: "",
-        city: "",
-        state: "",
-        building: "",
-        postcode: "",
-        country: "United Kingdom",
-      },
-      emergencyContact: {
-        name: "",
-        relationship: "",
-        phone: "",
-        email: "",
-      },
-      insuranceInfo: {
-        provider: "",
-        policyNumber: "",
-        memberNumber: "",
-        planType: "",
-        effectiveDate: "",
-      },
-    },
+    defaultValues: addNewUserDefaultValues,
   });
+
+  // When editing, require these fields to be filled before enabling "Update User"
+  const watched = form.watch();
+  const isEditFormValid = !editingUser || (() => {
+    const base = Boolean(
+      watched.email?.trim() &&
+      watched.firstName?.trim() &&
+      watched.lastName?.trim() &&
+      watched.role?.trim() &&
+      watched.genderAtBirth?.trim() &&
+      dobDay && dobMonth && dobYear
+    );
+    if (!base) return false;
+    if (selectedRole === "patient") {
+      return Boolean(
+        watched.phone?.trim() &&
+        watched.address?.street?.trim() &&
+        watched.address?.city?.trim() &&
+        watched.address?.postcode?.trim() &&
+        watched.address?.country?.trim() &&
+        watched.department?.trim() &&
+        watched.emergencyContact?.name?.trim() &&
+        watched.emergencyContact?.relationship?.trim()
+      );
+    }
+    return true;
+  })();
+
+  // When Edit User modal opens for a Pharmacist, ensure Pharmacist Subcategory is loaded from user data
+  useEffect(() => {
+    if (editingUser && editingUser.role?.toLowerCase() === 'pharmacist') {
+      const value = editingUser.medicalSpecialtyCategory || "";
+      setSelectedPharmacistSubcategory(value);
+      form.setValue("medicalSpecialtyCategory", value, { shouldValidate: false });
+    }
+  }, [editingUser]);
 
   const resetCreateUserFormState = () => {
     setEditingUser(null);
-    form.reset();
+    form.reset(addNewUserDefaultValues);
     setSelectedRole("doctor");
     setSelectedSpecialtyCategory("");
     setSelectedSubSpecialty("");
@@ -2590,23 +2660,22 @@ export default function UserManagement() {
       }
     }
     
+    // Validate Date of Birth (required for all users when creating or editing)
+    if (!dobDay || !dobMonth || !dobYear) {
+      form.setError("dobDay", { type: "manual", message: "Please add Date of Birth" });
+      form.trigger("dobDay");
+      return;
+    }
+
     // Validate Gender at Birth (required for all users)
     if (!data.genderAtBirth || data.genderAtBirth.trim() === '') {
-      form.setError("genderAtBirth", { type: "manual", message: "Gender at Birth is required" });
+      form.setError("genderAtBirth", { type: "manual", message: "Please add Gender at Birth" });
       form.trigger("genderAtBirth");
       return;
     }
     
-    // Validate Date of Birth for patient role (required)
+    // Validate Date of Birth for patient role (additional checks)
     if (data.role === 'patient') {
-      if (!dobDay || !dobMonth || !dobYear) {
-        toast({
-          title: "Date of Birth Required",
-          description: "Date of birth is required for patient accounts",
-          variant: "destructive",
-        });
-        return;
-      }
       
       // Validate NHS Number if Insurance Provider is not Self-Pay
       if (insuranceProvider && insuranceProvider !== "Self-Pay") {
@@ -3256,7 +3325,7 @@ export default function UserManagement() {
                       id="firstName"
                       {...form.register("firstName")}
                       minLength={2}
-                      maxLength={30}
+                      maxLength={50}
                       required
                       className={form.formState.errors.firstName ? "border-red-500" : ""}
                     />
@@ -3271,7 +3340,7 @@ export default function UserManagement() {
                       id="lastName"
                       {...form.register("lastName")}
                       minLength={2}
-                      maxLength={30}
+                      maxLength={50}
                       required
                       className={form.formState.errors.lastName ? "border-red-500" : ""}
                     />
@@ -3884,7 +3953,7 @@ export default function UserManagement() {
                 {/* Basic Information - Date of Birth and Gender at Birth */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Date of Birth</Label>
+                    <Label>Date of Birth{editingUser && <span className="text-red-500 ml-0.5">(Required)</span>}</Label>
                     <div className="grid grid-cols-3 gap-2">
                       <div className="space-y-1">
                         <Select 
@@ -3954,12 +4023,12 @@ export default function UserManagement() {
                         )}
                       </div>
                     </div>
-                    {dobErrors.combined && (
-                      <p className="text-sm text-red-500">{dobErrors.combined}</p>
+                    {(dobErrors.combined || form.formState.errors.dobDay) && (
+                      <p className="text-sm text-red-500">{form.formState.errors.dobDay?.message || dobErrors.combined}</p>
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="genderAtBirth">Gender at Birth</Label>
+                    <Label htmlFor="genderAtBirth">Gender at Birth{editingUser && <span className="text-red-500 ml-0.5">(Required)</span>}</Label>
                     <Select 
                       onValueChange={(value) => {
                         form.setValue("genderAtBirth", value);
@@ -4751,6 +4820,9 @@ export default function UserManagement() {
                     {form.formState.errors.password && (
                       <p className="text-sm text-red-500">{form.formState.errors.password.message}</p>
                     )}
+                    {editingUser && (
+                      <p className="text-xs text-muted-foreground">Leave blank to keep your current password.</p>
+                    )}
                   </div>
                 </div>
 
@@ -4800,6 +4872,7 @@ export default function UserManagement() {
                       updateUserMutation.isPending || 
                       emailValidationStatus === 'exists' ||
                       emailValidationStatus === 'checking' ||
+                      (editingUser && !isEditFormValid) ||
                       (!editingUser && subscriptionLimitData && (
                         selectedRole === 'patient' 
                           ? subscriptionLimitData.remainingPatients <= 0 
@@ -4850,15 +4923,26 @@ export default function UserManagement() {
                           className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 bg-white dark:bg-gray-900"
                           data-testid={`user-card-${user.id}`}
                         >
-                          <div className="flex items-center space-x-4">
-                            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                          <div className="flex items-center space-x-4 min-w-0 flex-1">
+                            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center flex-shrink-0">
                               {getRoleIcon(user.role)}
                             </div>
-                            <div>
-                              <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                                {user.firstName || 'N/A'} {user.lastName || 'N/A'}
+                            <div className="min-w-0 flex-1">
+                              <h3
+                                className="font-medium text-gray-900 dark:text-gray-100 truncate"
+                                title={`${user.firstName || 'N/A'} ${user.lastName || 'N/A'}`.trim()}
+                              >
+                                {(() => {
+                                  const fullName = `${user.firstName || 'N/A'} ${user.lastName || 'N/A'}`.trim();
+                                  return fullName.length > 20 ? fullName.slice(0, 20) + '...' : fullName;
+                                })()}
                               </h3>
-                              <p className="text-sm text-gray-500 dark:text-gray-400">{user.email}</p>
+                              <p
+                                className="text-sm text-gray-500 dark:text-gray-400 truncate"
+                                title={user.email}
+                              >
+                                {user.email.length > 20 ? user.email.slice(0, 20) + '...' : user.email}
+                              </p>
                               {user.department && user.department.trim() && (
                                 <p className="text-xs text-gray-400 dark:text-gray-500">{user.department}</p>
                               )}

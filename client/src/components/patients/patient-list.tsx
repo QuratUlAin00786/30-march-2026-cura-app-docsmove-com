@@ -2820,34 +2820,34 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
         viewMode === "list" ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full table-fixed">
                 <thead>
                   <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[7%] min-w-0">
                       Patient No.
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%] min-w-0">
                       Full Name
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[10%] min-w-0">
                       DOB
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%] min-w-0">
                       Mobile
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%] min-w-0">
                       Address
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[8%] min-w-0">
                       Risk
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%] min-w-0">
                       Email
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[10%] min-w-0">
                       Remind / Flag
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[8%] min-w-0">
                       Actions
                     </th>
                   </tr>
@@ -2936,34 +2936,34 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
       ) : viewMode === "list" ? (
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full table-fixed">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[7%] min-w-0">
                     Patient No.
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%] min-w-0">
                     Full Name
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[10%] min-w-0">
                     DOB
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%] min-w-0">
                     Mobile
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%] min-w-0">
                     Address
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[8%] min-w-0">
                     Risk
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%] min-w-0">
                     Email
                   </th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[10%] min-w-0">
                     Remind / Flag
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[8%] min-w-0">
                     Actions
                   </th>
                 </tr>
@@ -2975,16 +2975,18 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                     className="hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
                     data-testid={`row-patient-${patient.id}`}
                   >
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                      {patient.patientId}
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-0">
+                      <div className="truncate" title={patient.patientId}>{patient.patientId}</div>
                     </td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                      <div className="flex items-center gap-2">
-                        {patient.firstName} {patient.lastName}
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="truncate" title={`${patient.firstName} ${patient.lastName}`.trim()}>
+                          {patient.firstName} {patient.lastName}
+                        </span>
                         {patient.medicalHistory?.allergies && patient.medicalHistory.allergies.length > 0 && (
                           <TooltipProvider>
                             <Tooltip>
-                              <TooltipTrigger>
+                              <TooltipTrigger className="flex-shrink-0">
                                 <AlertTriangle className="h-3 w-3 text-red-500" />
                               </TooltipTrigger>
                               <TooltipContent>
@@ -2995,40 +2997,55 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                      {patient.dateOfBirth ? format(new Date(patient.dateOfBirth), 'dd.MM.yyyy') : ''} 
-                      {patient.dateOfBirth && (() => {
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-0">
+                      <div className="truncate" title={patient.dateOfBirth ? format(new Date(patient.dateOfBirth), 'dd.MM.yyyy') + (() => {
                         const birthDate = new Date(patient.dateOfBirth);
                         const today = new Date();
                         const age = today.getFullYear() - birthDate.getFullYear() - 
                           (today.getMonth() < birthDate.getMonth() || 
                           (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
                         return ` (${age})`;
-                      })()}
+                      })() : ''}>
+                        {patient.dateOfBirth ? format(new Date(patient.dateOfBirth), 'dd.MM.yyyy') : ''} 
+                        {patient.dateOfBirth && (() => {
+                          const birthDate = new Date(patient.dateOfBirth);
+                          const today = new Date();
+                          const age = today.getFullYear() - birthDate.getFullYear() - 
+                            (today.getMonth() < birthDate.getMonth() || 
+                            (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
+                          return ` (${age})`;
+                        })()}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                      {patient.phone || ''}
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-0">
+                      <div className="truncate" title={patient.phone || ''}>{patient.phone || ''}</div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                      {patient.address?.street && patient.address?.city ? 
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-0">
+                      <div className="truncate" title={patient.address?.street && patient.address?.city ? 
                         `${patient.address.street}, ${patient.address.postcode || ''} ${patient.address.city || ''}`.trim() : 
-                        ''
-                      }
+                        ''}>
+                        {patient.address?.street && patient.address?.city ? 
+                          `${patient.address.street}, ${patient.address.postcode || ''} ${patient.address.city || ''}`.trim() : 
+                          ''
+                        }
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {patient.riskLevel && (
-                        <Badge
-                          className={`text-xs ${getRiskLevelColor(patient.riskLevel)}`}
-                          style={{ backgroundColor: getRiskLevelBgColor(patient.riskLevel) }}
-                        >
-                          {patient.riskLevel}
-                        </Badge>
-                      )}
+                    <td className="px-4 py-3 text-sm max-w-0">
+                      <div className="truncate min-w-0">
+                        {patient.riskLevel && (
+                          <Badge
+                            className={`text-xs ${getRiskLevelColor(patient.riskLevel)}`}
+                            style={{ backgroundColor: getRiskLevelBgColor(patient.riskLevel) }}
+                          >
+                            {patient.riskLevel}
+                          </Badge>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                      <div className="flex items-center gap-1">
-                        <Mail className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                        <span className="truncate">{patient.email || "No email"}</span>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-0">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <Mail className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                        <span className="truncate" title={patient.email || "No email"}>{patient.email || "No email"}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-center">
@@ -3168,19 +3185,19 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-5 min-w-0 w-full">
           {displayPatients.map((patient: any) => {
             return (
               <Card
                 key={patient.id}
-                className="hover:shadow-md transition-shadow h-[400px] flex flex-col"
+                className="hover:shadow-md transition-shadow min-h-0 flex flex-col overflow-hidden"
               >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-3">
-                      <Avatar className="h-12 w-12">
+                <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-3">
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                      <Avatar className="h-9 w-9 sm:h-10 sm:w-10 flex-shrink-0">
                         <AvatarFallback
-                          className="text-white font-semibold"
+                          className="text-white text-xs sm:text-sm font-semibold"
                           style={{ backgroundColor: "#4A7DFF" }}
                         >
                           {getPatientInitials(
@@ -3189,19 +3206,30 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                           )}
                         </AvatarFallback>
                       </Avatar>
-                      <div>
-                        <CardTitle className="text-lg flex items-center gap-2 min-w-0">
-                          <span className="patient-name truncate flex-shrink">
-                            {patient.firstName} {patient.lastName}
-                          </span>
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 min-w-0">
                           <TooltipProvider>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="truncate block cursor-default">
+                                  {patient.firstName} {patient.lastName}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="max-w-xs break-words">
+                                  {[patient.firstName, patient.lastName].filter(Boolean).join(" ")}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <div className="flex items-center gap-1 flex-shrink-0">
                               {patient.medicalHistory?.allergies &&
                                 patient.medicalHistory.allergies.length > 0 && (
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <div className="flex-shrink-0">
-                                        <AlertTriangle className="h-4 w-4 text-red-500" />
+                                        <AlertTriangle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-red-500" />
                                       </div>
                                     </TooltipTrigger>
                                     <TooltipContent>
@@ -3220,7 +3248,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <div className="flex-shrink-0">
-                                        <Clock className="h-4 w-4 text-orange-500" />
+                                        <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-orange-500" />
                                       </div>
                                     </TooltipTrigger>
                                     <TooltipContent>
@@ -3236,7 +3264,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                             </div>
                           </TooltipProvider>
                         </CardTitle>
-                        <p className="text-sm patient-info">
+                        <p className="text-xs sm:text-sm text-muted-foreground truncate">
                           {patient.dateOfBirth
                             ? (() => {
                                 const birthDate = new Date(patient.dateOfBirth);
@@ -3256,16 +3284,16 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         </p>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end space-y-1.5 h-auto min-h-[60px] overflow-visible gap-1.5">
+                    <div className="flex flex-col items-end space-y-1 gap-1 flex-shrink-0">
                       {patient.riskLevel && (
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           {editingRiskLevelId === patient.id ? (
                             <div className="flex items-center gap-1 flex-shrink-0">
                               <Select
                                 value={tempRiskLevel}
                                 onValueChange={setTempRiskLevel}
                               >
-                                <SelectTrigger className="w-[80px] h-6 text-xs flex-shrink-0">
+                                <SelectTrigger className="w-[72px] h-6 text-[10px] sm:text-xs flex-shrink-0">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -3294,9 +3322,9 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                               </Button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <div className="flex items-center gap-1 flex-shrink-0">
                               <Badge
-                                className={`text-xs flex-shrink-0 whitespace-nowrap ${getRiskLevelColor(patient.riskLevel)}`}
+                                className={`text-[10px] sm:text-xs flex-shrink-0 whitespace-nowrap max-w-[4.5rem] truncate ${getRiskLevelColor(patient.riskLevel)}`}
                                 style={{
                                   backgroundColor: getRiskLevelBgColor(
                                     patient.riskLevel,
@@ -3321,14 +3349,14 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                       {patient.insuranceInfo?.provider && (
                         <Badge
                           variant="outline"
-                          className="text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
+                          className="text-[10px] sm:text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 max-w-[5rem] truncate"
                         >
                           {patient.insuranceInfo.provider === "NHS (National Health Service)" ? "NHS" : patient.insuranceInfo.provider.toUpperCase()}
                         </Badge>
                       )}
                       {patient.isInsured && (
                         <Badge
-                          className="text-xs text-black flex-shrink-0 whitespace-nowrap"
+                          className="text-[10px] sm:text-xs text-black flex-shrink-0 whitespace-nowrap"
                           style={{ backgroundColor: "#FFFACD" }}
                           data-testid={`badge-insured-${patient.id}`}
                         >
@@ -3339,58 +3367,60 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                   </div>
                 </CardHeader>
 
-                <CardContent className="space-y-3 overflow-visible pb-6 flex-1 flex flex-col justify-between">
-                  <div className="space-y-2 text-sm">
+                <CardContent className="p-3 sm:p-4 space-y-2 sm:space-y-3 overflow-hidden pb-4 sm:pb-5 flex-1 flex flex-col justify-between min-h-0">
+                  <div className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm min-w-0">
                     {patient.phone && (
-                      <div className="flex items-center">
-                        <Phone className="h-4 w-4 mr-2 text-gray-600 dark:text-gray-300" />
-                        <span className="text-neutral-600 dark:text-neutral-300">
+                      <div className="flex items-center min-w-0">
+                        <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 flex-shrink-0 text-gray-600 dark:text-gray-300" />
+                        <span className="text-neutral-600 dark:text-neutral-300 truncate">
                           {patient.phone}
                         </span>
                       </div>
                     )}
                     {patient.email && (
-                      <div className="flex items-center truncate">
-                        <Mail className="h-4 w-4 mr-2 text-gray-600 dark:text-gray-300" />
+                      <div className="flex items-center min-w-0">
+                        <Mail className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 flex-shrink-0 text-gray-600 dark:text-gray-300" />
                         <span className="text-neutral-600 dark:text-neutral-300 truncate">
                           {patient.email}
                         </span>
                       </div>
                     )}
                     {patient.nhsNumber && (
-                      <div className="flex items-center text-neutral-600 dark:text-white">
-                        <FileText className="h-4 w-4 mr-2" />
-                        NHS: {patient.nhsNumber}
+                      <div className="flex items-center min-w-0 text-neutral-600 dark:text-white">
+                        <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 flex-shrink-0" />
+                        <span className="truncate">NHS: {patient.nhsNumber}</span>
                       </div>
                     )}
                     {patient.genderAtBirth && (
-                      <div className="flex items-center text-neutral-600 dark:text-neutral-300">
-                        <User className="h-4 w-4 mr-2" />
-                        Gender: {patient.genderAtBirth}
+                      <div className="flex items-center min-w-0 text-neutral-600 dark:text-neutral-300">
+                        <User className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 flex-shrink-0" />
+                        <span className="truncate">Gender: {patient.genderAtBirth}</span>
                       </div>
                     )}
                     {patient.address?.postcode && (
-                      <div className="flex items-center text-neutral-600 dark:text-neutral-300">
-                        <MapPin className="h-4 w-4 mr-2" />
-                        {patient.address.postcode}
-                        {patient.address.city && `, ${patient.address.city}`}
+                      <div className="flex items-center min-w-0 text-neutral-600 dark:text-neutral-300">
+                        <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 flex-shrink-0" />
+                        <span className="truncate">
+                          {patient.address.postcode}
+                          {patient.address.city && `, ${patient.address.city}`}
+                        </span>
                       </div>
                     )}
                   </div>
 
                   {patient.medicalHistory?.chronicConditions &&
                     patient.medicalHistory.chronicConditions.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                      <div className="space-y-0.5 sm:space-y-1 min-w-0">
+                        <p className="text-[10px] sm:text-xs font-medium text-neutral-700 dark:text-neutral-300">
                           Conditions:
                         </p>
-                        <div className="flex flex-wrap gap-1 max-w-full">
+                        <div className="flex flex-wrap gap-1 max-w-full min-w-0">
                           {patient.medicalHistory.chronicConditions
                             .slice(0, 2)
                             .map((condition: string, index: number) => (
                               <Badge
                                 key={index}
-                                className={`text-xs flex-shrink-0 whitespace-nowrap ${getConditionColor(condition)}`}
+                                className={`text-[10px] sm:text-xs flex-shrink-0 max-w-full truncate ${getConditionColor(condition)}`}
                                 style={{
                                   backgroundColor:
                                     getConditionBgColor(condition),
@@ -3403,12 +3433,9 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                             2 && (
                             <Badge
                               variant="outline"
-                              className="text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
+                              className="text-[10px] sm:text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
                             >
-                              +
-                              {patient.medicalHistory.chronicConditions.length -
-                                2}{" "}
-                              more
+                              +{patient.medicalHistory.chronicConditions.length - 2} more
                             </Badge>
                           )}
                         </div>
@@ -3416,8 +3443,8 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                     )}
 
                   {patient.lastVisit && (
-                    <div className="flex items-center text-xs text-neutral-500 dark:text-neutral-400">
-                      <Clock className="h-3 w-3 mr-1" />
+                    <div className="flex items-center text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400 truncate min-w-0">
+                      <Clock className="h-3 w-3 mr-1 flex-shrink-0" />
                       Last visit:{" "}
                       {formatDistanceToNow(new Date(patient.lastVisit), {
                         addSuffix: true,
@@ -3428,7 +3455,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                   {/* Display patient flags - Show only 2, hide others */}
                   {patient.flags && patient.flags.length > 0 && (
                     <TooltipProvider>
-                      <div className="flex flex-wrap gap-1.5 mt-2 min-h-[24px] max-w-full">
+                      <div className="flex flex-wrap gap-1 mt-1.5 sm:mt-2 min-h-[20px] sm:min-h-[24px] max-w-full min-w-0">
                         {patient.flags.slice(0, 2).map((flag: string, index: number) => {
                           const flagParts = flag.split(":");
                           const [category, , reason] = flagParts;
@@ -3452,10 +3479,10 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                           return (
                             <Tooltip key={index}>
                               <TooltipTrigger asChild>
-                                <div className="relative group flex-shrink-0 max-w-full">
+                                <div className="relative group flex-shrink-0 max-w-full min-w-0">
                                   <Badge
                                     variant="outline"
-                                    className="text-xs pr-6 cursor-pointer whitespace-nowrap flex-shrink-0"
+                                    className="text-[10px] sm:text-xs pr-5 sm:pr-6 cursor-pointer max-w-[7rem] sm:max-w-none truncate flex-shrink-0"
                                   >
                                     {getFlagTypeDisplay(category)}
                                     <Button
@@ -3487,7 +3514,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         {patient.flags.length > 2 && (
                           <Badge
                             variant="outline"
-                            className="text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
+                            className="text-[10px] sm:text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 whitespace-nowrap"
                           >
                             +{patient.flags.length - 2} more
                           </Badge>
@@ -3496,110 +3523,140 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                     </TooltipProvider>
                   )}
 
-                  <div className="space-y-2 mt-4">
+                  <div className="space-y-1.5 sm:space-y-2 mt-2 sm:mt-4">
                     {/* Primary action buttons - Medical Records prominently featured */}
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5 sm:gap-2">
                       <Button
-                        size="default"
+                        size="sm"
                         variant="outline"
                         onClick={() => {
                           const subdomain = getTenantSubdomain();
                           setLocation(`/${subdomain}/patients/${patient.id}/records`);
                         }}
-                        className="flex-1 text-sm text-white"
+                        className="flex-1 text-xs sm:text-sm text-white min-w-0"
                         style={{
                           borderColor: "#4A7DFF",
                           backgroundColor: "#4A7DFF",
                         }}
                       >
-                        <FileText className="h-4 w-4 mr-1" />
-                        Records
+                        <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 flex-shrink-0" />
+                        <span className="truncate">Records</span>
                       </Button>
                       <Button
-                        size="default"
+                        size="sm"
                         onClick={() => handleBookAppointment(patient)}
-                        className="flex-1 text-sm text-white"
+                        className="flex-1 text-xs sm:text-sm text-white min-w-0"
                         style={{ backgroundColor: "#7279FB" }}
                       >
-                        <Calendar className="h-4 w-4 mr-1" />
-                        Book
+                        <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 flex-shrink-0" />
+                        <span className="truncate">Book</span>
                       </Button>
                     </div>
 
-                    {/* Secondary actions */}
+                    {/* Secondary actions - icon only by default; label on hover to prevent overlapping */}
                     <div
-                      className={`grid ${canDeletePatient ? "grid-cols-5" : canEditPatient ? "grid-cols-4" : "grid-cols-3"} gap-1`}
+                      className={`flex items-center justify-between gap-1 flex-wrap`}
                     >
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleViewPatient(patient)}
-                        className="flex-1 text-xs h-7"
-                        data-testid={`button-view-${patient.id}`}
-                      >
-                        <Eye className="h-3 w-3 mr-1" />
-                        View
-                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleViewPatient(patient)}
+                              className="h-8 w-8 shrink-0"
+                              data-testid={`button-view-${patient.id}`}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent><p>View</p></TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       {canEditPatient && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleEditPatient(patient)}
-                          className="flex-1 text-xs h-7"
-                          data-testid={`button-edit-${patient.id}`}
-                        >
-                          <Edit className="h-3 w-3 mr-1" />
-                          Edit
-                        </Button>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleEditPatient(patient)}
+                                className="h-8 w-8 shrink-0"
+                                data-testid={`button-edit-${patient.id}`}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Edit</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleRemindPatient(patient)}
-                        className="flex-1 text-xs h-7"
-                        data-testid={`button-remind-${patient.id}`}
-                      >
-                        <Bell className="h-3 w-3 mr-1" />
-                        Remind
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleFlagPatient(patient)}
-                        className="flex-1 text-xs h-7"
-                        data-testid={`button-flag-${patient.id}`}
-                      >
-                        <Flag className="h-3 w-3 mr-1" />
-                        Flag
-                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleRemindPatient(patient)}
+                              className="h-8 w-8 shrink-0"
+                              data-testid={`button-remind-${patient.id}`}
+                            >
+                              <Bell className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent><p>Remind</p></TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleFlagPatient(patient)}
+                              className="h-8 w-8 shrink-0"
+                              data-testid={`button-flag-${patient.id}`}
+                            >
+                              <Flag className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent><p>Flag</p></TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       {canDeletePatient && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDeletePatient(patient)}
-                          disabled={deletePatientMutation.isPending}
-                          className="flex-1 text-xs h-7 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950 dark:text-red-400 dark:hover:text-red-300"
-                          data-testid={`button-delete-${patient.id}`}
-                        >
-                          <Trash2 className="h-3 w-3 mr-1" />
-                          Delete
-                        </Button>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleDeletePatient(patient)}
+                                disabled={deletePatientMutation.isPending}
+                                className="h-8 w-8 shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950 dark:text-red-400 dark:hover:text-red-300"
+                                data-testid={`button-delete-${patient.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Delete</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       )}
                     </div>
                   </div>
 
                   {patient.alerts && patient.alerts.length > 0 && (
-                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-2">
-                      <div className="flex items-center text-red-700 dark:text-red-300 text-xs font-medium mb-1">
-                        <AlertTriangle className="h-3 w-3 mr-1" />
-                        Urgent Alerts
+                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-1.5 sm:p-2 min-w-0">
+                      <div className="flex items-center text-red-700 dark:text-red-300 text-[10px] sm:text-xs font-medium mb-0.5 sm:mb-1">
+                        <AlertTriangle className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1 flex-shrink-0" />
+                        <span className="truncate">Urgent Alerts</span>
                       </div>
                       {patient.alerts
                         .slice(0, 2)
                         .map((alert: any, index: number) => (
                           <p
                             key={index}
-                            className="text-xs text-red-600 dark:text-red-400"
+                            className="text-[10px] sm:text-xs text-red-600 dark:text-red-400 truncate"
                           >
                             {alert.message || alert}
                           </p>

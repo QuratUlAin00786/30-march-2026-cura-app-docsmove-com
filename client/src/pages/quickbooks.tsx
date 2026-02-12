@@ -210,18 +210,17 @@ export default function QuickBooks() {
     
     if (activeConnectionError) {
       console.error('[QB DEBUG] Full error object:', activeConnectionError);
-      // Check if error message contains JSON parsing errors or technical details
       let userFriendlyMessage = activeConnectionError?.message || "QuickBooks connection issue please fix";
-      
-      // Replace technical JSON parsing errors with user-friendly message
       if (userFriendlyMessage.includes('JSON') || 
           userFriendlyMessage.includes('<!DOCTYPE') || 
           userFriendlyMessage.includes('Unexpected token')) {
         userFriendlyMessage = "QuickBooks connection issue please fix";
       }
-      
-      setErrorMessage(userFriendlyMessage);
-      setErrorModalOpen(true);
+      // Do not show the connection error modal for the generic QuickBooks connection message
+      if (userFriendlyMessage !== "QuickBooks connection issue please fix") {
+        setErrorMessage(userFriendlyMessage);
+        setErrorModalOpen(true);
+      }
     }
   }, [activeConnection, activeConnectionLoading, activeConnectionError]);
 
@@ -336,18 +335,17 @@ export default function QuickBooks() {
     },
     onError: (error: any) => {
       console.error('[QB FRONTEND] Error getting OAuth URL:', error);
-      // Check if error message contains JSON parsing errors or technical details
       let userFriendlyMessage = error.message || "QuickBooks connection issue please fix";
-      
-      // Replace technical JSON parsing errors with user-friendly message
       if (userFriendlyMessage.includes('JSON') || 
           userFriendlyMessage.includes('<!DOCTYPE') || 
           userFriendlyMessage.includes('Unexpected token')) {
         userFriendlyMessage = "QuickBooks connection issue please fix";
       }
-      
-      setErrorMessage(userFriendlyMessage);
-      setErrorModalOpen(true);
+      // Do not show the connection error modal for the generic QuickBooks connection message
+      if (userFriendlyMessage !== "QuickBooks connection issue please fix") {
+        setErrorMessage(userFriendlyMessage);
+        setErrorModalOpen(true);
+      }
     },
   });
 

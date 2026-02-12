@@ -261,6 +261,9 @@ export const users = pgTable("users", {
   isSaaSOwner: boolean("is_saas_owner").notNull().default(false), // Flag for SaaS owners
   lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // Personal info (all users) – also synced to patients table when role is patient
+  dateOfBirth: text("date_of_birth"),
+  genderAtBirth: text("gender_at_birth"),
 });
 
 // Password Reset Tokens

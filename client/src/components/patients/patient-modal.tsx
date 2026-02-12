@@ -260,9 +260,37 @@ const COUNTRY_DIGIT_LIMITS: Record<string, number> = {
   "+379": 10, "+58": 10, "+84": 10, "+967": 9, "+260": 9, "+263": 9
 };
 
+/**
+ * Validates First Name or Last Name per rules:
+ * 1. Only letters (A-Z, a-z), spaces, hyphens (-), apostrophes (')
+ * 2. Between 2 and 50 characters
+ * 3. No more than 2 identical characters in a row
+ * 4. No numbers, symbols, or nonsense (e.g. "hhhhhh", "aaaaaa")
+ */
+function validatePatientName(name: string): { valid: true } | { valid: false; reason: string } {
+  const trimmed = name.trim();
+  if (trimmed.length < 2) return { valid: false, reason: "Invalid – must be at least 2 characters." };
+  if (trimmed.length > 50) return { valid: false, reason: "Invalid – must be between 2 and 50 characters." };
+  if (!/^[A-Za-z\s\-']+$/.test(trimmed)) return { valid: false, reason: "Invalid – must contain only letters, spaces, hyphens, or apostrophes." };
+  if (/(.)\1{2,}/.test(trimmed)) return { valid: false, reason: "Invalid – contains excessive repeated characters." };
+  return { valid: true };
+}
+
 const patientSchema = z.object({
-  firstName: z.string().trim().min(2, "First name must be at least 2 characters").max(30, "First name cannot exceed 30 characters"),
-  lastName: z.string().trim().min(2, "Last name must be at least 2 characters").max(30, "Last name cannot exceed 30 characters"),
+  firstName: z.string().trim().min(1, "First name is required").refine(
+    (val) => validatePatientName(val).valid,
+    (val) => {
+      const r = validatePatientName(val);
+      return { message: r.valid ? "" : r.reason };
+    }
+  ),
+  lastName: z.string().trim().min(1, "Last name is required").refine(
+    (val) => validatePatientName(val).valid,
+    (val) => {
+      const r = validatePatientName(val);
+      return { message: r.valid ? "" : r.reason };
+    }
+  ),
   dateOfBirth: z.string().trim().min(1, "Date of birth is required").refine(
     (val) => !isNaN(Date.parse(val)),
     { message: "Please enter a valid date" }
@@ -823,7 +851,7 @@ export function PatientModal({ open, onOpenChange, editMode = false, editPatient
                         <FormItem>
                           <FormLabel className="required">First Name</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder="Enter first name" maxLength={30} />
+                            <Input {...field} placeholder="Enter first name" maxLength={50} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -837,7 +865,7 @@ export function PatientModal({ open, onOpenChange, editMode = false, editPatient
                         <FormItem>
                           <FormLabel className="required">Last Name</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder="Enter last name" maxLength={30} />
+                            <Input {...field} placeholder="Enter last name" maxLength={50} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>

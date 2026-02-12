@@ -74,7 +74,7 @@ export default function UserManual() {
             </TabsTrigger>
             <TabsTrigger value="documents" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
-              Documents
+              File Settings
             </TabsTrigger>
             <TabsTrigger value="features" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
@@ -1121,13 +1121,13 @@ export default function UserManual() {
             </Card>
           </TabsContent>
 
-          {/* Documents Tab */}
+          {/* File Settings Tab (formerly Documents) */}
           <TabsContent value="documents">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileText className="h-5 w-5" />
-                  Create Header & Footer for PDF Documents
+                  File Settings – Clinic Information
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -1136,14 +1136,52 @@ export default function UserManual() {
                     <div>
                       <h3 className="font-semibold mb-2">Objective</h3>
                       <p className="text-muted-foreground">
-                        Customize branding for all printed and digital documents.
+                        Configure clinic branding and header/footer for all printed and digital documents. This page is available under <strong>Settings → Clinic Information</strong> (Header Design & Information and Footer Design & Information tabs).
                       </p>
                     </div>
 
                     <Separator />
 
                     <div>
-                      <h3 className="font-semibold mb-3">Forms Interface</h3>
+                      <h3 className="font-semibold mb-3">Clinic Information – Header Design & Information</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        On the Settings page, open <strong>Clinic Information</strong> and use the <strong>Header Design & Information</strong> tab to upload your clinic logo and set header and sub-heading details. You can switch to <strong>Footer Design & Information</strong> for footer content. Use <strong>View Header Footer</strong> to preview.
+                      </p>
+                      
+                      <div 
+                        className="cursor-pointer border rounded-lg overflow-hidden hover:shadow-lg transition-shadow max-w-2xl"
+                        onClick={() => {
+                          const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+                          setLocation(`/${subdomain}/settings`);
+                        }}
+                        data-testid="img-clinic-information-settings"
+                      >
+                        <img 
+                          src={createClinicInfoScreenshot} 
+                          alt="Clinic Information – File Settings (Settings page)" 
+                          className="w-full h-auto"
+                        />
+                        <div className="p-2 bg-muted text-center text-sm text-muted-foreground">
+                          Clinic Information (File Settings) – Click to go to Settings
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div>
+                      <h3 className="font-semibold mb-3">Sections on this page</h3>
+                      <ul className="text-sm text-muted-foreground space-y-2 list-disc list-inside">
+                        <li><strong>Clinic Logo:</strong> Choose File to upload a logo. Use a square image (e.g. 200×200 to 2000×2000), PNG or SVG preferred, under 1–2 MB. Logo preview appears below the specs.</li>
+                        <li><strong>Header Information:</strong> Enter clinic name, set clinic name font size (e.g. 24pt), and pick a background color (e.g. #4A7DFF).</li>
+                        <li><strong>Sub Heading:</strong> Enter address, phone (+44 20 1234 5678), email, and website. Set font family (e.g. Verdana), font size (e.g. 12pt), and use Bold, Italic, or Underline for text styling.</li>
+                      </ul>
+                    </div>
+
+                    <Separator />
+
+                    <div>
+                      <h3 className="font-semibold mb-3">Forms interface (optional)</h3>
                       <p className="text-sm text-muted-foreground mb-4">
                         Create and manage medical forms, letters, and documents with templates and custom clinic information.
                       </p>
@@ -1159,33 +1197,6 @@ export default function UserManual() {
                         <img 
                           src={formsInterfaceScreenshot} 
                           alt="Forms Interface" 
-                          className="w-full h-auto"
-                        />
-                        <div className="p-2 bg-muted text-center text-sm text-muted-foreground">
-                          Click to go to Forms
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    <div>
-                      <h3 className="font-semibold mb-3">Create Clinic Information</h3>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Step 1: Upload clinic logo and configure header information including clinic name, address, phone, email, and website. Customize font family, font size, and text styling options.
-                      </p>
-                      
-                      <div 
-                        className="cursor-pointer border rounded-lg overflow-hidden hover:shadow-lg transition-shadow max-w-2xl"
-                        onClick={() => {
-                          const subdomain = localStorage.getItem('user_subdomain') || 'demo';
-                          setLocation(`/${subdomain}/forms`);
-                        }}
-                        data-testid="img-create-clinic-info"
-                      >
-                        <img 
-                          src={createClinicInfoScreenshot} 
-                          alt="Create Clinic Information" 
                           className="w-full h-auto"
                         />
                         <div className="p-2 bg-muted text-center text-sm text-muted-foreground">
@@ -1238,7 +1249,7 @@ export default function UserManual() {
                         <li className="text-sm">
                           <span className="font-semibold">Navigate:</span>
                           <div className="ml-6 mt-1 p-3 bg-muted rounded-lg font-mono text-xs">
-                            Settings → Document Templates → Header & Footer Configuration
+                            Settings → Clinic Information → Header Design & Information (or Footer Design & Information)
                           </div>
                         </li>
 

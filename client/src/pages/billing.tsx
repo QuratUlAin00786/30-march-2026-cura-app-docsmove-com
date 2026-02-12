@@ -222,6 +222,79 @@ function PricingManagementDashboard() {
     { serviceName: "Specialist Consultation", serviceCode: "SC001", category: "Visit with a specialist doctor (e.g., Cardiologist)", basePrice: "120.00" },
     { serviceName: "Teleconsultation", serviceCode: "TC001", category: "Online or phone consultation", basePrice: "40.00" }
   ];
+
+  // Treatment name options for Create Treatment Metadata combobox (user can also type custom)
+  const TREATMENT_NAME_OPTIONS = [
+    // 1. Injectables
+    "Botox (Wrinkle Relaxers)",
+    "Dermal Fillers (Hyaluronic Acid, Juvederm, Restylane)",
+    "PRP (Platelet-Rich Plasma) Injections",
+    "Kybella / Deoxycholic Acid (Fat-dissolving injections)",
+    "Mesotherapy",
+    "Lip Fillers",
+    "Cheek / Jawline Contouring",
+    // 2. Skin Treatments
+    "Chemical Peels (Glycolic, TCA, Salicylic)",
+    "Microdermabrasion",
+    "Microneedling / Collagen Induction Therapy",
+    "Laser Skin Resurfacing (CO2, Erbium, Fractional)",
+    "Skin Tightening (RF, Ultrasound, HIFU)",
+    "LED / Phototherapy",
+    "Scar / Stretch Mark Treatment",
+    "Acne / Acne Scar Treatment",
+    // 3. Body Contouring & Fat Reduction
+    "CoolSculpting / Cryolipolysis",
+    "Laser Lipolysis",
+    "Radiofrequency Body Contouring",
+    "Ultrasound Cavitation / Fat Reduction",
+    "Cellulite Treatment",
+    "Skin Firming & Tightening Treatments",
+    // 4. Hair Treatments
+    "PRP for Hair Loss",
+    "Scalp Micropigmentation",
+    "Laser Hair Removal",
+    "Hair Restoration / Transplant",
+    // 5. Facial Treatments
+    "Hydrafacial / Aqua Facial",
+    "Oxygen Facial",
+    "Vampire Facial (PRP + Microneedling)",
+    "Facials with Custom Serums",
+    "Facial Rejuvenation / Anti-Aging Treatments",
+    // 6. Laser & Light-Based
+    "IPL Photofacial / Skin Rejuvenation",
+    "Tattoo Removal",
+    "Pigmentation / Melasma Treatment",
+    "Vascular / Vein Treatment",
+    // 7. Dental & Smile Aesthetics
+    "Teeth Whitening",
+    "Smile Design",
+    "Orthodontic Aligners (Clear Aligners)",
+    // 8. Surgical / Minimally Invasive
+    "Liposuction",
+    "Thread Lift",
+    "Eyelid Surgery (Blepharoplasty)",
+    "Rhinoplasty",
+    "Chin / Jaw Augmentation",
+    "Breast Augmentation / Reduction",
+    "Minor Cosmetic Surgeries",
+    // 9. IV / Infusion Therapy
+    "Vitamin IV Therapy",
+    "Hydration IV Drip",
+    "Detox IV Drip",
+    "Glutathione IV (Skin Brightening)",
+    "Immunity Boost IV Drip",
+    "NAD+ IV Therapy",
+    "Energy / Performance IV Drip",
+    "Anti-Aging IV Drip",
+    // 10. Wellness & Other Aesthetic Services
+    "Cryotherapy / Cryo Facials",
+    "Hormone Therapy (anti-aging)",
+    "Body Wraps / Detox Treatments",
+    "PRP for Joints / Sports Recovery",
+    "Weight Management Injections (e.g., L-Carnitine)",
+    "Non-surgical Hair & Nail Treatments",
+  ];
+
   const [showServiceSuggestions, setShowServiceSuggestions] = useState(false);
   const [showRoleSuggestions, setShowRoleSuggestions] = useState(false);
   const [showDoctorSuggestions, setShowDoctorSuggestions] = useState(false);
@@ -258,6 +331,7 @@ function PricingManagementDashboard() {
   const [labTestError, setLabTestError] = useState("");
   const [imagingError, setImagingError] = useState("");
   const [showTreatmentsInfoModal, setShowTreatmentsInfoModal] = useState(false);
+  const [treatmentNameComboboxOpen, setTreatmentNameComboboxOpen] = useState(false);
   const [editingTreatmentInfo, setEditingTreatmentInfo] = useState<any>(null);
   const [newTreatmentInfo, setNewTreatmentInfo] = useState({ name: "", colorCode: "#2563eb" });
   const [isSavingTreatmentInfo, setIsSavingTreatmentInfo] = useState(false);
@@ -277,6 +351,7 @@ function PricingManagementDashboard() {
 
   const closeTreatmentsInfoModal = () => {
     setShowTreatmentsInfoModal(false);
+    setTreatmentNameComboboxOpen(false);
     setEditingTreatmentInfo(null);
     setNewTreatmentInfo({ name: "", colorCode: "#2563eb" });
   };
@@ -3520,12 +3595,51 @@ function PricingManagementDashboard() {
           <div className="py-4 space-y-4">
             <div>
               <Label htmlFor="treatmentInfoName">Treatment Name</Label>
-              <Input
-                id="treatmentInfoName"
-                value={newTreatmentInfo.name}
-                onChange={(e) => setNewTreatmentInfo({ ...newTreatmentInfo, name: e.target.value })}
-                placeholder="e.g., Botox"
-              />
+              <Popover open={treatmentNameComboboxOpen} onOpenChange={setTreatmentNameComboboxOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    id="treatmentInfoName"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={treatmentNameComboboxOpen}
+                    className="w-full justify-between font-normal h-10"
+                  >
+                    <span className={newTreatmentInfo.name ? "" : "text-muted-foreground"}>
+                      {newTreatmentInfo.name || "Select or type treatment name..."}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Command>
+                    <CommandInput
+                      placeholder="Search or type custom treatment..."
+                      value={newTreatmentInfo.name}
+                      onValueChange={(value) => setNewTreatmentInfo((prev) => ({ ...prev, name: value }))}
+                    />
+                    <CommandEmpty>No match. Use your typed text as custom treatment name.</CommandEmpty>
+                    <CommandGroup className="max-h-64 overflow-auto">
+                      {TREATMENT_NAME_OPTIONS.filter((option) =>
+                        option.toLowerCase().includes(newTreatmentInfo.name.toLowerCase())
+                      ).map((option) => (
+                        <CommandItem
+                          key={option}
+                          value={option}
+                          onSelect={() => {
+                            setNewTreatmentInfo((prev) => ({ ...prev, name: option }));
+                            setTreatmentNameComboboxOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={`mr-2 h-4 w-4 ${newTreatmentInfo.name === option ? "opacity-100" : "opacity-0"}`}
+                          />
+                          {option}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             <div>
               <Label htmlFor="treatmentInfoColor">Color</Label>
@@ -4170,6 +4284,16 @@ export default function BillingPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [activeTab, setActiveTab] = useState("invoices");
   const queryClient = useQueryClient();
+
+  // Sync active tab with URL ?tab= (e.g. /billing?tab=invoices from "Click here to add invoice")
+  useEffect(() => {
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    const tab = params.get("tab");
+    const validTabs = ["invoices", "outstanding", "payment-history", "insurance-claims", "custom-reports", "pricing-management"];
+    if (tab && validTabs.includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, []);
   const [isInvoiceSaved, setIsInvoiceSaved] = useState(false);
   const [clinicHeader, setClinicHeader] = useState<any>(null);
   const [clinicFooter, setClinicFooter] = useState<any>(null);
@@ -6454,10 +6578,11 @@ export default function BillingPage() {
           setServiceSelectionError("The linked treatment does not have a price configured.");
           return;
         }
+        const appointmentIdForInvoice = appointment.appointmentId ?? (appointment as any).appointment_id ?? String(appointment.id);
         newItem = {
           id: lineId,
           serviceType: "appointments",
-          serviceId: appointment.appointmentId || String(appointment.id),
+          serviceId: appointmentIdForInvoice,
           code: treatment.metadata?.code || `T-${treatment.id}`,
           description: treatmentInfo?.name || treatment.name || "Treatment",
           quantity: baseQuantity,
@@ -6477,11 +6602,12 @@ export default function BillingPage() {
           setServiceSelectionError("No consultation fee is configured for the attending doctor.");
           return;
         }
+      const appointmentIdForInvoice = appointment.appointmentId ?? (appointment as any).appointment_id ?? String(appointment.id);
       newItem = {
           id: lineId,
           serviceType: "appointments",
-          serviceId: appointment.appointmentId || String(appointment.id),
-        code: appointment.appointmentId || `APT-${appointment.id}`,
+          serviceId: appointmentIdForInvoice,
+        code: appointmentIdForInvoice.startsWith("APT") ? appointmentIdForInvoice : `APT-${appointment.id}`,
         description: appointment.description || appointment.title || "Consultation",
           quantity: baseQuantity,
           unitPrice: amount,
@@ -10218,22 +10344,29 @@ export default function BillingPage() {
                           <SelectItem value="loading" disabled>Loading...</SelectItem>
                         ) : availableAppointments.length > 0 ? (
                           availableAppointments.map((appointment: any) => {
-                            // Format datetime for display
+                            // Format datetime for display in UTC (parse as UTC when ISO string has no Z)
                             let datetimeStr = '';
                             if (appointment.scheduledAt) {
                               try {
-                                const scheduledDate = new Date(appointment.scheduledAt);
+                                const raw = appointment.scheduledAt;
+                                const iso = typeof raw === 'string' ? raw.trim() : String(raw);
+                                // Treat ISO datetime without Z or offset as UTC
+                                const scheduledDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/Z|[+-]\d{2}:?\d{2}$/.test(iso)
+                                  ? new Date(iso + 'Z')
+                                  : new Date(raw);
                                 const dateStr = scheduledDate.toLocaleDateString('en-US', { 
                                   year: 'numeric', 
                                   month: 'short', 
-                                  day: 'numeric' 
+                                  day: 'numeric',
+                                  timeZone: 'UTC'
                                 });
                                 const timeStr = scheduledDate.toLocaleTimeString('en-US', { 
                                   hour: '2-digit', 
                                   minute: '2-digit',
-                                  hour12: true 
+                                  hour12: true,
+                                  timeZone: 'UTC'
                                 });
-                                datetimeStr = ` - ${dateStr} ${timeStr}`;
+                                datetimeStr = ` - ${dateStr} ${timeStr} UTC`;
                               } catch (e) {
                                 // Fallback if date parsing fails
                                 datetimeStr = '';
@@ -10296,7 +10429,16 @@ export default function BillingPage() {
                       }
 
                       const appointmentDate = appointmentDateStr ? format(new Date(appointmentDateStr + 'T00:00:00'), "dd MMM yyyy") : 'N/A';
-                      const appointmentTime = selectedAppointment.scheduledAt ? format(new Date(selectedAppointment.scheduledAt), "h:mm a") : 'N/A';
+                      const appointmentTime = selectedAppointment.scheduledAt
+                        ? (() => {
+                            const raw = selectedAppointment.scheduledAt;
+                            const iso = typeof raw === 'string' ? raw.trim() : String(raw);
+                            const d = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/Z|[+-]\d{2}:?\d{2}$/.test(iso)
+                              ? new Date(iso + 'Z')
+                              : new Date(raw);
+                            return d.toLocaleTimeString('en-US', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: true }) + ' UTC';
+                          })()
+                        : 'N/A';
                       const dueDate = dueDateStr ? format(new Date(dueDateStr + 'T00:00:00'), "dd MMM yyyy") : 'N/A';
                       const createdDate = createdAtStr ? format(new Date(createdAtStr + 'T00:00:00'), "dd MMM yyyy") : 'N/A';
                       const provider = allUsers.find((u: any) => u.id === selectedAppointment.providerId);

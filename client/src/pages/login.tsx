@@ -150,6 +150,13 @@ export default function Login() {
             <CardDescription>
               Enter your email or username to access the EMR system
             </CardDescription>
+            {error === "Session expired due to inactivity. Please log in again." && (
+              <Alert variant="destructive" className="mt-3">
+                <AlertDescription>
+                  Session expired due to inactivity. Please log in again.
+                </AlertDescription>
+              </Alert>
+            )}
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -179,7 +186,7 @@ export default function Login() {
                 />
               </div>
 
-              {error && (
+              {error && error !== "Session expired due to inactivity. Please log in again." && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
