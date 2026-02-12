@@ -1310,7 +1310,7 @@ export default function SaaSCustomers() {
                               </div>
                             ) : viewingCustomer ? (
                               <div className="h-[550px] overflow-y-auto pr-2">
-                                <div className="space-y-6 text-sm text-gray-700">
+                              <div className="space-y-6 text-sm text-gray-700">
                                 <section className="space-y-2">
                                   <p className="text-xs uppercase tracking-wide text-gray-500">
                                     Organization summary
@@ -1843,9 +1843,9 @@ export default function SaaSCustomers() {
                                           // Otherwise, show all options except Trial
                                           return (
                                             <>
-                                              <option value="active">Active</option>
-                                              <option value="expired">Expired</option>
-                                              <option value="cancelled">Cancelled</option>
+                                        <option value="active">Active</option>
+                                        <option value="expired">Expired</option>
+                                        <option value="cancelled">Cancelled</option>
                                             </>
                                           );
                                         })()}
@@ -1876,10 +1876,10 @@ export default function SaaSCustomers() {
                                           // Otherwise, show all options except Trial
                                           return (
                                             <>
-                                              <option value="paid">Paid</option>
-                                              <option value="unpaid">Unpaid</option>
-                                              <option value="failed">Failed</option>
-                                              <option value="pending">Pending</option>
+                                        <option value="paid">Paid</option>
+                                        <option value="unpaid">Unpaid</option>
+                                        <option value="failed">Failed</option>
+                                        <option value="pending">Pending</option>
                                             </>
                                           );
                                         })()}

@@ -4058,7 +4058,8 @@ export class DatabaseStorage implements IStorage {
 
   async sendMessage(messageData: any, organizationId: number): Promise<any> {
     const messageId = `msg_${Date.now()}`;
-    const timestamp = new Date();
+    // Always use UTC timestamp to ensure consistency across timezones
+    const timestamp = new Date(); // This will be converted to UTC ISO string when stored
     
     // CRITICAL: Only create conversations for internal messages (Message type)
     // External messages (SMS/Email/WhatsApp/Voice) should NOT create conversations
@@ -4071,14 +4072,14 @@ export class DatabaseStorage implements IStorage {
       // Only find or create conversation for internal messages
       if (messageData.conversationId) {
         // Verify the provided conversationId exists and is valid
-        const existingConv = await db.select()
-          .from(conversationsTable)
-          .where(and(
+      const existingConv = await db.select()
+        .from(conversationsTable)
+        .where(and(
             eq(conversationsTable.id, messageData.conversationId),
-            eq(conversationsTable.organizationId, organizationId)
-          ))
-          .limit(1);
-        
+          eq(conversationsTable.organizationId, organizationId)
+        ))
+        .limit(1);
+      
         if (existingConv.length > 0) {
           // Verify both participants are in this conversation
           const participants = existingConv[0].participants as Array<{id: string | number; name: string; role: string}>;
@@ -4091,7 +4092,7 @@ export class DatabaseStorage implements IStorage {
           if (hasSender) {
             console.log(`✅ Using provided conversation: ${messageData.conversationId}`);
             conversationId = messageData.conversationId;
-          } else {
+      } else {
             // Conversation exists but sender is not a participant, find or create correct one
             console.log(`⚠️ WARNING - Sender not in provided conversation, finding or creating correct one`);
             conversationId = await this.findOrCreateConversation(
@@ -4099,8 +4100,8 @@ export class DatabaseStorage implements IStorage {
               messageData.recipientId,
               organizationId
             );
-          }
-        } else {
+      }
+    } else {
           // ConversationId provided but doesn't exist, find or create correct one
           console.log(`⚠️ WARNING - Provided conversationId ${messageData.conversationId} does not exist, finding or creating correct one`);
           conversationId = await this.findOrCreateConversation(
@@ -4154,6 +4155,7 @@ export class DatabaseStorage implements IStorage {
       recipientName: messageData.recipientId,
       subject: messageData.subject || '',
       content: messageData.content,
+      timestamp: timestamp, // Explicitly set timestamp (will be stored as UTC by database)
       isRead: false,
       priority: messageData.priority || 'normal',
       type: messageData.type || 'internal',

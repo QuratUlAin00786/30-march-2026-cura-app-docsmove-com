@@ -1066,17 +1066,50 @@ function PricingManagementDashboard() {
 
       // Invalidate and refetch the lab tests query
       // Add a small delay to ensure database transaction is committed
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       console.log('[LAB TESTS] Invalidating and refetching lab tests query, pricingTab:', pricingTab);
       
       // Invalidate the query cache
-      await queryClient.invalidateQueries({ queryKey: ['/api/pricing/lab-tests'] });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/pricing/lab-tests'],
+        exact: false 
+      });
       
       // Explicitly refetch if we're on the lab-tests tab
       if (pricingTab === "lab-tests") {
-        const result = await queryClient.refetchQueries({ queryKey: ['/api/pricing/lab-tests'] });
-        console.log('[LAB TESTS] Refetch result:', result);
+        // Use the refetch function directly from the useQuery hook
+        try {
+          await refetchLabTests();
+          console.log('[LAB TESTS] Direct refetch completed');
+        } catch (refetchError) {
+          console.error('[LAB TESTS] Error during direct refetch:', refetchError);
+        }
+        
+        // Also try refetching via queryClient as a fallback
+        try {
+          const result = await queryClient.refetchQueries({ 
+            queryKey: ['/api/pricing/lab-tests'],
+            exact: false
+          });
+          console.log('[LAB TESTS] QueryClient refetch result:', result);
+        } catch (refetchError) {
+          console.error('[LAB TESTS] Error during queryClient refetch:', refetchError);
+        }
+        
+        // Also manually trigger a refetch after a short delay to ensure data is loaded
+        setTimeout(async () => {
+          try {
+            queryClient.invalidateQueries({ 
+              queryKey: ['/api/pricing/lab-tests'],
+              exact: false 
+            });
+            await refetchLabTests();
+            console.log('[LAB TESTS] Delayed refetch completed');
+          } catch (error) {
+            console.error('[LAB TESTS] Error during delayed refetch:', error);
+          }
+        }, 500);
       } else {
         console.log('[LAB TESTS] Not on lab-tests tab, skipping refetch');
       }

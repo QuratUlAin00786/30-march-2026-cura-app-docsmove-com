@@ -238,8 +238,18 @@ const formatTimestampNoConversion = (timestamp: string): string => {
     if (timestamp instanceof Date) {
       date = timestamp;
     } else {
-      // Parse the timestamp string - JavaScript Date automatically handles timezone conversion
-      date = new Date(timestamp);
+      // Parse the timestamp string
+      // If it's an ISO string with 'Z' or timezone, JavaScript Date will parse it as UTC
+      // If it's not, we need to ensure it's treated as UTC
+      if (typeof timestamp === 'string' && (timestamp.includes('Z') || timestamp.includes('+') || timestamp.includes('-'))) {
+        // ISO format with timezone indicator - parse as UTC
+        date = new Date(timestamp);
+      } else {
+        // No timezone indicator - assume it's UTC and parse accordingly
+        // Append 'Z' to indicate UTC if not present
+        const utcTimestamp = timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
+        date = new Date(utcTimestamp);
+      }
     }
     
     // Validate the date
@@ -249,12 +259,13 @@ const formatTimestampNoConversion = (timestamp: string): string => {
     }
     
     // Use local time methods to display the time as it appears in user's timezone
-    // These methods (getHours(), getDate(), etc.) automatically convert UTC to local timezone
+    // When you create a Date from a UTC ISO string, JavaScript automatically converts it to local time
+    // These methods (getHours(), getDate(), etc.) return values in the user's local timezone
     const month = date.getMonth();
     const day = date.getDate();
     const year = date.getFullYear();
-    const hour = date.getHours(); // Already in local timezone
-    const minute = date.getMinutes(); // Already in local timezone
+    const hour = date.getHours(); // Returns local timezone hour (automatically converted from UTC)
+    const minute = date.getMinutes(); // Returns local timezone minute (automatically converted from UTC)
     
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthName = monthNames[month];
@@ -827,14 +838,14 @@ export default function MessagingPage() {
             // For received messages, this should be the server's UTC timestamp
             finalTimestamp = existing.timestamp;
           } else if (serverTs) {
-            // New message from server - ALWAYS use server's UTC timestamp
-            // Server stores timestamps in UTC, we preserve them as-is
-            // JavaScript Date will automatically convert UTC to local time when displayed
+            // New message from server - normalize to UTC ISO format
+            // This ensures consistent UTC format regardless of how the database returns it
             const serverDate = new Date(serverTs);
             if (!isNaN(serverDate.getTime())) {
-              // Use server's UTC timestamp (ISO format) - will be converted to local time for display
-              finalTimestamp = serverTs;
-              console.log('📨 Using server UTC timestamp:', serverTs, '-> Local time:', serverDate.toLocaleString());
+              // Convert to UTC ISO string to ensure consistent format
+              // This ensures both sender and receiver see the same time after local conversion
+              finalTimestamp = serverDate.toISOString();
+              console.log('📨 Normalized server timestamp to UTC:', serverTs, '-> UTC:', finalTimestamp, '-> Local:', serverDate.toLocaleString());
             } else {
               // Invalid server timestamp - this should not happen, but fallback to current UTC time
               console.warn('⚠️ Invalid server timestamp:', serverTs, 'using current UTC time');
@@ -859,8 +870,16 @@ export default function MessagingPage() {
           const incomingIds = new Set(normalized.map(m => m.id));
           const leftovers = prev.filter(m => !incomingIds.has(m.id));
           const merged = [...leftovers, ...normalized].sort((a, b) => {
-            const timeA = new Date(a.timestamp).getTime();
-            const timeB = new Date(b.timestamp).getTime();
+            // Ensure timestamps are valid dates
+            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            
+            // Handle invalid dates
+            if (isNaN(timeA) || isNaN(timeB)) {
+              console.warn('⚠️ Invalid timestamp detected:', { a: a.timestamp, b: b.timestamp });
+              return 0;
+            }
+            
             // Ascending order: oldest messages first, newest messages last (at bottom)
             return timeA - timeB;
           });
@@ -868,8 +887,13 @@ export default function MessagingPage() {
           // Log for debugging
           console.log('📋 MERGED MESSAGES - Count:', merged.length);
           if (merged.length > 0) {
-            console.log('📋 First message timestamp:', merged[0].timestamp, 'Content:', merged[0].content);
-            console.log('📋 Last message timestamp:', merged[merged.length - 1].timestamp, 'Content:', merged[merged.length - 1].content);
+            console.log('📋 First message timestamp:', merged[0].timestamp, 'Parsed:', new Date(merged[0].timestamp).toLocaleString(), 'Content:', merged[0].content);
+            console.log('📋 Last message timestamp:', merged[merged.length - 1].timestamp, 'Parsed:', new Date(merged[merged.length - 1].timestamp).toLocaleString(), 'Content:', merged[merged.length - 1].content);
+            // Log all timestamps for debugging
+            merged.forEach((m, idx) => {
+              const parsed = new Date(m.timestamp);
+              console.log(`📋 Message ${idx}: timestamp="${m.timestamp}", parsed="${parsed.toLocaleString()}", content="${m.content?.substring(0, 20)}"`);
+            });
           }
           
           return merged;
@@ -878,8 +902,16 @@ export default function MessagingPage() {
         // Non-preserving path: just use normalized server data, sorted by timestamp (ascending - oldest first, newest last).
         // Ensure proper chronological order: messages with earlier timestamps come first
         const sorted = normalized.sort((a, b) => {
-          const timeA = new Date(a.timestamp).getTime();
-          const timeB = new Date(b.timestamp).getTime();
+          // Ensure timestamps are valid dates
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          
+          // Handle invalid dates
+          if (isNaN(timeA) || isNaN(timeB)) {
+            console.warn('⚠️ Invalid timestamp detected:', { a: a.timestamp, b: b.timestamp });
+            return 0;
+          }
+          
           // Ascending order: oldest messages first, newest messages last (at bottom)
           return timeA - timeB;
         });
@@ -889,7 +921,7 @@ export default function MessagingPage() {
         if (sorted.length > 0) {
           console.log('📋 First message timestamp:', sorted[0].timestamp, 'Content:', sorted[0].content?.substring(0, 20));
           console.log('📋 Last message timestamp:', sorted[sorted.length - 1].timestamp, 'Content:', sorted[sorted.length - 1].content?.substring(0, 20));
-        }
+      }
         
         return sorted;
       });
@@ -1136,7 +1168,7 @@ export default function MessagingPage() {
               fetchMessages(data.conversationId, false);
             }
           }, 300);
-        }
+      }
         
         showSuccess("Message Sent", "Your message has been sent and conversation started successfully.");
       } else {
@@ -2723,10 +2755,25 @@ export default function MessagingPage() {
             
             // CRITICAL: Always use server's UTC timestamp (not current local time)
             // Server stores timestamps in UTC to avoid timezone confusion
-            const serverUtcTimestamp = receivedMessage.timestamp || receivedMessage.createdAt;
+            let serverUtcTimestamp = receivedMessage.timestamp || receivedMessage.createdAt;
             
             if (!serverUtcTimestamp) {
               console.warn('⚠️ WebSocket message missing UTC timestamp:', receivedMessage);
+              // Use current UTC time if missing
+              serverUtcTimestamp = new Date().toISOString();
+            } else {
+              // Validate timestamp is a valid date, but use it as-is from server
+              const timestampDate = new Date(serverUtcTimestamp);
+              if (!isNaN(timestampDate.getTime())) {
+                // Use server timestamp exactly as received - no conversion needed
+                // Server handles UTC, we just use it as-is
+                serverUtcTimestamp = String(serverUtcTimestamp);
+                console.log('📨 Using server timestamp as-is for received message:', serverUtcTimestamp, '-> Parsed as:', timestampDate.toLocaleString());
+              } else {
+                console.error('❌ Invalid timestamp format in WebSocket message:', serverUtcTimestamp);
+                // Fallback to current UTC time
+                serverUtcTimestamp = new Date().toISOString();
+              }
             }
             
             // Add the message with server's UTC timestamp
@@ -2737,25 +2784,33 @@ export default function MessagingPage() {
                 return prev; // Don't add duplicate
               }
               
-              // Add new message - ALWAYS use server's UTC timestamp
-              // If server timestamp is missing, use current UTC time (not local time)
+              // Add new message - ALWAYS use server's UTC timestamp in ISO format
               const newMessage = {
                 ...receivedMessage,
-                timestamp: serverUtcTimestamp || new Date().toISOString() // UTC timestamp from server
+                timestamp: serverUtcTimestamp // UTC timestamp in ISO format
               };
               
-              // Validate the timestamp
+              // Validate the timestamp one more time
               const timestampDate = new Date(newMessage.timestamp);
               if (isNaN(timestampDate.getTime())) {
-                console.error('❌ Invalid UTC timestamp in WebSocket message:', newMessage.timestamp);
+                console.error('❌ Invalid UTC timestamp after normalization:', newMessage.timestamp);
                 // Fallback to current UTC time
                 newMessage.timestamp = new Date().toISOString();
               }
               
-              // Sort by timestamp
+              // Sort by timestamp (ascending - oldest first, newest last)
               const updated = [...prev, newMessage].sort((a, b) => {
-                const timeA = new Date(a.timestamp).getTime();
-                const timeB = new Date(b.timestamp).getTime();
+                // Ensure timestamps are valid dates
+                const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                
+                // Handle invalid dates
+                if (isNaN(timeA) || isNaN(timeB)) {
+                  console.warn('⚠️ Invalid timestamp in WebSocket message:', { a: a.timestamp, b: b.timestamp });
+                  return 0;
+                }
+                
+                // Ascending order: oldest messages first, newest messages last
                 return timeA - timeB;
               });
               
@@ -2936,8 +2991,9 @@ export default function MessagingPage() {
     
     // Store a temporary message ID for optimistic update
     const tempMessageId = `temp-${Date.now()}`;
-    // Create timestamp in local time to avoid timezone conversion issues
-    const now = new Date();
+    // Create UTC timestamp for optimistic message - this will match server behavior
+    // Using UTC ensures both sender and receiver see the same time after local timezone conversion
+    const optimisticUtcTimestamp = new Date().toISOString();
     const optimisticMessage = {
       id: tempMessageId,
       senderId: currentUser?.id,
@@ -2947,7 +3003,7 @@ export default function MessagingPage() {
       recipientName: '',
       subject: '',
       content: messageContent,
-      timestamp: now.toISOString(), // Use ISO string but ensure it's from local Date object
+      timestamp: optimisticUtcTimestamp, // UTC timestamp in ISO format
       isRead: false,
       priority: 'normal' as const,
       type: 'internal' as const,
@@ -3014,17 +3070,30 @@ export default function MessagingPage() {
         const filtered = prev.filter(m => m.id !== tempMessageId);
         const optimisticMsg = prev.find(m => m.id === tempMessageId);
         
-        // Always preserve the optimistic timestamp to avoid timezone conversion issues
-        // The optimistic timestamp was created when user sent the message and displayed correctly
-          // Server timestamp might be in UTC and cause timezone conversion that changes the display
-        const optimisticTimestamp = optimisticMsg?.timestamp;
-        
-        // Check for both timestamp and createdAt fields from server
+        // Always use server's timestamp and normalize to UTC ISO format
+        // The server timestamp is the source of truth for both sender and receiver
+        // We normalize it to ensure consistent UTC format for display
         const serverTimestamp = responseData.timestamp || responseData.createdAt || null;
         
-        // Use optimistic timestamp if available (maintains what user saw), otherwise use server timestamp
-        // If neither exists, use current time
-        const finalTimestamp = optimisticTimestamp || serverTimestamp || new Date().toISOString();
+        let finalTimestamp: string;
+        if (serverTimestamp) {
+          // Validate the timestamp and normalize to UTC ISO format
+          const serverDate = new Date(serverTimestamp);
+          if (!isNaN(serverDate.getTime())) {
+            // Convert to UTC ISO string to ensure consistent format
+            // This ensures both sender and receiver see the same time after local conversion
+            finalTimestamp = serverDate.toISOString();
+            console.log('📨 Normalized server timestamp to UTC for sent message:', serverTimestamp, '-> UTC:', finalTimestamp, '-> Local:', serverDate.toLocaleString());
+          } else {
+            console.warn('⚠️ Invalid server timestamp in response:', serverTimestamp);
+            // Fallback to current UTC time
+            finalTimestamp = new Date().toISOString();
+          }
+        } else {
+          // No server timestamp - use current UTC time
+          console.warn('⚠️ No server timestamp in response, using current UTC time');
+          finalTimestamp = new Date().toISOString();
+        }
         
         const realMessage = {
           id: responseData.id,
@@ -3043,10 +3112,19 @@ export default function MessagingPage() {
           tags: responseData.tags || [] // Include tags if present
         };
         
-        // Sort messages by timestamp to maintain order
+        // Sort messages by timestamp to maintain order (ascending - oldest first, newest last)
         const updated = [...filtered, realMessage].sort((a, b) => {
-          const timeA = new Date(a.timestamp).getTime();
-          const timeB = new Date(b.timestamp).getTime();
+          // Ensure timestamps are valid dates
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          
+          // Handle invalid dates
+          if (isNaN(timeA) || isNaN(timeB)) {
+            console.warn('⚠️ Invalid timestamp in sent message:', { a: a.timestamp, b: b.timestamp });
+            return 0;
+          }
+          
+          // Ascending order: oldest messages first, newest messages last
           return timeA - timeB;
         });
         return updated;

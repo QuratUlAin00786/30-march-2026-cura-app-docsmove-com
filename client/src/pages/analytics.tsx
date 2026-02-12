@@ -47,6 +47,26 @@ function getTenantSubdomain(): string {
   return localStorage.getItem('user_subdomain') || 'demo';
 }
 
+// Custom Tooltip component with white border
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div style={{
+        backgroundColor: 'white',
+        border: '1px solid white',
+        borderRadius: '4px',
+        padding: '8px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      }}>
+        <p style={{ color: '#000', margin: 0 }}>
+          {`${payload[0].name} : ${payload[0].value}`}
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
+
 interface AnalyticsData {
   overview: {
     totalPatients: number;
@@ -136,6 +156,33 @@ export default function AnalyticsPage() {
     enabled: !!user
   });
 
+  // Fetch all appointments to filter for future and current ones
+  const fetchAllAppointments = async () => {
+    try {
+      const now = new Date(); // Current date and time
+      
+      const response = await apiRequest("GET", "/api/appointments");
+      if (response.ok) {
+        const allAppointments = await response.json();
+        
+        // Filter for appointments that are today or future (not past)
+        // Include appointments that are scheduled for today or later
+        const futureAndCurrent = allAppointments.filter((apt: any) => {
+          const appointmentDateTime = new Date(apt.scheduledAt || apt.scheduled_at || apt.date);
+          
+          // Include if appointment is today or in the future
+          return appointmentDateTime >= now;
+        });
+        
+        return futureAndCurrent;
+      }
+      return [];
+    } catch (error) {
+      console.error("Failed to fetch appointments:", error);
+      return [];
+    }
+  };
+
   // Fetch completed appointments (not past today)
   const fetchCompletedAppointments = async () => {
     try {
@@ -163,6 +210,13 @@ export default function AnalyticsPage() {
     }
   };
 
+  // Fetch all appointments to get future and current count
+  const { data: futureAndCurrentAppointments } = useQuery({
+    queryKey: ['future-appointments', user?.id],
+    queryFn: fetchAllAppointments,
+    enabled: !!user
+  });
+
   // Fetch completed appointments data
   const { data: completedAppointmentsData } = useQuery({
     queryKey: ['completed-appointments', user?.id],
@@ -171,10 +225,11 @@ export default function AnalyticsPage() {
   });
 
   const completedCount = completedAppointmentsData?.length || 0;
+  const futureAndCurrentCount = futureAndCurrentAppointments?.length || 0;
 
   const handleAppointmentsClick = () => {
-    if (completedAppointmentsData) {
-      setCompletedAppointments(completedAppointmentsData);
+    if (futureAndCurrentAppointments) {
+      setCompletedAppointments(futureAndCurrentAppointments);
       setShowAppointmentsDialog(true);
     }
   };
@@ -366,10 +421,10 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Appointments</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{analytics.overview.totalAppointments.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{futureAndCurrentCount.toLocaleString()}</p>
                 <p className="text-xs text-blue-600 flex items-center mt-1">
-                  {analytics.overview.totalAppointments > 0 ? 
-                    Math.round((analytics.overview.completedAppointments / analytics.overview.totalAppointments) * 100) : 0}% completion rate
+                  {futureAndCurrentCount > 0 ? 
+                    Math.round((completedCount / futureAndCurrentCount) * 100) : 0}% completion rate
                 </p>
               </div>
               <Calendar className="h-8 w-8 text-green-500" />
@@ -493,7 +548,7 @@ export default function AnalyticsPage() {
                   onClick={handleAppointmentsClick}
                 >
                   <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Appointments</div>
-                  <div className="text-2xl font-bold text-blue-600">{analytics.overview.totalAppointments || 0}</div>
+                  <div className="text-2xl font-bold text-blue-600">{futureAndCurrentCount || 0}</div>
                   <div className="text-xs text-gray-500">{completedCount || 0} completed</div>
                 </Card>
               </div>
@@ -704,7 +759,7 @@ export default function AnalyticsPage() {
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip content={<CustomTooltip />} />
                   </PieChart>
                 </ResponsiveContainer>
               </CardContent>

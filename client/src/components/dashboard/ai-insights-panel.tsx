@@ -241,8 +241,8 @@ export function AiInsightsPanel() {
                     onClick={() => {
                       setDismissingInsightId(insight.id);
                       updateInsightMutation.mutate({ 
-                        id: insight.id, 
-                        status: 'dismissed' 
+                      id: insight.id, 
+                      status: 'dismissed' 
                       });
                     }}
                     disabled={dismissingInsightId === insight.id}

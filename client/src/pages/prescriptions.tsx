@@ -1870,8 +1870,8 @@ export default function PrescriptionsPage() {
       errors.inventoryItems = "Please select an inventory item";
     } else {
       // Regular medication name validation
-      if (!medication.name.trim()) {
-        errors.name = "Medication name is required";
+    if (!medication.name.trim()) {
+      errors.name = "Medication name is required";
       }
     }
 
@@ -4862,19 +4862,19 @@ export default function PrescriptionsPage() {
                           <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
                             <strong>Address:</strong>{" "}
                             <span className="truncate block" title={prescription.patientAddress || "-"}>
-                              {prescription.patientAddress || "-"}
+                            {prescription.patientAddress || "-"}
                             </span>
                           </p>
                           <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
                             <strong>Allergies:</strong>{" "}
                             <span className="truncate block" title={prescription.patientAllergies || "-"}>
-                              {prescription.patientAllergies || "-"}
+                            {prescription.patientAllergies || "-"}
                             </span>
                           </p>
                           <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-100 min-w-0">
                             <strong>Weight:</strong>{" "}
                             <span className="truncate block" title={prescription.patientWeight || "-"}>
-                              {prescription.patientWeight || "-"}
+                            {prescription.patientWeight || "-"}
                             </span>
                           </p>
                         </div>
@@ -5946,12 +5946,12 @@ export default function PrescriptionsPage() {
                   <div className={`flex-1 grid ${user?.role === "nurse" || user?.role === "doctor" ? "grid-cols-7" : "grid-cols-8"} gap-4 items-center text-sm`}>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
                       <div className="truncate" title={prescription.prescriptionNumber || prescription.id || "N/A"}>
-                        {prescription.prescriptionNumber || prescription.id || "N/A"}
+                      {prescription.prescriptionNumber || prescription.id || "N/A"}
                       </div>
                     </div>
                     <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0">
                       <div className="truncate" title={prescription.patientName || "Unknown Patient"}>
-                        {prescription.patientName || "Unknown Patient"}
+                      {prescription.patientName || "Unknown Patient"}
                       </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
@@ -5965,16 +5965,16 @@ export default function PrescriptionsPage() {
                           ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
                           : "Unknown Provider";
                       })()}>
-                        {(() => {
-                          const providerInfo = allUsers?.find((p: any) => 
-                            p.id === prescription.doctorId || 
-                            p.id === prescription.providerId ||
-                            p.id === prescription.prescriptionCreatedBy
-                          );
-                          return providerInfo 
-                            ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
-                            : "Unknown Provider";
-                        })()}
+                      {(() => {
+                        const providerInfo = allUsers?.find((p: any) => 
+                          p.id === prescription.doctorId || 
+                          p.id === prescription.providerId ||
+                          p.id === prescription.prescriptionCreatedBy
+                        );
+                        return providerInfo 
+                          ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
+                          : "Unknown Provider";
+                      })()}
                       </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
@@ -5983,11 +5983,11 @@ export default function PrescriptionsPage() {
                         : prescription.createdAt
                         ? formatTimestampFromSystem(prescription.createdAt)
                         : "N/A"}>
-                        {prescription.clientCreatedAt
-                          ? formatTimestampFromSystem(prescription.clientCreatedAt)
-                          : prescription.createdAt
-                          ? formatTimestampFromSystem(prescription.createdAt)
-                          : "N/A"}
+                      {prescription.clientCreatedAt
+                        ? formatTimestampFromSystem(prescription.clientCreatedAt)
+                        : prescription.createdAt
+                        ? formatTimestampFromSystem(prescription.createdAt)
+                        : "N/A"}
                       </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
@@ -5996,11 +5996,11 @@ export default function PrescriptionsPage() {
                         : prescription.updatedAt
                         ? formatTimestampFromSystem(prescription.updatedAt)
                         : "N/A"}>
-                        {prescription.clientUpdatedAt
-                          ? formatTimestampFromSystem(prescription.clientUpdatedAt)
-                          : prescription.updatedAt
-                          ? formatTimestampFromSystem(prescription.updatedAt)
-                          : "N/A"}
+                      {prescription.clientUpdatedAt
+                        ? formatTimestampFromSystem(prescription.clientUpdatedAt)
+                        : prescription.updatedAt
+                        ? formatTimestampFromSystem(prescription.updatedAt)
+                        : "N/A"}
                       </div>
                     </div>
                     <div className="flex flex-col gap-1 min-w-0 max-w-full">
@@ -6166,26 +6166,26 @@ export default function PrescriptionsPage() {
                       >
                         <PenTool className="h-3.5 w-3.5" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                         className="h-6 w-6 p-0 flex-shrink-0"
-                        onClick={() => handleSendToPharmacy(prescription.id)}
-                        title="Share/Send to Pharmacy"
-                      >
+                          onClick={() => handleSendToPharmacy(prescription.id)}
+                          title="Share/Send to Pharmacy"
+                        >
                         <Share2 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                         className="h-6 w-6 p-0 flex-shrink-0"
-                        onClick={async () => {
-                          setSelectedPrescriptionForShareLog(prescription);
-                          // Fetch share logs for this prescription
-                          try {
-                            const response = await apiRequest(
-                              "GET",
-                              `/api/prescriptions/${prescription.id}/share-logs`
+                          onClick={async () => {
+                            setSelectedPrescriptionForShareLog(prescription);
+                            // Fetch share logs for this prescription
+                            try {
+                              const response = await apiRequest(
+                                "GET",
+                                `/api/prescriptions/${prescription.id}/share-logs`
                               );
                               if (response.ok) {
                                 const data = await response.json();
@@ -6249,7 +6249,7 @@ export default function PrescriptionsPage() {
       </Tabs>
         </div>
         </TooltipProvider>
-      </div>
+    </div>
 
       {/* Create/Edit Prescription Dialog - Moved outside Tabs for accessibility from both tabs */}
       <Dialog
@@ -6659,18 +6659,18 @@ export default function PrescriptionsPage() {
                                     </Label>
                                   </div>
                                 )}
-                                {formData.medications.length > 1 && (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => removeMedication(index)}
-                                    data-testid={`button-remove-medication-${index}`}
-                                    className="text-red-500 hover:text-red-700"
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </Button>
-                                )}
+                              {formData.medications.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeMedication(index)}
+                                  data-testid={`button-remove-medication-${index}`}
+                                  className="text-red-500 hover:text-red-700"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
                               </div>
                             </div>
 
@@ -6805,80 +6805,80 @@ export default function PrescriptionsPage() {
                                   </>
                                 ) : (
                                   <>
-                                    <Label htmlFor={`medication-name-${index}`}>
-                                      Medication Name *
-                                    </Label>
-                                    <Popover
-                                      open={medicationSearchOpen[index] || false}
-                                      onOpenChange={(open) =>
-                                        setMedicationSearchOpen((prev) => ({
-                                          ...prev,
-                                          [index]: open,
-                                        }))
-                                      }
+                                <Label htmlFor={`medication-name-${index}`}>
+                                  Medication Name *
+                                </Label>
+                                <Popover
+                                  open={medicationSearchOpen[index] || false}
+                                  onOpenChange={(open) =>
+                                    setMedicationSearchOpen((prev) => ({
+                                      ...prev,
+                                      [index]: open,
+                                    }))
+                                  }
+                                >
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      role="combobox"
+                                      aria-expanded={medicationSearchOpen[index] || false}
+                                      className="w-full justify-between"
+                                      data-testid={`input-medication-name-${index}`}
                                     >
-                                      <PopoverTrigger asChild>
-                                        <Button
-                                          variant="outline"
-                                          role="combobox"
-                                          aria-expanded={medicationSearchOpen[index] || false}
-                                          className="w-full justify-between"
-                                          data-testid={`input-medication-name-${index}`}
-                                        >
-                                          <span className="truncate">
-                                            {medication.name || "Select or type medication..."}
-                                          </span>
-                                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                        </Button>
-                                      </PopoverTrigger>
-                                      <PopoverContent className="w-[400px] p-0" align="start">
-                                        <Command shouldFilter={false}>
-                                          <CommandInput
-                                            placeholder="Search or type custom medication..."
-                                            value={medication.name}
-                                            onValueChange={(value) =>
-                                              updateMedication(index, "name", value)
-                                            }
-                                          />
-                                          <CommandEmpty>
-                                            Press Enter to use "{medication.name}" as custom medication
-                                          </CommandEmpty>
-                                          <CommandGroup className="max-h-64 overflow-auto">
-                                            {COMMON_MEDICATIONS.filter((med) =>
-                                              med.toLowerCase().includes(medication.name.toLowerCase())
-                                            ).map((med) => (
-                                              <CommandItem
-                                                key={med}
-                                                value={med}
-                                                onSelect={() => {
-                                                  updateMedication(index, "name", med);
-                                                  setMedicationSearchOpen((prev) => ({
-                                                    ...prev,
-                                                    [index]: false,
-                                                  }));
-                                                }}
-                                              >
-                                                <Check
-                                                  className={`mr-2 h-4 w-4 ${
-                                                    medication.name === med
-                                                      ? "opacity-100"
-                                                      : "opacity-0"
-                                                  }`}
-                                                />
-                                                {med}
-                                              </CommandItem>
-                                            ))}
-                                          </CommandGroup>
-                                        </Command>
-                                      </PopoverContent>
-                                    </Popover>
-                                    {formErrors.medications[index]?.name && (
-                                      <p
-                                        className="text-red-500 text-sm mt-1"
-                                        data-testid={`error-medication-name-${index}`}
-                                      >
-                                        {formErrors.medications[index].name}
-                                      </p>
+                                      <span className="truncate">
+                                        {medication.name || "Select or type medication..."}
+                                      </span>
+                                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-[400px] p-0" align="start">
+                                    <Command shouldFilter={false}>
+                                      <CommandInput
+                                        placeholder="Search or type custom medication..."
+                                        value={medication.name}
+                                        onValueChange={(value) =>
+                                          updateMedication(index, "name", value)
+                                        }
+                                      />
+                                      <CommandEmpty>
+                                        Press Enter to use "{medication.name}" as custom medication
+                                      </CommandEmpty>
+                                      <CommandGroup className="max-h-64 overflow-auto">
+                                        {COMMON_MEDICATIONS.filter((med) =>
+                                          med.toLowerCase().includes(medication.name.toLowerCase())
+                                        ).map((med) => (
+                                          <CommandItem
+                                            key={med}
+                                            value={med}
+                                            onSelect={() => {
+                                              updateMedication(index, "name", med);
+                                              setMedicationSearchOpen((prev) => ({
+                                                ...prev,
+                                                [index]: false,
+                                              }));
+                                            }}
+                                          >
+                                            <Check
+                                              className={`mr-2 h-4 w-4 ${
+                                                medication.name === med
+                                                  ? "opacity-100"
+                                                  : "opacity-0"
+                                              }`}
+                                            />
+                                            {med}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                                {formErrors.medications[index]?.name && (
+                                  <p
+                                    className="text-red-500 text-sm mt-1"
+                                    data-testid={`error-medication-name-${index}`}
+                                  >
+                                    {formErrors.medications[index].name}
+                                  </p>
                                     )}
                                   </>
                                 )}
@@ -7290,14 +7290,14 @@ export default function PrescriptionsPage() {
                               })
                               .map((med) => {
                                 const baseMedication = {
-                                  name: med.name.trim(),
-                                  dosage: med.dosage.trim(),
-                                  frequency: med.frequency.trim(),
-                                  duration: med.duration.trim(),
-                                  quantity: parseInt(med.quantity) || 0,
-                                  refills: parseInt(med.refills) || 0,
-                                  instructions: med.instructions.trim(),
-                                  genericAllowed: med.genericAllowed,
+                                name: med.name.trim(),
+                                dosage: med.dosage.trim(),
+                                frequency: med.frequency.trim(),
+                                duration: med.duration.trim(),
+                                quantity: parseInt(med.quantity) || 0,
+                                refills: parseInt(med.refills) || 0,
+                                instructions: med.instructions.trim(),
+                                genericAllowed: med.genericAllowed,
                                 };
 
                                 // Add inventory item ID if this medication is from inventory
@@ -8762,22 +8762,28 @@ export default function PrescriptionsPage() {
 
       {/* Advanced Electronic Signature Dialog */}
       <Dialog open={showESignDialog} onOpenChange={(open) => {
-        // Only allow closing if signature is saved, not by clicking outside
-        if (!open && !signatureSaved) {
-          // Prevent closing on outside click
-          return;
-        }
+        // Always allow closing via close button (X)
+        // The close button will work regardless of signatureSaved state
         setShowESignDialog(open);
         if (!open) {
           setPendingSavePrescriptionId(null);
           setHideTabs(false); // Reset hideTabs when dialog closes
+          setSignatureSaved(false); // Reset signature saved state when dialog closes
         }
       }}>
         <DialogContent 
           className="max-w-4xl max-h-[95vh] overflow-y-auto"
           onInteractOutside={(e) => {
-            // Prevent closing on outside click
-            e.preventDefault();
+            // Prevent closing on outside click only if signature is not saved
+            if (!signatureSaved) {
+              e.preventDefault();
+            }
+          }}
+          onEscapeKeyDown={(e) => {
+            // Prevent closing on ESC key only if signature is not saved
+            if (!signatureSaved) {
+              e.preventDefault();
+            }
           }}
         >
           <DialogHeader>
