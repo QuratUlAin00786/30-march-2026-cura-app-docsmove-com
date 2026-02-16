@@ -14921,6 +14921,54 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
+  // Share imaging study by email
+  app.post("/api/imaging/share-study", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+      const organizationId = req.tenant?.id ?? req.organizationId;
+      if (!organizationId) {
+        return res.status(400).json({ error: "Organization context is required" });
+      }
+      const { studyId, recipientEmail, customMessage } = req.body;
+      if (!studyId || !recipientEmail || typeof recipientEmail !== "string" || !recipientEmail.trim()) {
+        return res.status(400).json({ error: "Study ID and recipient email are required" });
+      }
+      const studyIdNum = typeof studyId === "number" ? studyId : parseInt(String(studyId), 10);
+      if (isNaN(studyIdNum)) {
+        return res.status(400).json({ error: "Invalid study ID" });
+      }
+      const medicalImage = await storage.getMedicalImage(studyIdNum, organizationId);
+      if (!medicalImage) {
+        return res.status(404).json({ error: "Imaging study not found" });
+      }
+      const patient = await storage.getPatient(medicalImage.patientId, organizationId);
+      const patientName = patient
+        ? `${patient.firstName ?? ""} ${patient.lastName ?? ""}`.trim() || `Patient ${medicalImage.patientId}`
+        : `Patient ${medicalImage.patientId}`;
+      const studyType = medicalImage.studyType || medicalImage.modality || "Imaging Study";
+      const sharedBy = `${req.user.firstName ?? ""} ${req.user.lastName ?? ""}`.trim() || req.user.email || "A user";
+      const emailSent = await emailService.sendImagingStudyShare(
+        recipientEmail.trim(),
+        patientName,
+        studyType,
+        sharedBy,
+        typeof customMessage === "string" ? customMessage : ""
+      );
+      if (!emailSent) {
+        return res.status(500).json({ error: "Failed to send email. Please try again later." });
+      }
+      res.json({ success: true, message: "Imaging study shared successfully" });
+    } catch (error) {
+      console.error("Error sharing imaging study:", error);
+      res.status(500).json({
+        error: "Failed to share imaging study",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   // Billing Routes
   app.get("/api/billing", authMiddleware, async (req: TenantRequest, res) => {
     try {

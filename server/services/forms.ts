@@ -904,10 +904,13 @@ export class FormService {
       for (const field of section.fields) {
         const valueRaw = this.formatAnswerValue(answersMap.get(field.id));
         const value = valueRaw || "—";
-        const wrappedLines = wrapTextLines(value, 11, maxValueWidth);
-        const valueFontSize = 11;
-        const valueLineSpacing = 14;
-        const rowHeight = Math.max(valueLineSpacing * wrappedLines.length, valueFontSize + 6);
+        const valueFontSize = 10;
+        const wrappedLines = wrapTextLines(value, valueFontSize, maxValueWidth);
+        const badgePaddingX = 6;
+        const badgePaddingY = 4;
+        const badgeHeight = valueFontSize + badgePaddingY * 2;
+        const valueLineSpacing = badgeHeight + 3;
+        const rowHeight = Math.max(valueLineSpacing * wrappedLines.length, badgeHeight + 6);
         ensureYSpace(rowHeight + 6);
 
         const labelY = yPosition;
@@ -919,14 +922,11 @@ export class FormService {
           color: rgb(0.15, 0.15, 0.27),
         });
 
-        const badgePaddingX = 6;
-        const badgePaddingY = 3;
         const badgeColor = rgb(0.93, 0.94, 0.99);
         let valueY = labelY;
-        const badgeHeight = valueFontSize + badgePaddingY * 2;
         for (const line of wrappedLines) {
           const textWidth = font.widthOfTextAtSize(line, valueFontSize);
-          const badgeWidth = textWidth + badgePaddingX * 2;
+          const badgeWidth = Math.min(textWidth + badgePaddingX * 2, maxValueWidth + badgePaddingX * 2);
           const badgeY = valueY - badgePaddingY;
           page.drawRectangle({
             x: valueColumnX - badgePaddingX,

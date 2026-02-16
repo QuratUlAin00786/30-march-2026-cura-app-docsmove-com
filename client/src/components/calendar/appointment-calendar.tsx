@@ -1964,7 +1964,7 @@ Medical License: [License Number]
       {/* Calendar Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <h2 className="text-2xl font-bold text-blue-800">
+          <h2 className="text-2xl font-bold text-blue-800 dark:text-blue-200">
             {format(selectedDate, "MMMM yyyy")}
           </h2>
           <div className="flex space-x-2">
@@ -2072,7 +2072,7 @@ Medical License: [License Number]
       {/* Selected Date Appointments */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center text-blue-800">
+          <CardTitle className="flex items-center text-blue-800 dark:text-blue-200">
             <Calendar className="h-5 w-5 mr-2" />
             Appointments for {format(selectedDate, "EEEE, MMMM d, yyyy")}
           </CardTitle>
@@ -2117,7 +2117,7 @@ Medical License: [License Number]
                       <div>
                         <div className="flex items-center space-x-2">
                           <Clock className="h-4 w-4 text-gray-400" />
-                          <span className="font-medium">{formatTime(appointment.scheduledAt)}</span>
+                          <span className="font-medium text-gray-900 dark:text-gray-100">{formatTime(appointment.scheduledAt)}</span>
                         </div>
                         <div className="flex items-center space-x-2 mt-1">
                           <User className="h-4 w-4 text-gray-400" />
@@ -2126,7 +2126,7 @@ Medical License: [License Number]
                           </span>
                         </div>
                       {serviceInfo && (
-                        <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
                           <span
                             className="inline-flex h-2 w-2 rounded-full"
                             style={{ backgroundColor: serviceInfo.color }}
@@ -2155,7 +2155,7 @@ Medical License: [License Number]
                           const providerRole = provider?.role?.toLowerCase();
                           const titlePrefix = providerRole === 'nurse' ? 'Nurse' : 'Dr.';
                           return (
-                            <div className="font-medium">{titlePrefix} {appointment.providerName}</div>
+                            <div className="font-medium text-gray-900 dark:text-gray-100">{titlePrefix} {appointment.providerName}</div>
                           );
                         })()}
                         {user?.role === 'admin' && (() => {
@@ -2171,7 +2171,7 @@ Medical License: [License Number]
                         {(() => {
                           const createdBy = getCreatedByUser(appointment.createdBy);
                           return createdBy ? (
-                            <div className="text-xs text-gray-400 mt-1">
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                               Created By: {createdBy.name} ({createdBy.role})
                             </div>
                           ) : null;
@@ -2204,7 +2204,7 @@ Medical License: [License Number]
                             e.stopPropagation();
                             handleCancelAppointment(appointment.id);
                           }}
-                          className="text-red-600 hover:text-red-800 hover:bg-red-50 border-red-300"
+                          className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 border-red-300 dark:border-red-700"
                           data-testid={`cancel-appointment-${appointment.id}`}
                         >
                           Cancel Appointment
@@ -2219,7 +2219,7 @@ Medical License: [License Number]
                               e.stopPropagation();
                               handleEditAppointment(appointment);
                             }}
-                            className="h-8 w-8 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                            className="h-8 w-8 p-0 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                             data-testid={`edit-appointment-${appointment.id}`}
                           >
                             <Edit className="h-4 w-4" />
@@ -2233,7 +2233,7 @@ Medical License: [License Number]
                               e.stopPropagation();
                               handleDeleteAppointment(appointment.id, appointment.title);
                             }}
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-800 hover:bg-red-50"
+                            className="h-8 w-8 p-0 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
                             data-testid={`delete-appointment-${appointment.id}`}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -2255,7 +2255,7 @@ Medical License: [License Number]
           {selectedAppointment && (
             <div>
               <DialogHeader>
-                <DialogTitle className="text-xl font-bold text-blue-800">
+                <DialogTitle className="text-xl font-bold text-blue-800 dark:text-blue-200">
                   Appointment Details
                 </DialogTitle>
                   <DialogDescription>
@@ -2381,7 +2381,7 @@ Medical License: [License Number]
               <div className="space-y-4 mt-6">
                 {selectedAppointment.description?.trim() ? (
                   <div>
-                    <Label className="text-sm font-medium text-gray-600">Description</Label>
+                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Description</Label>
                     <p className="mt-1">{selectedAppointment.description}</p>
                   </div>
                 ) : null}
@@ -2460,7 +2460,7 @@ Medical License: [License Number]
       <Dialog open={showAnatomicalViewer} onOpenChange={setShowAnatomicalViewer}>
         <DialogContent className="max-w-6xl h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-3 text-xl font-bold text-blue-800 mb-2">
+            <DialogTitle className="flex items-center gap-3 text-xl font-bold text-blue-800 dark:text-blue-200 mb-2">
               <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
                 <span className="text-white font-bold text-sm">🔬</span>
               </div>
@@ -2656,19 +2656,19 @@ Medical License: [License Number]
 
       {/* New Appointment Dialog */}
       <Dialog open={showNewAppointment} onOpenChange={setShowNewAppointment}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto dark:border-gray-700 dark:bg-slate-800">
           <div className="p-2">
             <DialogHeader className="mb-6">
-              <DialogTitle className="fs-3 font-bold text-blue-800">
+              <DialogTitle className="fs-3 font-bold text-blue-800 dark:text-blue-200">
                 Create New Appointment
               </DialogTitle>
-              <DialogDescription>
+              <DialogDescription className="dark:text-gray-400">
                 Fill in the details to create a new appointment
               </DialogDescription>
             </DialogHeader>
           
           {user?.role === 'admin' && shiftWarning && (
-            <Alert className="mb-4 bg-yellow-50 text-yellow-900 border-yellow-200 shadow-sm">
+            <Alert className="mb-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-900 dark:text-yellow-200 border-yellow-200 dark:border-yellow-700 shadow-sm">
               <div className="flex items-center justify-between gap-4">
                 <AlertDescription className="flex-1">{shiftWarning}</AlertDescription>
                 <Button
@@ -2686,7 +2686,7 @@ Medical License: [License Number]
           )}
 
           {user?.role === 'admin' && !shiftWarning && missingDateTimeWarning && (
-            <Alert className="mb-4 bg-yellow-50 text-yellow-900 border-yellow-200 shadow-sm">
+            <Alert className="mb-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-900 dark:text-yellow-200 border-yellow-200 dark:border-yellow-700 shadow-sm">
               <AlertDescription>{missingDateTimeWarning}</AlertDescription>
             </Alert>
           )}
@@ -2748,7 +2748,7 @@ Medical License: [License Number]
                     </Popover>
                   </div>
                   <div>
-                    <Label className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300 flex items-center gap-2">
                       <User className="h-4 w-4" />
                       Select Name
                     </Label>
@@ -2808,7 +2808,7 @@ Medical License: [License Number]
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label className="text-sm font-medium text-gray-600">Appointment Type</Label>
+                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Appointment Type</Label>
                     <Popover open={openAppointmentTypeCombo} onOpenChange={setOpenAppointmentTypeCombo}>
                       <PopoverTrigger asChild>
                         <Button
@@ -2865,7 +2865,7 @@ Medical License: [License Number]
                   <div>
                     {appointmentType === "treatment" && (
                       <>
-                        <Label className="text-sm font-medium text-gray-600">Select Treatment</Label>
+                        <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Select Treatment</Label>
                         <Popover open={openTreatmentCombo} onOpenChange={setOpenTreatmentCombo}>
                           <PopoverTrigger asChild>
                             <Button
@@ -3697,7 +3697,7 @@ Medical License: [License Number]
 
       {/* Appointment Confirmation Dialog */}
       <Dialog open={showConfirmationDialog} onOpenChange={setShowConfirmationDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl dark:border-gray-700 dark:bg-slate-800">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-blue-800 dark:text-blue-300">Appointment Summary</DialogTitle>
             <DialogDescription className="text-gray-600 dark:text-gray-300">Please review the appointment details before confirming</DialogDescription>
@@ -3914,13 +3914,13 @@ Medical License: [License Number]
 
       {/* Validation Error Dialog */}
       <Dialog open={showValidationError} onOpenChange={setShowValidationError}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:border-gray-700 dark:bg-slate-800">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-red-600">Insufficient Time Available</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-red-600 dark:text-red-400">Insufficient Time Available</DialogTitle>
           </DialogHeader>
           
           <div className="py-4">
-            <p className="text-gray-700">{validationErrorMessage}</p>
+            <p className="text-gray-700 dark:text-gray-300">{validationErrorMessage}</p>
           </div>
 
           <div className="flex justify-end">
@@ -3937,48 +3937,48 @@ Medical License: [License Number]
 
       {/* Success Modal */}
       <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:border-gray-700 dark:bg-slate-800">
           <DialogHeader>
             <DialogTitle className="sr-only">Appointment Created Successfully</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col items-center text-center py-6">
             {/* Green checkmark icon */}
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
-              <Check className="h-12 w-12 text-green-600" />
+            <div className="w-20 h-20 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center mb-6">
+              <Check className="h-12 w-12 text-green-600 dark:text-green-400" />
             </div>
 
             {/* Title */}
-            <h2 className="text-2xl font-bold text-green-600 mb-2">
+            <h2 className="text-2xl font-bold text-green-600 dark:text-green-400 mb-2">
               Appointment Successful!
             </h2>
 
             {/* Subtitle */}
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
               Your appointment has been processed successfully
             </p>
 
             {/* Appointment Details */}
             {createdAppointmentDetails && (
-              <div className="w-full bg-gray-50 rounded-lg p-4 mb-6 space-y-3">
+              <div className="w-full bg-gray-50 dark:bg-slate-700/50 dark:border dark:border-gray-600 rounded-lg p-4 mb-6 space-y-3">
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Appointment ID:</span>
-                  <span className="text-gray-900">{createdAppointmentDetails.appointmentId}</span>
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">Appointment ID:</span>
+                  <span className="text-gray-900 dark:text-gray-100">{createdAppointmentDetails.appointmentId}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Patient Name:</span>
-                  <span className="text-gray-900">
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">Patient Name:</span>
+                  <span className="text-gray-900 dark:text-gray-100">
                     {getPatientName(createdAppointmentDetails.patientId)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Date & Time:</span>
-                  <span className="text-gray-900">
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">Date & Time:</span>
+                  <span className="text-gray-900 dark:text-gray-100">
                     {createdAppointmentDetails.scheduledAt ? format(new Date(createdAppointmentDetails.scheduledAt), 'MM/dd/yyyy, h:mm a') : 'N/A'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600 font-medium">Type:</span>
-                  <span className="text-gray-900 capitalize">
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">Type:</span>
+                  <span className="text-gray-900 dark:text-gray-100 capitalize">
                     {(createdAppointmentDetails.appointmentType || createdAppointmentDetails.type || 'N/A').replace('_', ' ')}
                   </span>
                 </div>
@@ -4014,13 +4014,13 @@ Medical License: [License Number]
 
       {/* Edit Success Modal */}
       <Dialog open={showEditSuccessModal} onOpenChange={setShowEditSuccessModal}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:border-gray-700 dark:bg-slate-800">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-green-600">Success</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-green-600 dark:text-green-400">Success</DialogTitle>
           </DialogHeader>
           
           <div className="py-4">
-            <p className="text-gray-700">Appointment updated successfully.</p>
+            <p className="text-gray-700 dark:text-gray-300">Appointment updated successfully.</p>
           </div>
 
           <div className="flex justify-end">
@@ -4041,13 +4041,13 @@ Medical License: [License Number]
 
       {/* Duplicate Appointment Warning Dialog */}
       <Dialog open={showDuplicateWarning} onOpenChange={setShowDuplicateWarning}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:border-gray-700 dark:bg-slate-800">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-red-600">Duplicate Appointment</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-red-600 dark:text-red-400">Duplicate Appointment</DialogTitle>
           </DialogHeader>
           
           <div className="py-4">
-            <p className="text-gray-700">
+            <p className="text-gray-700 dark:text-gray-300">
               {user?.role === 'patient' 
                 ? duplicateAppointmentDetails || "Appointment already exists. Please edit it instead of creating new appointment."
                 : `You have already created an appointment with the same doctor on this date. (${duplicateAppointmentDetails}) You can choose a different time or update the existing appointment.`
@@ -4084,11 +4084,11 @@ Medical License: [License Number]
 
       {/* Edit Appointment Dialog */}
       <Dialog open={showEditAppointment} onOpenChange={setShowEditAppointment}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto dark:border-gray-700 dark:bg-slate-800">
           {editingAppointment && (
             <div className="p-2">
               <DialogHeader className="mb-6">
-                <DialogTitle className="text-xl font-bold text-blue-800">
+                <DialogTitle className="text-xl font-bold text-blue-800 dark:text-blue-200">
                   Edit Appointment
                 </DialogTitle>
                 <DialogDescription>
@@ -4154,7 +4154,7 @@ Medical License: [License Number]
 
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <Label className="text-sm font-medium text-gray-600">Appointment Type</Label>
+                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Appointment Type</Label>
                     <Popover open={openEditAppointmentTypeCombo} onOpenChange={setOpenEditAppointmentTypeCombo}>
                       <PopoverTrigger asChild>
                         <Button
@@ -4210,7 +4210,7 @@ Medical License: [License Number]
                   <div>
                     {editAppointmentType === "treatment" && (
                       <>
-                        <Label className="text-sm font-medium text-gray-600">Select Treatment</Label>
+                        <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Select Treatment</Label>
                         <Popover open={openEditTreatmentCombo} onOpenChange={setOpenEditTreatmentCombo}>
                           <PopoverTrigger asChild>
                             <Button
@@ -4515,7 +4515,7 @@ Medical License: [License Number]
                     </Select>
                   </div>
                   <div>
-                    <Label className="text-sm font-medium text-gray-600">Description</Label>
+                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Description</Label>
                     <Textarea 
                       defaultValue={editingAppointment.description || ''}
                       onChange={(e) => {
@@ -4640,13 +4640,13 @@ Medical License: [License Number]
 
       {/* Insufficient Time Available Warning Dialog */}
       <Dialog open={showInsufficientTimeWarning} onOpenChange={setShowInsufficientTimeWarning}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:border-gray-700 dark:bg-slate-800">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-red-600">Insufficient Time Available</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-red-600 dark:text-red-400">Insufficient Time Available</DialogTitle>
           </DialogHeader>
           
           <div className="py-4">
-            <p className="text-gray-700">{insufficientTimeMessage}</p>
+            <p className="text-gray-700 dark:text-gray-300">{insufficientTimeMessage}</p>
           </div>
 
           <div className="flex justify-end">

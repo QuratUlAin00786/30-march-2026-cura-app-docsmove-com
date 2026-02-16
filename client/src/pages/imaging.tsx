@@ -419,6 +419,47 @@ export default function ImagingPage() {
   const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
   const [isSavingSignature, setIsSavingSignature] = useState(false);
 
+  const isSignatureDarkTheme = () =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+
+  /** When dark theme, user draws in white; convert to black-on-white for PDF/save. */
+  const getSignatureDataForPdf = (canvas: HTMLCanvasElement): string => {
+    if (!isSignatureDarkTheme()) return canvas.toDataURL();
+    const w = canvas.width;
+    const h = canvas.height;
+    const off = document.createElement("canvas");
+    off.width = w;
+    off.height = h;
+    const ctx = off.getContext("2d");
+    if (!ctx) return canvas.toDataURL();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    const srcCtx = canvas.getContext("2d");
+    if (!srcCtx) return canvas.toDataURL();
+    const srcData = srcCtx.getImageData(0, 0, w, h);
+    const outData = ctx.getImageData(0, 0, w, h);
+    for (let i = 0; i < srcData.data.length; i += 4) {
+      const r = srcData.data[i];
+      const g = srcData.data[i + 1];
+      const b = srcData.data[i + 2];
+      const a = srcData.data[i + 3];
+      const isStroke = a > 20 && r + g + b > 384;
+      if (isStroke) {
+        outData.data[i] = 0;
+        outData.data[i + 1] = 0;
+        outData.data[i + 2] = 0;
+        outData.data[i + 3] = 255;
+      } else {
+        outData.data[i] = 255;
+        outData.data[i + 1] = 255;
+        outData.data[i + 2] = 255;
+        outData.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(outData, 0, 0);
+    return off.toDataURL();
+  };
+
   const [uploadFormData, setUploadFormData] = useState({
     patientId: "",
     studyType: "",
@@ -2910,7 +2951,7 @@ export default function ImagingPage() {
 
     if (!moved && lastPosition) {
       ctx.lineWidth = 2;
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
       ctx.beginPath();
       ctx.arc(lastPosition.x, lastPosition.y, 1.5, 0, Math.PI * 2);
       ctx.fill();
@@ -2933,7 +2974,7 @@ export default function ImagingPage() {
 
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#000000";
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -2983,7 +3024,7 @@ export default function ImagingPage() {
 
     if (!moved && lastPosition) {
       ctx.lineWidth = 2;
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
       ctx.beginPath();
       ctx.arc(lastPosition.x, lastPosition.y, 1.5, 0, Math.PI * 2);
       ctx.fill();
@@ -3008,7 +3049,7 @@ export default function ImagingPage() {
 
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#000000";
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -3152,12 +3193,10 @@ export default function ImagingPage() {
     if (!canvasRef.current || !eSignStudy || isSavingSignature) return;
 
     const canvas = canvasRef.current;
-    const signatureData = canvas.toDataURL();
-
     const blankCanvas = document.createElement("canvas");
     blankCanvas.width = canvas.width;
     blankCanvas.height = canvas.height;
-    if (signatureData === blankCanvas.toDataURL()) {
+    if (canvas.toDataURL() === blankCanvas.toDataURL()) {
       toast({
         title: "Error",
         description: "Please draw your signature before saving.",
@@ -3165,6 +3204,7 @@ export default function ImagingPage() {
       });
       return;
     }
+    const signatureData = getSignatureDataForPdf(canvas);
 
     // Disable button immediately
     setIsSavingSignature(true);
@@ -5727,33 +5767,14 @@ export default function ImagingPage() {
                     try {
                       if (shareFormData.method === "email") {
                         try {
-                          // Prepare authentication headers
-                          const token = localStorage.getItem("auth_token");
-                          const headers: Record<string, string> = {
-                            "Content-Type": "application/json",
-                            "X-Tenant-Subdomain": getActiveSubdomain(),
-                          };
-                          
-                          if (token) {
-                            headers["Authorization"] = `Bearer ${token}`;
-                          }
-                          
-                          const response = await fetch("/api/imaging/share-study", {
-                            method: "POST",
-                            headers,
-                            credentials: "include",
-                            body: JSON.stringify({
-                              studyId: selectedStudy.id,
-                              recipientEmail: shareFormData.email,
-                              customMessage: shareFormData.message,
-                              shareSource: shareFormData.shareSource || 'report', // 'prescription' or 'report'
-                            }),
+                          const response = await apiRequest("POST", "/api/imaging/share-study", {
+                            studyId: selectedStudy.id,
+                            recipientEmail: shareFormData.email,
+                            customMessage: shareFormData.message,
+                            shareSource: shareFormData.shareSource || "report",
                           });
-
                           const result = await response.json();
-
                           if (response.ok) {
-                            // Show success modal instead of toast
                             setShareSuccessEmail(shareFormData.email);
                             setShowShareDialog(false);
                             setShowShareSuccessDialog(true);
@@ -5770,11 +5791,20 @@ export default function ImagingPage() {
                               variant: "destructive",
                             });
                           }
-                        } catch (error) {
+                        } catch (error: unknown) {
                           console.error("Email sharing error:", error);
+                          const message = error instanceof Error ? error.message : "Network error. Please check your connection and try again.";
+                          const serverError = typeof message === "string" && message.includes("{") ? (() => {
+                            try {
+                              const json = JSON.parse(message.replace(/^\d+\s*:\s*/, "").trim());
+                              return json.error || message;
+                            } catch {
+                              return message;
+                            }
+                          })() : message;
                           toast({
                             title: "Sharing Failed",
-                            description: "Network error. Please check your connection and try again.",
+                            description: serverError || "Network error. Please check your connection and try again.",
                             variant: "destructive",
                           });
                         }
@@ -9939,12 +9969,12 @@ export default function ImagingPage() {
             {/* Signature Tab */}
             <TabsContent value="signature" className="space-y-4">
               {eSignStudy && (
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
-                  <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-slate-800 p-6 rounded-lg border border-blue-200 dark:border-gray-600">
+                  <h4 className="font-semibold text-blue-900 dark:text-gray-100 mb-3 flex items-center gap-2">
                     <FileText className="h-5 w-5" />
                     Imaging Study Summary for Digital Signature
                   </h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm text-blue-800">
+                  <div className="grid grid-cols-2 gap-4 text-sm text-blue-800 dark:text-gray-300">
                     <div>
                       <p>
                         <strong>Patient:</strong>{" "}
@@ -9981,11 +10011,11 @@ export default function ImagingPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 p-3 bg-white rounded border">
-                    <p className="text-sm font-medium text-gray-700 mb-2">
+                  <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded border dark:border-gray-600">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Study to be signed:
                     </p>
-                    <div className="text-xs text-gray-600 mb-1">
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
                       • Image ID: {eSignStudy.imageId || eSignStudy.id} - {eSignStudy.studyType || eSignStudy.modality || 'Imaging Study'}
                     </div>
                   </div>
@@ -9996,16 +10026,16 @@ export default function ImagingPage() {
                 {/* Advanced Signature Canvas */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Digital Signature Pad
                     </label>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       Signature Quality: Real-time Analysis
                     </div>
                   </div>
 
-                  <div className="border-2 border-gray-300 rounded-lg relative overflow-hidden bg-white shadow-inner">
+                  <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg relative overflow-hidden bg-white dark:bg-gray-900 shadow-inner">
                     <canvas
                       ref={canvasRef}
                       width={450}
@@ -10019,7 +10049,7 @@ export default function ImagingPage() {
                       onTouchMove={drawTouch}
                       onTouchEnd={stopDrawingTouch}
                     />
-                    <div className="absolute top-2 right-2 text-xs text-gray-400">
+                    <div className="absolute top-2 right-2 text-xs text-gray-400 dark:text-gray-500">
                       Advanced Capture Mode
                     </div>
                   </div>

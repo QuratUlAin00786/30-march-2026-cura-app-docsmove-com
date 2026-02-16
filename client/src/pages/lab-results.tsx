@@ -730,7 +730,48 @@ export default function LabResultsPage() {
   const [showRequiredSignatureDialog, setShowRequiredSignatureDialog] = useState(false);
   const [pendingPdfSave, setPendingPdfSave] = useState<{ resultId: number } | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  
+
+  const isSignatureDarkTheme = () =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+
+  /** When dark theme, user draws in white; convert to black-on-white for PDF/save. */
+  const getSignatureDataForPdf = (canvas: HTMLCanvasElement): string => {
+    if (!isSignatureDarkTheme()) return canvas.toDataURL();
+    const w = canvas.width;
+    const h = canvas.height;
+    const off = document.createElement("canvas");
+    off.width = w;
+    off.height = h;
+    const ctx = off.getContext("2d");
+    if (!ctx) return canvas.toDataURL();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    const srcCtx = canvas.getContext("2d");
+    if (!srcCtx) return canvas.toDataURL();
+    const srcData = srcCtx.getImageData(0, 0, w, h);
+    const outData = ctx.getImageData(0, 0, w, h);
+    for (let i = 0; i < srcData.data.length; i += 4) {
+      const r = srcData.data[i];
+      const g = srcData.data[i + 1];
+      const b = srcData.data[i + 2];
+      const a = srcData.data[i + 3];
+      const isStroke = a > 20 && r + g + b > 384;
+      if (isStroke) {
+        outData.data[i] = 0;
+        outData.data[i + 1] = 0;
+        outData.data[i + 2] = 0;
+        outData.data[i + 3] = 255;
+      } else {
+        outData.data[i] = 255;
+        outData.data[i + 1] = 255;
+        outData.data[i + 2] = 255;
+        outData.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(outData, 0, 0);
+    return off.toDataURL();
+  };
+
   // Signature details dialog states
   const [showSignatureDetailsDialog, setShowSignatureDetailsDialog] = useState(false);
   const [selectedSignatureData, setSelectedSignatureData] = useState<any>(null);
@@ -2638,7 +2679,7 @@ Report generated from Cura EMR System`;
 
     if (!moved && lastPosition) {
       ctx.lineWidth = 2;
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
       ctx.beginPath();
       ctx.arc(lastPosition.x, lastPosition.y, 1.5, 0, Math.PI * 2);
       ctx.fill();
@@ -2661,7 +2702,7 @@ Report generated from Cura EMR System`;
 
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#000000";
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -2711,7 +2752,7 @@ Report generated from Cura EMR System`;
 
     if (!moved && lastPosition) {
       ctx.lineWidth = 2;
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
       ctx.beginPath();
       ctx.arc(lastPosition.x, lastPosition.y, 1.5, 0, Math.PI * 2);
       ctx.fill();
@@ -2736,7 +2777,7 @@ Report generated from Cura EMR System`;
 
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#000000";
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -2846,7 +2887,7 @@ Report generated from Cura EMR System`;
     if (!canvasRef.current || !selectedResult) return;
 
     const canvas = canvasRef.current;
-    const signatureData = canvas.toDataURL();
+    const signatureData = getSignatureDataForPdf(canvas);
 
     const blankCanvas = document.createElement("canvas");
     blankCanvas.width = canvas.width;
@@ -6680,12 +6721,12 @@ Report generated from Cura EMR System`;
       <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">
+            <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
               Generate Lab Test Result
             </DialogTitle>
           </DialogHeader>
           
-          <div className="space-y-6 py-4">
+          <div className="space-y-6 py-4 text-gray-900 dark:text-gray-100">
             {/* Patient Selection */}
             <div className="space-y-2">
               <Label htmlFor="generate-patient">Select Patient *</Label>
@@ -6759,7 +6800,7 @@ Report generated from Cura EMR System`;
                 data-testid="input-test-id"
                 className="font-mono"
               />
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 Auto-generated unique test identifier (can be customized)
               </p>
             </div>
@@ -6842,16 +6883,16 @@ Report generated from Cura EMR System`;
             {/* Dynamic Test Fields - Show fields for each selected test */}
             {generateFormData.selectedTests && generateFormData.selectedTests.length > 0 && (
               <div className="space-y-6">
-                <div className="border-t pt-4">
-                  <h3 className="text-lg font-semibold mb-4">Test Result Values</h3>
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Test Result Values</h3>
                   
                   {generateFormData.selectedTests.map((testType: string) => {
                     const testFields = TEST_FIELD_DEFINITIONS[testType];
                     if (!testFields) return null;
 
                     return (
-                      <div key={testType} className="mb-6 p-4 bg-gray-50 rounded-lg border">
-                        <h4 className="font-semibold text-blue-700 mb-4">{testType}</h4>
+                      <div key={testType} className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                        <h4 className="font-semibold text-blue-700 dark:text-blue-300 mb-4">{testType}</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {testFields.map((field) => {
                             const currentValue = generateFormData.testValues?.[testType]?.[field.name] || "";
@@ -6877,9 +6918,9 @@ Report generated from Cura EMR System`;
 
                             return (
                               <div key={field.name} className="space-y-1">
-                                <Label htmlFor={`${testType}-${field.name}`} className="text-sm">
+                                <Label htmlFor={`${testType}-${field.name}`} className="text-sm text-gray-900 dark:text-gray-200">
                                   {field.name}
-                                  <span className="text-gray-500 text-xs ml-2">
+                                  <span className="text-gray-500 dark:text-gray-400 text-xs ml-2">
                                     ({field.unit}) - Ref: {field.referenceRange}
                                   </span>
                                 </Label>
@@ -6905,13 +6946,13 @@ Report generated from Cura EMR System`;
                                 />
                                 {/* Status Indicator */}
                                 {isNormal && (
-                                  <div className="flex items-center gap-1 text-xs text-green-600 mt-1">
+                                  <div className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 mt-1">
                                     <span>✅</span>
                                     <span className="font-medium">Normal</span>
                                   </div>
                                 )}
                                 {isCritical && (
-                                  <div className="flex items-center gap-1 text-xs text-red-600 mt-1">
+                                  <div className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 mt-1">
                                     <span>⚠️</span>
                                     <span className="font-medium">Critical - Outside normal range</span>
                                   </div>
@@ -7044,7 +7085,7 @@ Report generated from Cura EMR System`;
             </div>
 
             {/* Action Buttons */}
-            <div className="flex justify-between items-center pt-4 border-t">
+            <div className="flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-700">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -7183,16 +7224,16 @@ Report generated from Cura EMR System`;
       <Dialog open={showFillResultDialog} onOpenChange={setShowFillResultDialog}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold">
+            <DialogTitle className="text-lg font-bold text-gray-900 dark:text-white">
               Generate Lab Test Result
             </DialogTitle>
           </DialogHeader>
           
           {selectedLabOrder && (
-            <div className="space-y-6 py-4">
+            <div className="space-y-6 py-4 text-gray-900 dark:text-gray-100">
               {/* Lab Order Details - Read Only */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-                <h4 className="font-semibold text-blue-900 mb-2">Lab Order Details</h4>
+              <div className="bg-blue-50 dark:bg-gray-800 border border-blue-200 dark:border-gray-600 rounded-lg p-4 space-y-3">
+                <h4 className="font-semibold text-blue-900 dark:text-gray-100 mb-2">Lab Order Details</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <span className="text-sm text-gray-600 dark:text-gray-400">Patient Name:</span>
@@ -7372,9 +7413,9 @@ Report generated from Cura EMR System`;
                       
                       return (
                         <div key={testType} className="space-y-4">
-                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-600 p-3 rounded flex justify-between items-center">
+                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-slate-800 border-l-4 border-blue-600 dark:border-blue-500 p-3 rounded flex justify-between items-center">
                             <div>
-                              <h4 className="font-semibold text-blue-900 text-lg">
+                              <h4 className="font-semibold text-blue-900 dark:text-gray-100 text-lg">
                                 {testIndex + 1}. {testType}
                               </h4>
                               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
@@ -7386,7 +7427,7 @@ Report generated from Cura EMR System`;
                               variant="outline"
                               size="sm"
                               onClick={() => addCustomField(testType)}
-                              className="flex items-center gap-2"
+                              className="flex items-center gap-2 dark:border-gray-600 dark:hover:bg-gray-700"
                             >
                               <Plus className="h-4 w-4" />
                               Add Field
@@ -7401,15 +7442,15 @@ Report generated from Cura EMR System`;
                               return (
                                 <div key={`${testType}-${field.name}-${fieldIndex}`} className="space-y-1">
                                   {isCustom ? (
-                                    <div className="border-2 border-dashed border-blue-300 rounded-lg p-3 bg-blue-50/50">
+                                    <div className="border-2 border-dashed border-blue-300 dark:border-gray-600 rounded-lg p-3 bg-blue-50/50 dark:bg-gray-800/50">
                                       <div className="flex items-center justify-between mb-2">
-                                        <Label className="text-xs font-semibold text-blue-700">Custom Field</Label>
+                                        <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">Custom Field</Label>
                                         <Button
                                           type="button"
                                           variant="ghost"
                                           size="sm"
                                           onClick={() => removeCustomField(testType, fieldIndex - (TEST_FIELD_DEFINITIONS[testType]?.length || 0))}
-                                          className="h-5 w-5 p-0 text-red-600 hover:text-red-700"
+                                          className="h-5 w-5 p-0 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                                         >
                                           <X className="h-4 w-4" />
                                         </Button>
@@ -7451,9 +7492,9 @@ Report generated from Cura EMR System`;
                                     </div>
                                   ) : (
                                     <>
-                                      <Label htmlFor={`fill-${testType}-${field.name}`}>
+                                      <Label htmlFor={`fill-${testType}-${field.name}`} className="text-gray-900 dark:text-gray-200">
                                         {field.name}
-                                        <span className="text-xs text-gray-500 ml-2">
+                                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
                                           (Ref: {field.referenceRange} {field.unit})
                                         </span>
                                       </Label>
@@ -7469,7 +7510,7 @@ Report generated from Cura EMR System`;
                                     </>
                                   )}
                                   {hasError && (
-                                    <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
                                       <AlertTriangle className="h-2.5 w-2.5" />
                                       {hasError}
                                     </p>
@@ -7490,12 +7531,12 @@ Report generated from Cura EMR System`;
                           
                           return (
                             <div key={testType} className="space-y-4">
-                              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded flex justify-between items-center">
+                              <div className="bg-yellow-50 dark:bg-amber-900/30 border-l-4 border-yellow-400 dark:border-amber-600 p-3 rounded flex justify-between items-center">
                                 <div>
-                                  <h4 className="font-semibold text-yellow-900 text-lg">
+                                  <h4 className="font-semibold text-yellow-900 dark:text-amber-200 text-lg">
                                     {testTypes.length + testIndex + 1}. {testType}
                                   </h4>
-                                  <p className="text-sm text-yellow-700 mt-1">
+                                  <p className="text-sm text-yellow-700 dark:text-amber-300 mt-1">
                                     No predefined parameters. Add custom fields below.
                                   </p>
                                 </div>
@@ -7504,15 +7545,15 @@ Report generated from Cura EMR System`;
                                   variant="outline"
                                   size="sm"
                                   onClick={() => addCustomField(testType)}
-                                  className="flex items-center gap-2 border-yellow-300 hover:bg-yellow-100"
+                                  className="flex items-center gap-2 border-yellow-300 hover:bg-yellow-100 dark:border-amber-600 dark:hover:bg-amber-900/50"
                                 >
                                   <Plus className="h-4 w-4" />
                                   Add Parameter
                                 </Button>
                               </div>
                               {customFieldsForType.length === 0 ? (
-                                <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg p-6 text-center">
-                                  <p className="text-sm text-gray-600 mb-2">
+                                <div className="bg-gray-50 dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
                                     No parameters added yet. Click "Add Parameter" to create custom fields.
                                   </p>
                                 </div>
@@ -7523,15 +7564,15 @@ Report generated from Cura EMR System`;
                                     const hasError = validationErrors[fieldKey];
                                     
                                     return (
-                                      <div key={`${testType}-custom-${fieldIndex}`} className="space-y-1 border-2 border-dashed border-blue-300 rounded-lg p-3 bg-blue-50/50">
+                                      <div key={`${testType}-custom-${fieldIndex}`} className="space-y-1 border-2 border-dashed border-blue-300 dark:border-gray-600 rounded-lg p-3 bg-blue-50/50 dark:bg-gray-800/50">
                                         <div className="flex items-center justify-between mb-2">
-                                          <Label className="text-xs font-semibold text-blue-700">Custom Parameter</Label>
+                                          <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">Custom Parameter</Label>
                                           <Button
                                             type="button"
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => removeCustomField(testType, fieldIndex)}
-                                            className="h-5 w-5 p-0 text-red-600 hover:text-red-700"
+                                            className="h-5 w-5 p-0 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                                           >
                                             <X className="h-4 w-4" />
                                           </Button>
@@ -7571,7 +7612,7 @@ Report generated from Cura EMR System`;
                                           )}
                                         </div>
                                         {hasError && (
-                                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                          <p className="text-xs text-red-600 dark:text-red-400 mt-1 flex items-center gap-1">
                                             <AlertTriangle className="h-2.5 w-2.5" />
                                             {hasError}
                                           </p>
@@ -7692,10 +7733,10 @@ Report generated from Cura EMR System`;
 
               {/* Clinical Notes */}
               <div className="space-y-2">
-                <Label htmlFor="fill-clinical-notes">Clinical Notes (Optional)</Label>
+                <Label htmlFor="fill-clinical-notes" className="text-gray-900 dark:text-gray-200">Clinical Notes (Optional)</Label>
                 <textarea
                   id="fill-clinical-notes"
-                  className="w-full min-h-[100px] p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full min-h-[100px] p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter any clinical observations or notes..."
                   value={fillResultFormData.notes || ""}
                   onChange={(e) =>
@@ -7709,7 +7750,7 @@ Report generated from Cura EMR System`;
               </div>
 
               {/* Action Buttons */}
-              <div className="flex justify-end gap-3 pt-4 border-t">
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -8760,12 +8801,12 @@ Report generated from Cura EMR System`;
             {/* Signature Tab */}
             <TabsContent value="signature" className="space-y-4">
               {selectedResult && (
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
-                  <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-slate-800 p-6 rounded-lg border border-blue-200 dark:border-gray-600">
+                  <h4 className="font-semibold text-blue-900 dark:text-gray-100 mb-3 flex items-center gap-2">
                     <FileText className="h-5 w-5" />
                     Lab Result Summary for Digital Signature
                   </h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm text-blue-800">
+                  <div className="grid grid-cols-2 gap-4 text-sm text-blue-800 dark:text-gray-300">
                     <div>
                       <p>
                         <strong>Patient:</strong>{" "}
@@ -8802,11 +8843,11 @@ Report generated from Cura EMR System`;
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 p-3 bg-white rounded border">
-                    <p className="text-sm font-medium text-gray-700 mb-2">
+                  <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded border dark:border-gray-600">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Test to be signed:
                     </p>
-                    <div className="text-xs text-gray-600 mb-1">
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
                       • Test ID: {selectedResult.testId} - {selectedResult.testType}
                     </div>
                   </div>
@@ -8817,16 +8858,16 @@ Report generated from Cura EMR System`;
                 {/* Advanced Signature Canvas */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Digital Signature Pad
                     </label>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       Signature Quality: Real-time Analysis
                     </div>
                   </div>
 
-                  <div className="border-2 border-gray-300 rounded-lg relative overflow-hidden bg-white shadow-inner">
+                  <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg relative overflow-hidden bg-white dark:bg-gray-900 shadow-inner">
                     <canvas
                       ref={canvasRef}
                       width={450}
@@ -8840,7 +8881,7 @@ Report generated from Cura EMR System`;
                       onTouchMove={drawTouch}
                       onTouchEnd={stopDrawingTouch}
                     />
-                    <div className="absolute top-2 right-2 text-xs text-gray-400">
+                    <div className="absolute top-2 right-2 text-xs text-gray-400 dark:text-gray-500">
                       Advanced Capture Mode
                     </div>
                   </div>

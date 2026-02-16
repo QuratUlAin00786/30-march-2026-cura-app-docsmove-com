@@ -3509,23 +3509,24 @@ export default function MessagingPage() {
   return (
     <div className="h-screen flex flex-col overflow-hidden max-w-full w-full min-h-0">
       {/* Top row: Header + Theme Toggle */}
-      <div className="flex items-center justify-between gap-2 bg-white px-2 py-1 rounded flex-shrink-0 min-w-0 max-w-full">
+      <div className="flex items-center justify-between gap-1.5 bg-white dark:bg-card px-2 py-0.5 rounded flex-shrink-0 min-w-0 max-w-full">
         <Header
           title="Messaging Center"
           subtitle="Secure communication with patients and staff"
         />
 
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-sm text-neutral-600">Theme:</span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className="text-xs text-neutral-600 dark:text-neutral-400">Theme:</span>
           <ThemeToggle />
         </div>
       </div>
 
       {/* Healthcare Quick Actions */}
-      <div className="flex items-center gap-2 sm:gap-4 mb-2 px-4 sm:px-6 flex-wrap flex-shrink-0 min-w-0 max-w-full">
+      <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 px-3 sm:px-4 flex-wrap flex-shrink-0 min-w-0 max-w-full">
             <Button 
               variant="outline" 
               size="sm"
+              className="text-xs py-1.5 px-2.5 h-8 shrink-0"
               onClick={() => {
                 setNewMessage({
                   recipient: "",
@@ -3539,11 +3540,12 @@ export default function MessagingPage() {
                 setShowNewMessage(true);
               }}
             >
-              📅 Appointment Reminder
+              <span className="text-xs">📅 Appointment Reminder</span>
             </Button>
             <Button 
               variant="outline" 
               size="sm"
+              className="text-xs py-1.5 px-2.5 h-8"
               onClick={() => {
                 setNewMessage({
                   recipient: "",
@@ -3557,11 +3559,12 @@ export default function MessagingPage() {
                 setShowNewMessage(true);
               }}
             >
-              🧪 Lab Results
+              <span className="text-xs">🧪 Lab Results</span>
             </Button>
             <Button 
               variant="outline" 
               size="sm"
+              className="text-xs py-1.5 px-2.5 h-8"
               onClick={() => {
                 setNewMessage({
                   recipient: "",
@@ -3575,7 +3578,7 @@ export default function MessagingPage() {
                 setShowNewMessage(true);
               }}
             >
-              💊 Prescription Ready
+              <span className="text-xs">💊 Prescription Ready</span>
             </Button>
           <Dialog open={showVideoCall} onOpenChange={(open) => {
             setShowVideoCall(open);
@@ -3590,9 +3593,9 @@ export default function MessagingPage() {
             }
           }}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Video className="h-4 w-4 mr-2" />
-                Video Call
+              <Button variant="outline" size="sm" className="text-xs py-1.5 px-2.5 h-8">
+                <Video className="h-3.5 w-3.5 mr-1.5" />
+                <span className="text-xs">Video Call</span>
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-xl">
@@ -3870,8 +3873,8 @@ export default function MessagingPage() {
           }}>
             {canCreate('messaging') && (
             <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
+              <Button size="sm" className="text-xs py-1.5 px-2.5 h-8">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
                 New Message
               </Button>
             </DialogTrigger>
@@ -4231,23 +4234,23 @@ export default function MessagingPage() {
       </Dialog>
 
       {/* Messaging Content */}
-      <div className="flex-1 min-h-0 overflow-hidden p-4 md:p-6 max-w-full">
+      <div className="flex-1 min-h-0 overflow-hidden p-3 md:p-4 max-w-full">
       <Tabs value={activeMessagingTab} onValueChange={setActiveMessagingTab} className="w-full h-full flex flex-col min-h-0 min-w-0">
-        <TabsList className="w-full grid grid-cols-4 flex-shrink-0 min-w-0">
-          <TabsTrigger value="conversations" className="min-w-0">Conversations</TabsTrigger>
-          <TabsTrigger value="sms" className="min-w-0">SMS</TabsTrigger>
-          <TabsTrigger value="campaigns" className="min-w-0">Campaigns</TabsTrigger>
-          <TabsTrigger value="templates" className="min-w-0">Announcement</TabsTrigger>
+        <TabsList className="w-full grid grid-cols-4 flex-shrink-0 min-w-0 h-9 text-sm">
+          <TabsTrigger value="conversations" className="min-w-0 text-xs sm:text-sm py-1.5">Conversations</TabsTrigger>
+          <TabsTrigger value="sms" className="min-w-0 text-xs sm:text-sm py-1.5">SMS</TabsTrigger>
+          <TabsTrigger value="campaigns" className="min-w-0 text-xs sm:text-sm py-1.5">Campaigns</TabsTrigger>
+          <TabsTrigger value="templates" className="min-w-0 text-xs sm:text-sm py-1.5">Announcement</TabsTrigger>
         </TabsList>
-        <TabsContent value="conversations" className="flex-1 overflow-hidden mt-4 min-h-0 min-w-0">
-          <div className="grid grid-cols-12 gap-3 md:gap-4 h-full min-w-0">
+        <TabsContent value="conversations" className="flex-1 overflow-hidden mt-2 min-h-0 min-w-0">
+          <div className="grid grid-cols-12 gap-2 md:gap-3 h-full min-w-0">
             {/* Conversations List */}
             <div className="col-span-4 min-w-0 border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-lg flex flex-col overflow-hidden">
-              <div className="p-3 md:p-4 border-b border-gray-200 dark:border-slate-600 flex-shrink-0 min-w-0">
-                <div className="flex items-center justify-between gap-2 mb-3 min-w-0">
-                  <h2 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">All Messages</h2>
+              <div className="p-2.5 md:p-3 border-b border-gray-200 dark:border-slate-600 flex-shrink-0 min-w-0">
+                <div className="flex items-center justify-between gap-1.5 mb-2 min-w-0">
+                  <h2 className="text-sm md:text-base font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">All Messages</h2>
                 <Select value={messageFilter} onValueChange={setMessageFilter}>
-                    <SelectTrigger className="min-w-0 w-full max-w-[8.75rem] h-9 flex-shrink-0">
+                    <SelectTrigger className="min-w-0 w-full max-w-[7rem] h-8 flex-shrink-0 text-xs">
                       <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -4260,10 +4263,10 @@ export default function MessagingPage() {
                 </Select>
                 </div>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 h-4 w-4" />
+                  <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 h-3.5 w-3.5" />
                   <Input
                     placeholder="Search conversations..."
-                    className="pl-10"
+                    className="pl-8 h-8 text-sm"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -4272,13 +4275,13 @@ export default function MessagingPage() {
 
               <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                 <ScrollArea className="flex-1 min-h-0 min-w-0">
-                  <div className="p-4 md:p-6">
+                  <div className="p-2.5 md:p-3">
                     {/* New Conversation Option */}
                     {/* Show existing conversations first */}
                     {filteredConversations && filteredConversations.length > 0 && (
-                      <div className="mb-4">
-                        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4 px-1">📩 Click conversation below to send messages:</h3>
-                        <div className="space-y-3">
+                      <div className="mb-2.5">
+                        <h3 className="text-xs font-medium text-gray-900 dark:text-gray-100 mb-2 px-0.5">📩 Click conversation below to send messages:</h3>
+                        <div className="space-y-2">
                           {filteredConversations.map((conversation: Conversation) => {
                             const otherParticipant = getOtherParticipant(conversation);
                             const participantName = otherParticipant?.name && otherParticipant.name !== 'undefined' 
@@ -4295,7 +4298,7 @@ export default function MessagingPage() {
                             return (
                           <div
                             key={conversation.id}
-                                className={`p-4 rounded-lg cursor-pointer transition-all duration-200 ${
+                                className={`p-2.5 rounded-md cursor-pointer transition-all duration-200 ${
                               selectedConversation === conversation.id
                                     ? 'border-2 border-blue-500 bg-blue-50/50 dark:bg-blue-900/20'
                                     : 'border border-green-200 dark:border-green-700 bg-white dark:bg-slate-700 hover:border-green-300 dark:hover:border-green-600 hover:shadow-sm'
@@ -4306,18 +4309,18 @@ export default function MessagingPage() {
                               setSelectedConversation(conversation.id);
                             }}
                           >
-                                <div className="flex items-start gap-3">
+                                <div className="flex items-start gap-2">
                                   {/* Kebab menu - in front of name and time */}
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        className="h-8 w-8 p-0 flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                                        className="h-6 w-6 p-0 flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                                         onClick={(e) => e.stopPropagation()}
                                         title="Actions"
                                       >
-                                        <MoreVertical className="h-4 w-4" />
+                                        <MoreVertical className="h-3.5 w-3.5" />
                                       </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
@@ -4335,13 +4338,13 @@ export default function MessagingPage() {
                                   </DropdownMenu>
                                   {/* Avatar */}
                               <div className="relative flex-shrink-0">
-                                    <Avatar className="h-10 w-10">
-                                      <AvatarFallback className="bg-green-500 text-white text-sm font-semibold">
+                                    <Avatar className="h-8 w-8">
+                                      <AvatarFallback className="bg-green-500 text-white text-xs font-semibold">
                                         {String(participantName).charAt(0).toUpperCase()}
                                   </AvatarFallback>
                                 </Avatar>
                                 {conversation.unreadCount > 0 && (
-                                      <Badge variant="destructive" className="absolute -top-1 -right-1 text-xs min-w-[18px] h-5 flex items-center justify-center p-0.5">
+                                      <Badge variant="destructive" className="absolute -top-0.5 -right-0.5 text-[10px] min-w-[14px] h-4 flex items-center justify-center p-0">
                                     {conversation.unreadCount}
                                   </Badge>
                                 )}
@@ -4350,29 +4353,29 @@ export default function MessagingPage() {
                                   {/* Content */}
                               <div className="flex-1 min-w-0">
                                     {/* Name */}
-                                    <div className="flex items-start justify-between mb-1">
-                                      <h4 className="font-semibold text-base text-gray-900 dark:text-gray-100 truncate">
+                                    <div className="flex items-start justify-between mb-0.5">
+                                      <h4 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
                                         {participantName}
                                     </h4>
                                 </div>
                                     
                                     {/* Role Badge and Date */}
-                                    <div className="flex items-center gap-2 mb-2">
+                                    <div className="flex items-center gap-1.5 mb-1">
                                       <Badge 
-                                        className="bg-purple-500 text-white text-xs px-2 py-0.5 font-normal"
+                                        className="bg-purple-500 text-white text-[10px] px-1.5 py-0 font-normal"
                                         variant="secondary"
                                       >
                                         {participantRole}
                                       </Badge>
                                       {lastMessageTimestamp && (
-                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400">
                                           {lastMessageTimestamp}
                                         </span>
                                       )}
                                     </div>
                                     
                                     {/* Last Message */}
-                                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-1">
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1">
                                   {conversation.lastMessage?.content || "No messages yet"}
                                 </p>
                               </div>
@@ -4385,26 +4388,26 @@ export default function MessagingPage() {
                     )}
 
                     {(!filteredConversations || filteredConversations.length === 0) && (
-                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                        <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>No existing conversations found</p>
+                      <div className="text-center py-5 text-gray-500 dark:text-gray-400">
+                        <MessageSquare className="h-10 w-10 mx-auto mb-2.5 opacity-50" />
+                        <p className="text-sm">No existing conversations found</p>
                       </div>
                     )}
                   </div>
                 </ScrollArea>
 
                 {/* Fixed bottom section - excluded from scroll */}
-                <div className="p-4 pt-3 border-t border-gray-200 dark:border-slate-600 flex-shrink-0 bg-white dark:bg-slate-800">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Or create new conversation:</p>
+                <div className="p-2.5 pt-2 border-t border-gray-200 dark:border-slate-600 flex-shrink-0 bg-white dark:bg-slate-800">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1.5">Or create new conversation:</p>
                   <div
-                    className="p-3 rounded-lg cursor-pointer transition-all border-2 border-dashed border-gray-300 dark:border-slate-500 hover:border-gray-400 dark:hover:border-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700/50"
+                    className="p-2 rounded-md cursor-pointer transition-all border-2 border-dashed border-gray-300 dark:border-slate-500 hover:border-gray-400 dark:hover:border-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700/50"
                     onClick={() => setShowNewMessage(true)}
                   >
-                    <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-gray-100 dark:bg-slate-600 flex items-center justify-center flex-shrink-0">
-                        <Plus className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                    <div className="flex items-center gap-1.5">
+                      <div className="h-6 w-6 rounded-full bg-gray-100 dark:bg-slate-600 flex items-center justify-center flex-shrink-0">
+                        <Plus className="h-3 w-3 text-gray-500 dark:text-gray-400" />
                       </div>
-                      <p className="text-sm text-gray-600 dark:text-gray-300 font-medium">New Message</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-300 font-medium">New Message</p>
                     </div>
                   </div>
                 </div>
@@ -4416,10 +4419,10 @@ export default function MessagingPage() {
               {selectedConversation ? (
                 <>
                   {/* Message Header */}
-                  <div className="p-3 border-b border-gray-200 dark:border-slate-600 flex items-center justify-between flex-shrink-0">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback>
+                  <div className="p-2.5 border-b border-gray-200 dark:border-slate-600 flex items-center justify-between flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="text-xs">
                           {(() => {
                             const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
                             return conv ? String(getOtherParticipant(conv)?.name || 'U').charAt(0).toUpperCase() : 'U';
@@ -4427,31 +4430,32 @@ export default function MessagingPage() {
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <h3 className="font-medium text-gray-900 dark:text-gray-100">
+                        <h3 className="font-medium text-sm text-gray-900 dark:text-gray-100">
                           {(() => {
                             const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
                             return conv ? getOtherParticipant(conv)?.name : '';
                           })()}
                         </h3>
-                        <div className="flex items-center gap-2">
-                        <p className="text-sm text-gray-600 dark:text-gray-300">
+                        <div className="flex items-center gap-1.5">
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
                           {(() => {
                             const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
                             return conv ? getOtherParticipant(conv)?.role : '';
                           })()}
                         </p>
                           {/* Online/Offline Status */}
-                          <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                             Online
                           </span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <Button 
                         variant="outline" 
                         size="sm"
+                        className="h-7 w-7 p-0"
                         onClick={() => {
                           const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
                           if (conv) {
@@ -4462,11 +4466,12 @@ export default function MessagingPage() {
                           }
                         }}
                       >
-                        <Phone className="h-4 w-4" />
+                        <Phone className="h-3.5 w-3.5" />
                       </Button>
                       <Button 
                         variant="outline" 
                         size="sm"
+                        className="h-7 w-7 p-0"
                         onClick={() => {
                           const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
                           if (conv) {
@@ -4475,11 +4480,12 @@ export default function MessagingPage() {
                           }
                         }}
                       >
-                        <Video className="h-4 w-4" />
+                        <Video className="h-3.5 w-3.5" />
                       </Button>
                       <Button 
                         variant="outline" 
                         size="sm"
+                        className="h-7 w-7 p-0"
                         onClick={() => {
                           if (selectedConversation) {
                             const conv = conversations.find((c: Conversation) => c.id === selectedConversation);
@@ -4499,7 +4505,7 @@ export default function MessagingPage() {
                           const isLoading = toggleFavoriteMutation.isPending;
                           return (
                             <Star 
-                              className={`h-4 w-4 ${isFavorite ? "fill-yellow-500 text-yellow-500" : ""} ${isLoading ? "opacity-50" : ""}`} 
+                              className={`h-3.5 w-3.5 ${isFavorite ? "fill-yellow-500 text-yellow-500" : ""} ${isLoading ? "opacity-50" : ""}`} 
                             />
                           );
                         })()}
@@ -4520,16 +4526,16 @@ export default function MessagingPage() {
 
                   {/* Messages */}
                   <ScrollArea className="flex-1 overflow-y-auto">
-                    <div ref={messagesContainerRef} className="space-y-4 p-4">
+                    <div ref={messagesContainerRef} className="space-y-2 p-3">
                       {(() => {
                         console.log('🔥 RENDERING MESSAGES - Count:', messages.length);
                         console.log('🔥 RENDERING MESSAGES - Data:', JSON.stringify(messages, null, 2));
                         return null;
                       })()}
                       {messages.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                          <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                          <p>No messages in this conversation</p>
+                        <div className="text-center py-5 text-gray-500 dark:text-gray-400">
+                          <MessageSquare className="h-10 w-10 mx-auto mb-2.5 opacity-50" />
+                          <p className="text-sm">No messages in this conversation</p>
                         </div>
                       ) : (
                         messages.map((message: Message, index: number) => {
@@ -4544,14 +4550,14 @@ export default function MessagingPage() {
                           return (
                             <div 
                               key={message.id} 
-                              className={`flex gap-3 mb-4 transition-all duration-200 group ${
+                              className={`flex gap-2 mb-2 transition-all duration-200 group ${
                                 isSentByCurrentUser ? 'flex-row-reverse' : 'flex-row'
                               }`}
                             >
                               {/* Avatar - only show for received messages */}
                               {!isSentByCurrentUser && (
-                                <Avatar className="h-8 w-8 flex-shrink-0">
-                                  <AvatarFallback className="text-xs bg-gray-400 text-white">
+                                <Avatar className="h-6 w-6 flex-shrink-0">
+                                  <AvatarFallback className="text-[10px] bg-gray-400 text-white">
                                   {message.senderName?.charAt(0) || 'U'}
                                 </AvatarFallback>
                               </Avatar>
@@ -4754,17 +4760,17 @@ export default function MessagingPage() {
                                 
                                 {/* Message Bubble */}
                                 <div 
-                                  className={`rounded-2xl px-4 py-2.5 shadow-sm transition-all duration-200 ${
+                                  className={`rounded-xl px-3 py-2 shadow-sm transition-all duration-200 ${
                                     isSentByCurrentUser 
                                       ? 'bg-blue-600 text-white rounded-br-md' // Outgoing: blue with sharper left corners
                                       : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-md' // Incoming: gray with sharper right corners
                                   }`}
                                 >
-                                  <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                                  <p className="text-xs whitespace-pre-wrap break-words">{message.content}</p>
                                   
                                   {/* Timestamp for sent messages - shown below message */}
                                   {isSentByCurrentUser && (
-                                    <div className="text-xs text-blue-100 dark:text-blue-300 mt-1 text-right">
+                                    <div className="text-[10px] text-blue-100 dark:text-blue-300 mt-0.5 text-right">
                                       {formatTimestampNoConversion(message.timestamp)}
                                     </div>
                                   )}
@@ -4882,11 +4888,11 @@ export default function MessagingPage() {
                   </ScrollArea>
 
                   {/* Message Composer */}
-                  <div className="p-3 border-t border-gray-200 dark:border-slate-600 bg-blue-50 dark:bg-slate-700 flex-shrink-0">
-                    <div className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">
+                  <div className="p-2.5 border-t border-gray-200 dark:border-slate-600 bg-blue-50 dark:bg-slate-700 flex-shrink-0">
+                    <div className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-1.5">
                       💬 Reply to this conversation
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex gap-2">
                       <Textarea
                         key={`message-input-${selectedConversation}`}
                         placeholder="Type your reply here..."
@@ -4900,16 +4906,16 @@ export default function MessagingPage() {
                             }
                           }
                         }}
-                        className="flex-1 min-h-[80px] bg-white dark:bg-slate-600"
+                        className="flex-1 min-h-[64px] text-sm py-2 px-3 bg-white dark:bg-slate-600"
                       />
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1">
                         <Button 
                           size="sm"
+                          className="h-8 w-8 p-0 bg-blue-600 hover:bg-blue-700 shrink-0"
                           onClick={handleSendConversationMessage}
                           disabled={!newMessageContent.trim()}
-                          className="bg-blue-600 hover:bg-blue-700"
                         >
-                          <Send className="h-4 w-4" />
+                          <Send className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </div>
@@ -4918,9 +4924,9 @@ export default function MessagingPage() {
               ) : (
                 <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
                   <div className="text-center">
-                    <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                    <h3 className="text-lg font-medium mb-2 text-gray-900 dark:text-gray-100">Select a conversation</h3>
-                    <p className="text-sm">Choose a conversation from the list to start messaging</p>
+                    <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <h3 className="text-base font-medium mb-1.5 text-gray-900 dark:text-gray-100">Select a conversation</h3>
+                    <p className="text-xs">Choose a conversation from the list to start messaging</p>
                   </div>
                 </div>
               )}
