@@ -216,8 +216,8 @@ export function AdminDashboard() {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Fetch all patients without isActive filter - use a very high limit to get all patients
-      const response = await fetch('/api/patients?limit=10000', {
+      // Fetch all patients without isActive filter (no limit = all patients)
+      const response = await fetch('/api/patients', {
         headers,
         credentials: 'include'
       });
@@ -245,8 +245,8 @@ export function AdminDashboard() {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Fetch only active patients (is_active = true) - use a very high limit to get all active patients
-      const response = await fetch('/api/patients?isActive=true&limit=10000', {
+      // Fetch only active patients (is_active = true) (no limit = all)
+      const response = await fetch('/api/patients?isActive=true', {
         headers,
         credentials: 'include'
       });

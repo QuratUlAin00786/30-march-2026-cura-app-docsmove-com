@@ -4,6 +4,7 @@ import { Users, Calendar, Brain, Stethoscope, Pill, FileText } from "lucide-reac
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { isToday } from "date-fns";
 
 function getTenantSubdomain(): string {
   return localStorage.getItem('user_subdomain') || 'demo';
@@ -15,20 +16,27 @@ export function DoctorDashboard() {
     queryKey: ["/api/dashboard/stats"],
   });
 
+  const { data: appointmentsData } = useQuery({
+    queryKey: ["/api/appointments"],
+  });
+
   const { data: upcomingAppointments } = useQuery({
     queryKey: ["/api/appointments"],
     select: (data) => {
-      // Filter appointments for today and upcoming
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       return Array.isArray(data) ? data.filter((apt: any) => {
         const aptDate = new Date(apt.scheduledAt);
-        return aptDate >= today;
+        return aptDate >= today && (user?.id != null ? apt.providerId === user.id : true);
       }).sort((a: any, b: any) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()) : [];
     }
   });
 
-  // Fetch all patients from the patients table to get total count
+  const todayOwnAppointmentsCount = Array.isArray(appointmentsData)
+    ? appointmentsData.filter((apt: any) => isToday(new Date(apt.scheduledAt)) && user?.id != null && apt.providerId === user.id).length
+    : 0;
+
+  // Fetch all patients for Total Patients count (no limit = API returns all)
   const { data: allPatients, isLoading: patientsLoading } = useQuery({
     queryKey: ["/api/patients/all"],
     queryFn: async () => {
@@ -41,7 +49,7 @@ export function DoctorDashboard() {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Fetch all patients without isActive filter
+      // No limit param: server returns all patients so count is accurate
       const response = await fetch('/api/patients', {
         headers,
         credentials: 'include'
@@ -70,7 +78,7 @@ export function DoctorDashboard() {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      // Fetch only active patients (is_active = true)
+      // Fetch only active patients (is_active = true); no limit = all
       const response = await fetch('/api/patients?isActive=true', {
         headers,
         credentials: 'include'
@@ -90,9 +98,9 @@ export function DoctorDashboard() {
   
   const doctorCards = [
     {
-      title: "Today's Patients",
-      value: (stats && typeof stats === 'object' && 'todayAppointments' in stats) ? String(stats.todayAppointments) : "0",
-      description: "Scheduled appointments",
+      title: "Today's Appointments",
+      value: String(todayOwnAppointmentsCount),
+      description: "Your scheduled appointments today",
       icon: Calendar,
       href: `/${subdomain}/appointments`,
       color: "bg-blue-100 text-blue-800"

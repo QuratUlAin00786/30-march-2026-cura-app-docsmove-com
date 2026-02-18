@@ -42,7 +42,7 @@ export default function Dashboard() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      // Fetch only active patients (is_active = true)
+      // Fetch only active patients (is_active = true); no limit = server returns all
       const response = await fetch("/api/patients?isActive=true", {
         headers,
         credentials: "include",

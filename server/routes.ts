@@ -4236,7 +4236,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   // Patient routes
   app.get("/api/patients", authMiddleware, requireRole(["admin", "doctor", "nurse", "patient"]), async (req: TenantRequest, res) => {
     try {
-      const limit = parseInt(req.query.limit as string) || 50;
+      // No default limit: return all patients so count (e.g. "12 patients found") is accurate for doctor/nurse/admin
+      const limitParam = req.query.limit as string;
+      const limit = limitParam !== undefined && limitParam !== '' ? parseInt(limitParam, 10) : undefined;
       const isActiveParam = req.query.isActive as string;
       
       // Parse isActive parameter: if provided, convert to boolean, otherwise undefined (return all)
@@ -5956,8 +5958,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           appointments = [];
         }
       } else if (userRole === 'nurse') {
-        // Nurses can see all appointments for now - can be restricted further if needed
-        appointments = await storage.getAppointmentsByOrganization(req.tenant!.id);
+        // Nurses see only their own appointments (where they are the provider)
+        appointments = await storage.getAppointmentsByProvider(userId, req.tenant!.id);
       } else {
         // Default: no access for other roles
         return res.status(403).json({ error: "Access denied" });

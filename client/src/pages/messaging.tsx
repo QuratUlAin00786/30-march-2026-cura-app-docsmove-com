@@ -31,6 +31,7 @@ import {
   Mail,
   Smartphone,
   Clock,
+  Check,
   CheckCheck,
   CheckCircle,
   XCircle,
@@ -335,6 +336,7 @@ export default function MessagingPage() {
     serverUrl?: string;
   } | null>(null);
   const [newMessageContent, setNewMessageContent] = useState("");
+  const [showSentConfirmation, setShowSentConfirmation] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [messageFilter, setMessageFilter] = useState("all");
   const [activeMessagingTab, setActiveMessagingTab] = useState("conversations");
@@ -576,12 +578,20 @@ export default function MessagingPage() {
     patient.patientId?.toLowerCase().includes(messagePatientSearch.toLowerCase())
   );
 
-  // Filter users/patients based on selected role for admin
-  const filteredRecipients = selectedRecipientRole === 'patient' 
-    ? (patientsData || [])
-    : selectedRecipientRole 
-      ? (usersData || []).filter((u: any) => u.role === selectedRecipientRole)
-      : [];
+  // Filter users/patients based on selected role; exclude current user so they cannot select themselves
+  const currentUserId = currentUser?.id ?? user?.id;
+  const filteredRecipients = (() => {
+    const base = selectedRecipientRole === 'patient'
+      ? (patientsData || [])
+      : selectedRecipientRole
+        ? (usersData || []).filter((u: any) => u.role === selectedRecipientRole)
+        : [];
+    if (currentUserId == null) return base;
+    if (selectedRecipientRole === 'patient') {
+      return base.filter((p: any) => String(p.userId) !== String(currentUserId) && String(p.id) !== String(currentUserId));
+    }
+    return base.filter((u: any) => String(u.id) !== String(currentUserId));
+  })();
 
   // Helper function to get the other participant (not the current user)
   const getOtherParticipant = (conversation: Conversation) => {
@@ -1170,8 +1180,6 @@ export default function MessagingPage() {
             }
           }, 300);
       }
-        
-        showSuccess("Message Sent", "Your message has been sent and conversation started successfully.");
       } else {
         // Non-message types: don't create/update conversations, just send the message
         console.log('📧 NON-MESSAGE TYPE - no conversation created');
@@ -3171,8 +3179,14 @@ export default function MessagingPage() {
       // Only refetch if needed for consistency, but preserve the current messages
       console.log('🔥 MESSAGE SENT SUCCESSFULLY - Keeping optimistic update');
       
-      // Show success notification
-      showSuccess("Message Sent", "Your message has been sent successfully.");
+      // Show inline "Message sent" with green tick inside message area for 10 seconds, then hide
+      setShowSentConfirmation(true);
+      setTimeout(() => setShowSentConfirmation(false), 10000);
+      
+      // Auto scroll down so new message and "Message sent" are visible
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 200);
       
     } catch (error: any) {
       // Remove the optimistic message since send failed
@@ -4663,13 +4677,75 @@ export default function MessagingPage() {
                                     </DropdownMenu>
                                   </div>
                                 ) : (
-                                  <div className="mb-1 self-end">
+                                  /* Sent: bubble and kebab in one row, kebab on the right */
+                                  <div className="flex items-end gap-1.5 justify-end w-full">
+                                    <div 
+                                      className={`rounded-xl px-3 py-2 shadow-sm transition-all duration-200 min-w-0 ${
+                                        isSentByCurrentUser 
+                                          ? 'bg-blue-600 text-white rounded-br-md' // Outgoing: blue with sharper left corners
+                                          : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-md' // Incoming: gray with sharper right corners
+                                      }`}
+                                    >
+                                      <p className="text-xs whitespace-pre-wrap break-words">{message.content}</p>
+                                      <div className="flex items-center justify-end gap-1.5 mt-0.5 text-[10px] text-blue-100 dark:text-blue-300">
+                                        <span>{formatTimestampNoConversion(message.timestamp)}</span>
+                                        <span className="flex items-center gap-0.5 opacity-90">
+                                          sent
+                                          <Check className="h-3 w-3 inline" strokeWidth={2.5} />
+                                        </span>
+                                      </div>
+                                      {message.tags && message.tags.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                          {message.tags.map((tag: any) => {
+                                            const colorMap: Record<string, { bg: string; text: string; border: string }> = {
+                                              blue: { bg: 'rgba(255, 255, 255, 0.3)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              red: { bg: 'rgba(255, 200, 200, 0.4)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              green: { bg: 'rgba(200, 255, 200, 0.4)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              yellow: { bg: 'rgba(255, 255, 200, 0.4)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              purple: { bg: 'rgba(255, 200, 255, 0.4)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              orange: { bg: 'rgba(255, 220, 200, 0.4)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              pink: { bg: 'rgba(255, 200, 220, 0.4)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                              gray: { bg: 'rgba(255, 255, 255, 0.25)', text: '#ffffff', border: 'rgba(255, 255, 255, 0.5)' },
+                                            };
+                                            const colors = colorMap[tag.color] || colorMap.blue;
+                                            return (
+                                              <Badge key={tag.id} variant="secondary" className="text-xs" style={{ backgroundColor: colors.bg, color: colors.text, borderColor: colors.border }}>
+                                                <Tag className="h-2 w-2 mr-1" />
+                                                {tag.name}
+                                              </Badge>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                      {message.attachments && message.attachments.length > 0 && (
+                                        <div className="mt-2 space-y-2">
+                                          {message.attachments.map((attachment: any) => {
+                                            const isImage = attachment.type?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(attachment.name || '');
+                                            return (
+                                              <div key={attachment.id} className="space-y-1">
+                                                {isImage && attachment.url ? (
+                                                  <div className="overflow-hidden rounded-md border border-blue-400 max-w-full">
+                                                    <img src={attachment.url} alt={attachment.name || 'Attachment'} className="max-w-full h-auto max-h-[400px] object-contain w-full block" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                                  </div>
+                                                ) : (
+                                                  <div className="flex items-center gap-2 text-xs text-blue-100 dark:text-blue-200">
+                                                    <Paperclip className="h-3 w-3" />
+                                                    <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="text-blue-50 hover:text-white hover:underline break-words">{attachment.name}</a>
+                                                    <span className="text-blue-200 dark:text-blue-300 whitespace-nowrap">({(attachment.size / 1024).toFixed(1)} KB)</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
                                     <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button 
                                         variant="ghost" 
                                         size="sm" 
-                                        className={`h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity ${
+                                        className={`h-6 w-6 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
                                           isSentByCurrentUser ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-gray-500'
                                         }`}
                                       >
@@ -4758,7 +4834,8 @@ export default function MessagingPage() {
                                 </div>
                                 )}
                                 
-                                {/* Message Bubble */}
+                                {/* Message Bubble - only for received messages; sent messages have bubble above inside the row */}
+                                {!isSentByCurrentUser && (
                                 <div 
                                   className={`rounded-xl px-3 py-2 shadow-sm transition-all duration-200 ${
                                     isSentByCurrentUser 
@@ -4767,13 +4844,6 @@ export default function MessagingPage() {
                                   }`}
                                 >
                                   <p className="text-xs whitespace-pre-wrap break-words">{message.content}</p>
-                                  
-                                  {/* Timestamp for sent messages - shown below message */}
-                                  {isSentByCurrentUser && (
-                                    <div className="text-[10px] text-blue-100 dark:text-blue-300 mt-0.5 text-right">
-                                      {formatTimestampNoConversion(message.timestamp)}
-                                    </div>
-                                  )}
                                   {message.tags && message.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-2">
                                       {message.tags.map((tag) => {
@@ -4877,10 +4947,22 @@ export default function MessagingPage() {
                                     </div>
                                   )}
                                 </div>
+                                )}
                               </div>
                             </div>
                           )
                         })
+                      )}
+                      {/* Inline "Message sent" with green tick - right side, below the message */}
+                      {showSentConfirmation && (
+                        <div
+                          className="flex items-center justify-end gap-1.5 py-1.5 mr-[30px] text-xs text-green-600 dark:text-green-400 transition-opacity duration-200"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
+                          <span>Message sent</span>
+                        </div>
                       )}
                       {/* Invisible element at bottom for auto-scroll */}
                       <div ref={messagesEndRef} />

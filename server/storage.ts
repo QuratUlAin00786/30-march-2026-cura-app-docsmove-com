@@ -1312,7 +1312,7 @@ export class DatabaseStorage implements IStorage {
     return this.normalizePatientData(patient);
   }
 
-  async getPatientsByOrganization(organizationId: number, limit = 50, isActive?: boolean): Promise<Patient[]> {
+  async getPatientsByOrganization(organizationId: number, limit?: number, isActive?: boolean): Promise<Patient[]> {
     let whereConditions = [eq(patients.organizationId, organizationId)];
     
     // Add isActive filter only if explicitly provided
@@ -1320,10 +1320,12 @@ export class DatabaseStorage implements IStorage {
       whereConditions.push(eq(patients.isActive, isActive));
     }
     
-    const results = await db.select().from(patients)
+    const baseQuery = db.select().from(patients)
       .where(and(...whereConditions))
-      .orderBy(desc(patients.updatedAt))
-      .limit(limit);
+      .orderBy(desc(patients.updatedAt));
+    const results = (limit != null && limit > 0)
+      ? await baseQuery.limit(limit)
+      : await baseQuery;
     
     // Ensure no duplicates based on patient ID
     const uniqueResults = results.filter((patient, index, self) => 

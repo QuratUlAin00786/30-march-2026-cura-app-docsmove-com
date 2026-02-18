@@ -3,11 +3,22 @@ import { useQuery } from "@tanstack/react-query";
 import { Users, Calendar, Heart, Pill, FileText, Stethoscope } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/use-auth";
+import { isToday } from "date-fns";
 
 export function NurseDashboard() {
+  const { user } = useAuth();
   const { data: stats, isLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
   });
+
+  const { data: appointmentsData } = useQuery({
+    queryKey: ["/api/appointments"],
+  });
+
+  const todayOwnAppointmentsCount = Array.isArray(appointmentsData)
+    ? appointmentsData.filter((apt: any) => isToday(new Date(apt.scheduledAt)) && user?.id != null && apt.createdBy === user.id).length
+    : 0;
 
   const nurseCards = [
     {
@@ -19,9 +30,9 @@ export function NurseDashboard() {
       color: "bg-blue-100 text-blue-800"
     },
     {
-      title: "Today's Tasks",
-      value: stats?.todayAppointments || "0",
-      description: "Patient care activities",
+      title: "Today's Appointments",
+      value: String(todayOwnAppointmentsCount),
+      description: "Appointments you booked for today",
       icon: Calendar,
       href: "/appointments",
       color: "bg-green-100 text-green-800"

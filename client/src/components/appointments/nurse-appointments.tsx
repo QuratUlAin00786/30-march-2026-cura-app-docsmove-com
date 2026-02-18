@@ -53,7 +53,12 @@ export default function NurseAppointments({ onNewAppointment }: { onNewAppointme
     staleTime: 60000,
   });
 
-  const appointments = appointmentsData || [];
+  const rawAppointments = appointmentsData || [];
+  // Nurses see only appointments they themselves booked
+  const appointments =
+    user?.role === "nurse" && user?.id
+      ? rawAppointments.filter((apt: any) => apt.createdBy === user.id)
+      : rawAppointments;
 
   const getDoctorName = (providerId: number) => {
     if (!usersData || !Array.isArray(usersData)) return `Dr. Provider ${providerId}`;
