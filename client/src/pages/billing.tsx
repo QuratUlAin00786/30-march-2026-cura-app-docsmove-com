@@ -49,12 +49,21 @@ import {
   Edit,
   LayoutGrid,
   List,
-  Loader2
+  Loader2,
+  XCircle,
+  CircleDollarSign,
+  RefreshCw
 } from "lucide-react";
 import { SearchComboBox } from "@/components/SearchComboBox";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Check, ChevronsUpDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Check, ChevronsUpDown, MoreVertical } from "lucide-react";
 
 interface Invoice {
   id: number;
@@ -4366,6 +4375,8 @@ export default function BillingPage() {
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<Invoice | null>(null);
+  const [showStatusCountsPopup, setShowStatusCountsPopup] = useState(false);
+  const [showMonthWisePopup, setShowMonthWisePopup] = useState(false);
   const [isListView, setIsListView] = useState(true);
   const [invoicePaymentMethod, setInvoicePaymentMethod] = useState<
     "Cash" | "Online Payment" | "Insurance" | "Not Selected"
@@ -6272,15 +6283,17 @@ export default function BillingPage() {
     enabled: user?.role === 'doctor' || user?.role === 'nurse',
   });
 
-  // Doctor/nurse invoice category tab state
-  const [doctorInvoiceTab, setDoctorInvoiceTab] = useState<'overall' | 'appointments' | 'labResults' | 'imaging' | 'fees'>('overall');
+  // Doctor/nurse: top-level tab (Overall | Fees)
+  const [doctorInvoiceTab, setDoctorInvoiceTab] = useState<'overall' | 'fees'>('overall');
+  // Doctor/nurse: sub-tabs under Overall (All, Appointments, Lab Results, Imaging)
+  const [doctorOverallSubTab, setDoctorOverallSubTab] = useState<'overall' | 'appointments' | 'labResults' | 'imaging'>('overall');
 
   // Get the appropriate invoices based on user role (doctor/nurse use categorized tabs)
   const displayInvoices = (user?.role === 'doctor' || user?.role === 'nurse') && doctorInvoices 
     ? (doctorInvoiceTab === 'fees' ? [] :
-       doctorInvoiceTab === 'overall' ? doctorInvoices.overall :
-       doctorInvoiceTab === 'appointments' ? doctorInvoices.appointments :
-       doctorInvoiceTab === 'labResults' ? doctorInvoices.labResults :
+       doctorOverallSubTab === 'overall' ? doctorInvoices.overall :
+       doctorOverallSubTab === 'appointments' ? doctorInvoices.appointments :
+       doctorOverallSubTab === 'labResults' ? doctorInvoices.labResults :
        doctorInvoices.imaging)
     : invoices;
 
@@ -6289,9 +6302,10 @@ export default function BillingPage() {
   // Track which invoices have been checked/updated to avoid repeated updates
   const processedOverdueInvoicesRef = React.useRef<Set<number>>(new Set());
 
-  // Auto-update invoice status to "overdue" for admin role when due date is past
+  // Auto-update invoice status to "overdue" for admin, doctor, nurse when due date is past and status is "unpaid" only
   useEffect(() => {
-    if (user?.role === 'admin' && displayInvoices && Array.isArray(displayInvoices) && !isLoadingInvoices) {
+    const canAutoOverdue = user?.role === 'admin' || user?.role === 'doctor' || user?.role === 'nurse';
+    if (canAutoOverdue && displayInvoices && Array.isArray(displayInvoices) && !isLoadingInvoices) {
       const today = new Date();
       today.setHours(0, 0, 0, 0); // Set to start of day for accurate comparison
       
@@ -6299,8 +6313,11 @@ export default function BillingPage() {
       const newlyProcessed: number[] = [];
       
       displayInvoices.forEach((invoice: any) => {
-        // Skip if already processed, paid, or overdue
-        if (processedOverdueInvoicesRef.current.has(invoice.id) || invoice.status === 'paid' || invoice.status === 'overdue') {
+        // Only auto-update when status is "unpaid"; other statuses (paid, overdue, cancelled, etc.) are not changed
+        if (invoice.status !== 'unpaid') {
+          return;
+        }
+        if (processedOverdueInvoicesRef.current.has(invoice.id)) {
           return;
         }
         
@@ -6310,28 +6327,23 @@ export default function BillingPage() {
         
         if (dueDate < today) {
           newlyProcessed.push(invoice.id);
-          // Update status to overdue
           overdueUpdates.push(
             (async (): Promise<void> => {
               try {
                 await apiRequest('PATCH', `/api/billing/invoices/${invoice.id}`, {
-              status: 'overdue'
+                  status: 'overdue'
                 });
               } catch (error) {
-              console.error(`Failed to update invoice ${invoice.id} to overdue:`, error);
+                console.error(`Failed to update invoice ${invoice.id} to overdue:`, error);
               }
             })()
           );
         }
       });
       
-      // Execute all updates
       if (overdueUpdates.length > 0) {
-        // Mark invoices as processed before making API calls
         newlyProcessed.forEach(id => processedOverdueInvoicesRef.current.add(id));
-        
         Promise.all(overdueUpdates).then(() => {
-          // Refetch invoices after updates
           queryClient.refetchQueries({ queryKey: ["/api/billing/invoices"] });
         });
       }
@@ -7270,6 +7282,79 @@ export default function BillingPage() {
     return totalInvoices - totalPayments;
   };
 
+  // Count overdue invoices (admin Quick Stats) from invoices list (database via API)
+  const getOverdueInvoicesCount = () =>
+    Array.isArray(invoices) ? invoices.filter((inv: any) => String(inv.status || '').toLowerCase() === 'overdue').length : 0;
+
+  // Count invoices by status from database (invoices list) for admin Quick Stats label
+  const getInvoiceStatusCounts = () => {
+    if (!Array.isArray(invoices)) return { paid: 0, unpaid: 0, overdue: 0, cancelled: 0, pending: 0, other: 0 };
+    const counts = { paid: 0, unpaid: 0, overdue: 0, cancelled: 0, pending: 0, sent: 0, other: 0 };
+    invoices.forEach((inv: any) => {
+      const s = String(inv.status || '').toLowerCase();
+      if (s === 'paid') counts.paid++;
+      else if (s === 'unpaid') counts.unpaid++;
+      else if (s === 'overdue') counts.overdue++;
+      else if (s === 'cancelled') counts.cancelled++;
+      else if (s === 'pending') counts.pending++;
+      else if (s === 'sent') counts.sent++;
+      else if (s) counts.other++;
+    });
+    return counts;
+  };
+
+  // Count invoices for the current month (from database) - uses invoiceDate or dateOfService
+  const getThisMonthInvoiceCount = () => {
+    if (!Array.isArray(invoices)) return 0;
+    const now = new Date();
+    const thisYear = now.getFullYear();
+    const thisMonth = now.getMonth();
+    return invoices.filter((inv: any) => {
+      const d = inv.invoiceDate || inv.dateOfService || inv.createdAt || inv.created_at;
+      if (!d) return false;
+      const date = new Date(d);
+      return date.getFullYear() === thisYear && date.getMonth() === thisMonth;
+    }).length;
+  };
+
+  const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // Month-wise invoice counts for current year (from database) - for "This Month" card number
+  const getMonthWiseInvoiceCounts = () => {
+    if (!Array.isArray(invoices)) return MONTH_NAMES.map((name, i) => ({ monthName: name, monthIndex: i, count: 0 }));
+    const now = new Date();
+    const thisYear = now.getFullYear();
+    const counts = new Array(12).fill(0);
+    invoices.forEach((inv: any) => {
+      const d = inv.invoiceDate || inv.dateOfService || inv.createdAt || inv.created_at;
+      if (!d) return;
+      const date = new Date(d);
+      if (date.getFullYear() === thisYear) counts[date.getMonth()]++;
+    });
+    return MONTH_NAMES.map((monthName, monthIndex) => ({ monthName, monthIndex, count: counts[monthIndex] }));
+  };
+
+  // Month-wise counts grouped by year (for popup) - years descending
+  const getMonthWiseInvoiceCountsByYear = () => {
+    if (!Array.isArray(invoices)) return [];
+    const byYear: Record<number, number[]> = {};
+    invoices.forEach((inv: any) => {
+      const d = inv.invoiceDate || inv.dateOfService || inv.createdAt || inv.created_at;
+      if (!d) return;
+      const date = new Date(d);
+      const y = date.getFullYear();
+      if (!byYear[y]) byYear[y] = new Array(12).fill(0);
+      byYear[y][date.getMonth()]++;
+    });
+    return Object.keys(byYear)
+      .map(Number)
+      .sort((a, b) => b - a)
+      .map((year) => ({
+        year,
+        months: MONTH_NAMES.map((monthName, monthIndex) => ({ monthName, count: byYear[year][monthIndex] })),
+      }));
+  };
+
   // Calculate Revenue Breakdown from real data
   const getRevenueBreakdown = (feeList: any[]) => {
     if (!Array.isArray(invoices) || !Array.isArray(feeList)) {
@@ -7931,7 +8016,7 @@ export default function BillingPage() {
             {/* Quick Stats - Admin Only */}
             {isAdmin && (
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card>
+                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setShowStatusCountsPopup(true)}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -7943,7 +8028,7 @@ export default function BillingPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setShowStatusCountsPopup(true)}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -7955,24 +8040,24 @@ export default function BillingPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setShowStatusCountsPopup(true)}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Overdue Invoices</p>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">2</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{getOverdueInvoicesCount()}</p>
                       </div>
                       <Clock className="h-8 w-8 text-orange-600" />
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setShowMonthWisePopup(true)}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-gray-600 dark:text-gray-300">This Month</p>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">24</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{getThisMonthInvoiceCount()}</p>
                       </div>
                       <CalendarDays className="h-8 w-8 text-blue-600" />
                     </div>
@@ -7990,22 +8075,18 @@ export default function BillingPage() {
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2 min-w-0">
-                          {user?.role !== 'patient' && (
-                            <Select value={statusFilter} onValueChange={setStatusFilter}>
-                              <SelectTrigger className="h-8 text-sm w-[7.5rem] min-w-0 shrink-0" data-testid="select-status-filter">
-                                <SelectValue placeholder="Filter by status" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Status</SelectItem>
-                                <SelectItem value="unpaid">Unpaid</SelectItem>
-                                <SelectItem value="sent">Sent</SelectItem>
-                                <SelectItem value="paid">Paid</SelectItem>
-                                <SelectItem value="unpaid">Unpaid</SelectItem>
-                                <SelectItem value="overdue">Overdue</SelectItem>
-                                <SelectItem value="cancelled">Cancelled</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          )}
+                          <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="h-8 text-sm w-[7.5rem] min-w-0 shrink-0" data-testid="select-status-filter">
+                              <SelectValue placeholder="Filter by status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Status</SelectItem>
+                              <SelectItem value="unpaid">Unpaid</SelectItem>
+                              <SelectItem value="paid">Paid</SelectItem>
+                              <SelectItem value="overdue">Overdue</SelectItem>
+                              <SelectItem value="cancelled">Cancelled</SelectItem>
+                            </SelectContent>
+                          </Select>
 
                           {user?.role !== 'patient' && (
                             <Popover open={invoiceSearchOpen} onOpenChange={setInvoiceSearchOpen}>
@@ -8085,7 +8166,7 @@ export default function BillingPage() {
                           </Popover>
                           )}
 
-                          {canShowNewInvoiceButton && (
+                          {canShowNewInvoiceButton && user?.role !== 'doctor' && user?.role !== 'nurse' && (
                             <Button size="sm" onClick={() => setShowNewInvoice(true)} className="h-8 shrink-0 flex items-center gap-1.5">
                               <Plus className="h-3.5 w-3.5" />
                               New Invoice
@@ -8136,7 +8217,6 @@ export default function BillingPage() {
 
                           {user?.role !== 'patient' && (
                             <div className="flex flex-col gap-0.5 shrink-0">
-                              <Label htmlFor="service-date-from" className="text-xs text-gray-600 dark:text-gray-400">Service Date From</Label>
                               <Input
                                 id="service-date-from"
                                 type="date"
@@ -8148,7 +8228,7 @@ export default function BillingPage() {
                             </div>
                           )}
 
-                          {(serviceDateFrom || invoiceIdFilter !== "all" || ((user?.role === 'doctor' || user?.role === 'nurse') && (insuranceProviderFilter !== 'all' || paymentMethodFilter !== 'all' || universalSearch))) && (
+                          {(serviceDateFrom || invoiceIdFilter !== "all" || statusFilter !== "all" || ((user?.role === 'doctor' || user?.role === 'nurse') && (insuranceProviderFilter !== 'all' || paymentMethodFilter !== 'all' || universalSearch))) && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -8156,6 +8236,7 @@ export default function BillingPage() {
                               onClick={() => {
                                 setServiceDateFrom("");
                                 setInvoiceIdFilter("all");
+                                setStatusFilter("all");
                                 if (user?.role === 'doctor' || user?.role === 'nurse') {
                                   setInsuranceProviderFilter('all');
                                   setPaymentMethodFilter('all');
@@ -8171,6 +8252,18 @@ export default function BillingPage() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
+                          {isPatient && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-8 p-0 shrink-0"
+                              onClick={() => queryClient.refetchQueries({ queryKey: ["/api/billing/invoices"] })}
+                              title="Refresh list"
+                              data-testid="button-refresh-invoices"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Label htmlFor="list-view-toggle" className="text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">List View</Label>
                           <Switch 
                             id="list-view-toggle"
@@ -8178,54 +8271,63 @@ export default function BillingPage() {
                             onCheckedChange={setIsListView}
                             data-testid="switch-list-view"
                           />
+                          {canShowNewInvoiceButton && (user?.role === 'doctor' || user?.role === 'nurse') && (
+                            <Button size="sm" onClick={() => setShowNewInvoice(true)} className="h-8 shrink-0 flex items-center gap-1.5">
+                              <Plus className="h-3.5 w-3.5" />
+                              New Invoice
+                            </Button>
+                          )}
                         </div>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Doctor/nurse category tabs (Overall, Appointments, Lab Results, Imaging, Fees) */}
+                {/* Doctor/nurse: top-level tabs (Overall | Fees); Appointments, Lab Results, Imaging under Overall */}
                 {(user?.role === 'doctor' || user?.role === 'nurse') && (
                   <Card>
                     <CardContent className="p-4">
-                      <Tabs value={doctorInvoiceTab} onValueChange={(value) => setDoctorInvoiceTab(value as any)} className="w-full">
-                        <TabsList className="grid w-full grid-cols-5 gap-1">
+                      <Tabs value={doctorInvoiceTab} onValueChange={(value) => setDoctorInvoiceTab(value as 'overall' | 'fees')} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 gap-1">
                           <TabsTrigger value="overall" data-testid="tab-doctor-overall">
                             Overall
-                            {doctorInvoices && (
-                              <Badge variant="secondary" className="ml-2">
-                                {doctorInvoices.overall?.length || 0}
-                              </Badge>
-                            )}
-                          </TabsTrigger>
-                          <TabsTrigger value="appointments" data-testid="tab-doctor-appointments">
-                            Appointments
-                            {doctorInvoices && (
-                              <Badge variant="secondary" className="ml-2">
-                                {doctorInvoices.appointments?.length || 0}
-                              </Badge>
-                            )}
-                          </TabsTrigger>
-                          <TabsTrigger value="labResults" data-testid="tab-doctor-lab-results">
-                            Lab Results
-                            {doctorInvoices && (
-                              <Badge variant="secondary" className="ml-2">
-                                {doctorInvoices.labResults?.length || 0}
-                              </Badge>
-                            )}
-                          </TabsTrigger>
-                          <TabsTrigger value="imaging" data-testid="tab-doctor-imaging">
-                            Imaging
-                            {doctorInvoices && (
-                              <Badge variant="secondary" className="ml-2">
-                                {doctorInvoices.imaging?.length || 0}
-                              </Badge>
-                            )}
                           </TabsTrigger>
                           <TabsTrigger value="fees" data-testid="tab-doctor-fees">
                             Fees
                           </TabsTrigger>
                         </TabsList>
+                        {doctorInvoiceTab === 'overall' && (
+                          <div className="mt-4">
+                            <Tabs value={doctorOverallSubTab} onValueChange={(v) => setDoctorOverallSubTab(v as any)} className="w-full">
+                              <TabsList className="grid w-full grid-cols-4 gap-1">
+                                <TabsTrigger value="overall" data-testid="tab-doctor-overall-all">
+                                  All
+                                  {doctorOverallSubTab === 'overall' && doctorInvoices && (
+                                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.overall?.length ?? 0}</span>
+                                  )}
+                                </TabsTrigger>
+                                <TabsTrigger value="appointments" data-testid="tab-doctor-appointments">
+                                  Appointments
+                                  {doctorOverallSubTab === 'appointments' && doctorInvoices && (
+                                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.appointments?.length ?? 0}</span>
+                                  )}
+                                </TabsTrigger>
+                                <TabsTrigger value="labResults" data-testid="tab-doctor-lab-results">
+                                  Lab Results
+                                  {doctorOverallSubTab === 'labResults' && doctorInvoices && (
+                                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.labResults?.length ?? 0}</span>
+                                  )}
+                                </TabsTrigger>
+                                <TabsTrigger value="imaging" data-testid="tab-doctor-imaging">
+                                  Imaging
+                                  {doctorOverallSubTab === 'imaging' && doctorInvoices && (
+                                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.imaging?.length ?? 0}</span>
+                                  )}
+                                </TabsTrigger>
+                              </TabsList>
+                            </Tabs>
+                          </div>
+                        )}
                       </Tabs>
                     </CardContent>
                   </Card>
@@ -8241,9 +8343,9 @@ export default function BillingPage() {
                 ) : isListView ? (
                 /* Invoices List - List View - Table Format */
                     <Card className="w-full max-w-full overflow-hidden">
-                      <CardContent className="p-0 w-full max-w-full overflow-hidden">
-                        <div className="overflow-hidden w-full max-w-full">
-                          <table className="w-full table-fixed border-collapse">
+                      <CardContent className="p-2 sm:p-3 w-full max-w-full overflow-hidden">
+                        <div className={`w-full max-w-full overflow-x-hidden ${(user?.role === 'doctor' || user?.role === 'nurse' || user?.role === 'patient') ? 'h-[750px] overflow-y-auto' : 'overflow-hidden'} ${isPatient ? '[&_th]:break-words [&_td]:break-words [&_th]:min-w-0 [&_td]:min-w-0 [&_td]:align-top [&_td]:whitespace-normal [&_td]:overflow-visible [&_td]:text-[11px]' : ''}`}>
+                          <table className={`w-full border-collapse ${isPatient ? 'table-auto' : 'table-fixed'}`}>
                           <colgroup>
                             <col className="w-[8%]" />
                             {user?.role !== 'patient' && <col className="w-[9%]" />}
@@ -8262,37 +8364,37 @@ export default function BillingPage() {
                           </colgroup>
                           <thead className="bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Invoice No.</th>
                               {user?.role !== 'patient' && (
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
+                                <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Patient Name</th>
                               )}
                               {(user?.role === 'patient' || user?.role === 'admin') && (
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Provider/Doctor</th>
+                                <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Provider/Doctor</th>
                               )}
                               {user?.role === 'admin' && (
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Doctor Name</th>
+                                <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Doctor Name</th>
                               )}
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Payment Method</th>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Type</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Payment Method</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Service Type</th>
                               {(user?.role === 'admin' || user?.role === 'doctor' || user?.role === 'nurse' || user?.role === 'patient') && (
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service ID</th>
+                                <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Service ID</th>
                               )}
                               {isPatient && (
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created At</th>
+                                <th className="px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider text-[9px]">Created At</th>
                               )}
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                              <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Service Date</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Due Date</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Total</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Outstanding</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Status</th>
+                              <th className={`px-2 py-1.5 text-left font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider ${isPatient ? 'text-[9px]' : 'text-[10px]'}`}>Actions</th>
                             </tr>
                           </thead>
                           <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
                             {filteredInvoices.map((invoice) => (
                               <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-slate-800" data-testid={`invoice-row-${invoice.id}`}>
                                 <td 
-                                  className="px-0.5 py-1 text-xs font-medium text-gray-900 dark:text-gray-100 cursor-pointer hover:text-primary hover:underline truncate" 
+                                  className="px-2 py-1.5 text-[11px] font-medium text-gray-900 dark:text-gray-100 cursor-pointer hover:text-primary hover:underline truncate" 
                                   onClick={() => {
                                     const invoiceNum = invoice.invoiceNumber || invoice.id;
                                     
@@ -8307,11 +8409,13 @@ export default function BillingPage() {
                                 >
                                   <span className="truncate block">{invoice.invoiceNumber || invoice.id}</span>
                                 </td>
-                                <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={invoice.patientName}>
-                                  {invoice.patientName}
-                                </td>
+                                {user?.role !== 'patient' && (
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate" title={invoice.patientName}>
+                                    {invoice.patientName}
+                                  </td>
+                                )}
                                 {(user?.role === 'patient' || user?.role === 'admin') && (
-                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400">
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-600 dark:text-gray-400">
                                     {(() => {
                                       const providerInfo = getProviderInfo(invoice);
                                       if (providerInfo) {
@@ -8322,19 +8426,29 @@ export default function BillingPage() {
                                               {providerInfo.name}
                                             </span>
                                             {providerInfo.role && (
-                                              <span className="text-xs text-gray-500 dark:text-gray-400 capitalize truncate block">
+                                              <span className="text-[10px] text-gray-500 dark:text-gray-400 capitalize truncate block">
                                                 {providerInfo.role}
                                               </span>
                                             )}
                                           </div>
                                         );
                                       }
+                                      // Fallback: try createdBy / provider from invoice or allUsers
+                                      const createdById = invoice.createdBy || invoice.created_by;
+                                      if (createdById && allUsers?.length) {
+                                        const creator = allUsers.find((u: any) => u.id === createdById || String(u.id) === String(createdById));
+                                        if (creator) {
+                                          const name = [creator.firstName, creator.lastName].filter(Boolean).join(' ').trim();
+                                          if (name) return <span className="font-medium text-gray-900 dark:text-gray-100 truncate block" title={name}>{name}</span>;
+                                        }
+                                      }
+                                      if (invoice.doctorName) return <span className="font-medium text-gray-900 dark:text-gray-100 truncate block" title={invoice.doctorName}>{invoice.doctorName}</span>;
                                       return <span className="text-gray-400">-</span>;
                                     })()}
                                   </td>
                                 )}
                                 {user?.role === 'admin' && (
-                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 truncate">
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 truncate">
                                     {(() => {
                                       // Get doctor name from doctor_id in invoices table
                                       if (invoice.doctorId) {
@@ -8350,8 +8464,8 @@ export default function BillingPage() {
                                     })()}
                                   </td>
                                 )}
-                                <td className="px-0.5 py-1 text-xs">
-                                  <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 truncate max-w-full text-xs">
+                                <td className="px-2 py-1.5 text-[11px]">
+                                  <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 truncate max-w-full text-[11px]">
                                     {(() => {
                                       // If status is unpaid and payment method is "Online Payment", show "Not Selected"
                                       // "Online Payment" should only show when payment is actually processed
@@ -8360,43 +8474,44 @@ export default function BillingPage() {
                                     })()}
                                   </Badge>
                                 </td>
-                                <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 truncate" title={invoice.serviceType || invoice.serviceName || invoice.items?.[0]?.description || '-'}>
+                                <td className="px-2 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 truncate" title={invoice.serviceType || invoice.serviceName || invoice.items?.[0]?.description || '-'}>
                                   {invoice.serviceType || invoice.serviceName || invoice.items?.[0]?.description || '-'}
                                 </td>
                                 {(user?.role === 'admin' || user?.role === 'doctor' || user?.role === 'nurse' || user?.role === 'patient') && (
-                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
-                                  {(() => {
-                                      // Get service_id directly from invoices table
-                                      // Priority: invoice.serviceId (top-level from invoices.service_id column) > invoice.items[0].serviceId
-                                      const serviceId = invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId;
-                                      const serviceIdStr = serviceId ? String(serviceId) : '-';
-                                      // Display the raw service_id from invoices table
-                                      return <span className="truncate block" title={serviceIdStr}>{serviceIdStr}</span>;
-                                  })()}
-                                </td>
-                                )}
-                                {isPatient && (
-                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={invoice.createdAt || invoice.created_at 
-                                      ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
-                                      : '-'}>
-                                    {invoice.createdAt || invoice.created_at 
-                                      ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
-                                      : '-'}
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 font-mono max-w-0 overflow-hidden" title={invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId ? String(invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId) : '-'}>
+                                    <span className="block truncate">
+                                      {invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId ? String(invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId) : '-'}
+                                    </span>
                                   </td>
                                 )}
-                                <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={format(new Date(invoice.dateOfService), 'MMM d, yyyy')}>
+                                {isPatient && (
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate" title={(() => {
+                                      const raw = invoice.createdAt || invoice.created_at;
+                                      if (!raw) return '-';
+                                      const d = new Date(raw);
+                                      return isNaN(d.getTime()) ? '-' : format(d, 'MMM d, yyyy HH:mm');
+                                    })()}>
+                                    {(() => {
+                                      const raw = invoice.createdAt || invoice.created_at;
+                                      if (!raw) return '-';
+                                      const d = new Date(raw);
+                                      return isNaN(d.getTime()) ? '-' : format(d, 'MMM d, yyyy HH:mm');
+                                    })()}
+                                  </td>
+                                )}
+                                <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate" title={format(new Date(invoice.dateOfService), 'MMM d, yyyy')}>
                                   {format(new Date(invoice.dateOfService), 'MMM d, yyyy')}
                                 </td>
-                                <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate" title={format(new Date(invoice.dueDate), 'MMM d, yyyy')}>
+                                <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate" title={format(new Date(invoice.dueDate), 'MMM d, yyyy')}>
                                   {format(new Date(invoice.dueDate), 'MMM d, yyyy')}
                                 </td>
-                                <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(invoice.totalAmount)}>
+                                <td className="px-2 py-1.5 text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(invoice.totalAmount)}>
                                   {formatCurrency(invoice.totalAmount)}
                                 </td>
-                                <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(invoice.totalAmount - invoice.paidAmount)}>
+                                <td className="px-2 py-1.5 text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(invoice.totalAmount - invoice.paidAmount)}>
                                   {formatCurrency(invoice.totalAmount - invoice.paidAmount)}
                                 </td>
-                                <td className="px-0.5 py-1 text-xs">
+                                <td className="px-2 py-1.5 text-[11px]">
                                   {user?.role === 'patient' ? (
                                     <Badge className={`${getStatusColor(invoice.status)} truncate max-w-full`}>
                                       <span className="truncate block" title={invoice.status}>{invoice.status}</span>
@@ -8412,7 +8527,6 @@ export default function BillingPage() {
                                       </SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="unpaid">Unpaid</SelectItem>
-                                        <SelectItem value="sent">Sent</SelectItem>
                                         <SelectItem value="paid">Paid</SelectItem>
                                         <SelectItem value="pending">Pending</SelectItem>
                                         <SelectItem value="overdue">Overdue</SelectItem>
@@ -8421,79 +8535,30 @@ export default function BillingPage() {
                                     </Select>
                                   )}
                                 </td>
-                                <td className="px-0.5 py-1 text-xs">
-                                  <div className="flex items-center gap-0.5">
-                                    <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)} data-testid="button-view-invoice" title="View" className="h-5 w-5 p-0">
-                                      <Eye className="h-3 w-3" />
-                                    </Button>
-                                    {isPatient && (
-                                      <>
-                                        {savedInvoiceIds.has(invoice.id) && (
-                                          <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            onClick={() => handleOpenSavedInvoicePdf(invoice)} 
-                                            data-testid="button-open-saved-invoice-pdf-patient" 
-                                            title="Open Invoice PDF"
-                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 h-5 w-5 p-0"
-                                          >
-                                            <FileText className="h-3 w-3" />
-                                          </Button>
-                                        )}
-                                        <Button 
-                                          variant="ghost" 
-                                          size="sm" 
-                                          onClick={() => handleSaveInvoice(invoice.id.toString())} 
-                                          data-testid="button-save-invoice-patient" 
-                                          title="Save Invoice"
-                                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 h-5 w-5 p-0"
-                                        >
-                                          <FileText className="h-3 w-3" />
-                                        </Button>
-                                      </>
-                                    )}
-                                    {savedInvoiceIds.has(invoice.id) && (
-                                      <>
-                                        {!isPatient && (
-                                          <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            onClick={() => handleOpenSavedInvoicePdf(invoice)} 
-                                            data-testid="button-open-saved-invoice-pdf" 
-                                            title="Open Saved PDF"
-                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 h-5 w-5 p-0"
-                                          >
-                                            <FileText className="h-3 w-3" />
-                                          </Button>
-                                        )}
-                                        <Button variant="ghost" size="sm" onClick={() => handleDownloadInvoice(invoice.id.toString())} data-testid="button-download-invoice" title="Download" className="h-5 w-5 p-0">
-                                          <Download className="h-3 w-3" />
-                                        </Button>
-                                        {!isPatient && (
-                                          <Button variant="ghost" size="sm" onClick={() => handleSendInvoice(invoice.id)} data-testid="button-send-invoice" title="Send" className="h-5 w-5 p-0">
-                                            <Send className="h-3 w-3" />
-                                          </Button>
-                                        )}
-                                      </>
-                                    )}
-                                    {!isAdmin && invoice.status !== 'unpaid' && invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
-                                      <Button 
-                                        variant="default" 
-                                        size="sm" 
-                                        onClick={() => handlePayNow(invoice)}
-                                        data-testid="button-pay-now"
-                                        style={{ 
-                                          backgroundColor: '#4A7DFF',
-                                          color: 'white'
-                                        }}
-                                        title="Pay Now"
-                                        className="h-7 px-2 text-xs"
-                                      >
-                                        <CreditCard className="h-3 w-3 mr-1" />
-                                        Pay
+                                <td className="px-2 py-1.5 text-[11px]">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" data-testid="button-actions-menu" title="Actions">
+                                        <MoreVertical className="h-4 w-4" />
                                       </Button>
-                                    )}
-                                  </div>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => handleViewInvoice(invoice)} data-testid="button-view-invoice">
+                                        <Eye className="h-4 w-4 mr-2" />
+                                        View
+                                      </DropdownMenuItem>
+                                      {!isPatient && canDelete('billing') && (
+                                        <DropdownMenuItem
+                                          onClick={() => handleDeleteInvoice(invoice.id)}
+                                          className="text-red-600 focus:text-red-600 dark:text-red-400 focus:dark:text-red-400"
+                                          data-testid="button-delete-invoice"
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Delete
+                                        </DropdownMenuItem>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 </td>
                               </tr>
                             ))}
@@ -8527,7 +8592,6 @@ export default function BillingPage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="unpaid">Unpaid</SelectItem>
-                                      <SelectItem value="sent">Sent</SelectItem>
                                       <SelectItem value="paid">Paid</SelectItem>
                                       <SelectItem value="pending">Pending</SelectItem>
                                       <SelectItem value="overdue">Overdue</SelectItem>
@@ -8793,9 +8857,7 @@ export default function BillingPage() {
                               <SelectContent>
                                 <SelectItem value="all">All Status</SelectItem>
                                 <SelectItem value="unpaid">Unpaid</SelectItem>
-                                <SelectItem value="sent">Sent</SelectItem>
                                 <SelectItem value="paid">Paid</SelectItem>
-                                <SelectItem value="unpaid">Unpaid</SelectItem>
                                 <SelectItem value="overdue">Overdue</SelectItem>
                                 <SelectItem value="cancelled">Cancelled</SelectItem>
                               </SelectContent>
@@ -8851,7 +8913,6 @@ export default function BillingPage() {
                             )}
 
                             <div className="flex flex-col gap-0.5 shrink-0">
-                              <Label htmlFor="admin-service-date-from" className="text-xs text-gray-600 dark:text-gray-400">Service Date From</Label>
                               <Input
                                 id="admin-service-date-from"
                                 type="date"
@@ -8902,48 +8963,51 @@ export default function BillingPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Doctor/nurse category tabs */}
+                  {/* Doctor/nurse: top-level (Overall | Fees); Appointments, Lab Results, Imaging under Overall */}
                   {(user?.role === 'doctor' || user?.role === 'nurse') && (
                     <Card>
                       <CardContent className="p-4">
-                        <Tabs value={doctorInvoiceTab} onValueChange={(value) => setDoctorInvoiceTab(value as any)} className="w-full">
-                          <TabsList className="grid w-full grid-cols-5 gap-1">
+                        <Tabs value={doctorInvoiceTab} onValueChange={(value) => setDoctorInvoiceTab(value as 'overall' | 'fees')} className="w-full">
+                          <TabsList className="grid w-full grid-cols-2 gap-1">
                             <TabsTrigger value="overall" data-testid="tab-doctor-overall">
                               Overall
-                              {doctorInvoices && (
-                                <Badge variant="secondary" className="ml-2">
-                                  {doctorInvoices.overall?.length || 0}
-                                </Badge>
-                              )}
-                            </TabsTrigger>
-                            <TabsTrigger value="appointments" data-testid="tab-doctor-appointments">
-                              Appointments
-                              {doctorInvoices && (
-                                <Badge variant="secondary" className="ml-2">
-                                  {doctorInvoices.appointments?.length || 0}
-                                </Badge>
-                              )}
-                            </TabsTrigger>
-                            <TabsTrigger value="labResults" data-testid="tab-doctor-lab-results">
-                              Lab Results
-                              {doctorInvoices && (
-                                <Badge variant="secondary" className="ml-2">
-                                  {doctorInvoices.labResults?.length || 0}
-                                </Badge>
-                              )}
-                            </TabsTrigger>
-                            <TabsTrigger value="imaging" data-testid="tab-doctor-imaging">
-                              Imaging
-                              {doctorInvoices && (
-                                <Badge variant="secondary" className="ml-2">
-                                  {doctorInvoices.imaging?.length || 0}
-                                </Badge>
-                              )}
                             </TabsTrigger>
                             <TabsTrigger value="fees" data-testid="tab-doctor-fees">
                               Fees
                             </TabsTrigger>
                           </TabsList>
+                          {doctorInvoiceTab === 'overall' && (
+                            <div className="mt-4">
+                              <Tabs value={doctorOverallSubTab} onValueChange={(v) => setDoctorOverallSubTab(v as any)} className="w-full">
+                                <TabsList className="grid w-full grid-cols-4 gap-1">
+                                  <TabsTrigger value="overall" data-testid="tab-doctor-overall-all">
+                                    All
+                                    {doctorOverallSubTab === 'overall' && doctorInvoices && (
+                                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.overall?.length ?? 0}</span>
+                                    )}
+                                  </TabsTrigger>
+                                  <TabsTrigger value="appointments" data-testid="tab-doctor-appointments">
+                                    Appointments
+                                    {doctorOverallSubTab === 'appointments' && doctorInvoices && (
+                                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.appointments?.length ?? 0}</span>
+                                    )}
+                                  </TabsTrigger>
+                                  <TabsTrigger value="labResults" data-testid="tab-doctor-lab-results">
+                                    Lab Results
+                                    {doctorOverallSubTab === 'labResults' && doctorInvoices && (
+                                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.labResults?.length ?? 0}</span>
+                                    )}
+                                  </TabsTrigger>
+                                  <TabsTrigger value="imaging" data-testid="tab-doctor-imaging">
+                                    Imaging
+                                    {doctorOverallSubTab === 'imaging' && doctorInvoices && (
+                                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200">{doctorInvoices.imaging?.length ?? 0}</span>
+                                    )}
+                                  </TabsTrigger>
+                                </TabsList>
+                              </Tabs>
+                            </div>
+                          )}
                         </Tabs>
                       </CardContent>
                     </Card>
@@ -8959,9 +9023,9 @@ export default function BillingPage() {
                   ) : isListView ? (
                     /* List View - Table Format */
                     <Card>
-                      <CardContent className="p-0">
-                        <div className="overflow-hidden w-full">
-                          <table className="w-full">
+                      <CardContent className="p-2 sm:p-3">
+                        <div className={`w-full overflow-x-hidden ${(user?.role === 'doctor' || user?.role === 'nurse') ? 'h-[750px] overflow-y-auto' : 'overflow-hidden'}`}>
+                          <table className="w-full min-w-0 table-fixed">
                             <colgroup>
                               <col style={{ width: '7%' }} />
                               <col style={{ width: '8%' }} />
@@ -8980,24 +9044,24 @@ export default function BillingPage() {
                             </colgroup>
                             <thead className="bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700">
                               <tr>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service ID</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Doctor Name</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Type</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service ID</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Doctor Name</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Type</th>
                                 {isAdmin && (
-                                  <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created By</th>
+                                  <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created By</th>
                                 )}
                                 {isPatient && (
-                                  <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created At</th>
+                                  <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created At</th>
                                 )}
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Payment Method</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                                <th className="px-0.5 py-1 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Payment Method</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                                <th className="px-2 py-1.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                               </tr>
                             </thead>
                             <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -9087,38 +9151,32 @@ export default function BillingPage() {
                                 
                                 return (
                                 <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-slate-800" data-testid={`invoice-row-${invoice.id}`}>
-                                  <td className="px-0.5 py-1 text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={invoice.invoiceNumber || invoice.id}>
+                                  <td className="px-2 py-1.5 text-[11px] font-medium text-gray-900 dark:text-gray-100 truncate" title={invoice.invoiceNumber || invoice.id}>
                                     <span className="truncate block">{invoice.invoiceNumber || invoice.id}</span>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs text-gray-600 dark:text-gray-400 truncate">
-                                    {(() => {
-                                      // Get service_id directly from invoices table
-                                      // Priority: invoice.serviceId (top-level from invoices.service_id column) > invoice.items[0].serviceId
-                                      const serviceId = invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId;
-                                      const serviceIdStr = serviceId ? String(serviceId) : '-';
-                                      return <span className="truncate block" title={serviceIdStr}>{serviceIdStr}</span>;
-                                    })()}
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 max-w-0 overflow-hidden" title={invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId ? String(invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId) : '-'}>
+                                    <span className="block truncate">{invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId ? String(invoice.serviceId || invoice.service_id || invoice.items?.[0]?.serviceId) : '-'}</span>
                                   </td>
                                   {user?.role !== 'patient' && (
-                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={invoice.patientName}>
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate max-w-0" title={invoice.patientName}>
                                     <div className="truncate">{invoice.patientName}</div>
                                   </td>
                                   )}
-                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={doctorName}>
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate max-w-0" title={doctorName}>
                                     <div className="truncate">{doctorName}</div>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs truncate max-w-0">
+                                  <td className="px-2 py-1.5 text-[11px] truncate max-w-0">
                                     <Badge variant="outline" className="text-xs truncate max-w-full" title={serviceTypeLabel}>
                                       <span className="truncate block">{serviceTypeLabel}</span>
                                     </Badge>
                                   </td>
                                   {isAdmin && (
-                                    <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={createdByName || '-'}>
+                                    <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate max-w-0" title={createdByName || '-'}>
                                       <div className="truncate">{createdByName || '-'}</div>
                                     </td>
                                   )}
                                   {isPatient && (
-                                    <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={invoice.createdAt || invoice.created_at 
+                                    <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate max-w-0" title={invoice.createdAt || invoice.created_at 
                                         ? format(new Date(invoice.createdAt || invoice.created_at), 'MMM d, yyyy HH:mm')
                                         : '-'}>
                                       <div className="truncate">
@@ -9128,7 +9186,7 @@ export default function BillingPage() {
                                       </div>
                                     </td>
                                   )}
-                                  <td className="px-0.5 py-1 text-xs truncate max-w-0">
+                                  <td className="px-2 py-1.5 text-[11px] truncate max-w-0">
                                     <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 truncate max-w-full text-xs">
                                       {(() => {
                                         // If status is unpaid and payment method is "Online Payment", show "Not Selected"
@@ -9138,19 +9196,19 @@ export default function BillingPage() {
                                       })()}
                                     </Badge>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={format(new Date(invoice.dateOfService), 'MMM d, yyyy')}>
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate max-w-0" title={format(new Date(invoice.dateOfService), 'MMM d, yyyy')}>
                                     <div className="truncate">{format(new Date(invoice.dateOfService), 'MMM d, yyyy')}</div>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs text-gray-900 dark:text-gray-100 truncate max-w-0" title={format(new Date(invoice.dueDate), 'MMM d, yyyy')}>
+                                  <td className="px-2 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 truncate max-w-0" title={format(new Date(invoice.dueDate), 'MMM d, yyyy')}>
                                     <div className="truncate">{format(new Date(invoice.dueDate), 'MMM d, yyyy')}</div>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate max-w-0" title={formatCurrency(invoice.totalAmount)}>
+                                  <td className="px-2 py-1.5 text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate max-w-0" title={formatCurrency(invoice.totalAmount)}>
                                     <div className="truncate">{formatCurrency(invoice.totalAmount)}</div>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate max-w-0" title={formatCurrency(invoice.totalAmount - invoice.paidAmount)}>
+                                  <td className="px-2 py-1.5 text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate max-w-0" title={formatCurrency(invoice.totalAmount - invoice.paidAmount)}>
                                     <div className="truncate">{formatCurrency(invoice.totalAmount - invoice.paidAmount)}</div>
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs">
+                                  <td className="px-2 py-1.5 text-[11px]">
                                     {isAdmin ? (
                                       <Select 
                                         value={invoice.status} 
@@ -9162,7 +9220,6 @@ export default function BillingPage() {
                                         </SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value="unpaid">Unpaid</SelectItem>
-                                          <SelectItem value="sent">Sent</SelectItem>
                                           <SelectItem value="paid">Paid</SelectItem>
                                           <SelectItem value="pending">Pending</SelectItem>
                                           <SelectItem value="overdue">Overdue</SelectItem>
@@ -9175,43 +9232,30 @@ export default function BillingPage() {
                                       </Badge>
                                     )}
                                   </td>
-                                  <td className="px-0.5 py-1 text-xs">
-                                    <div className="flex items-center gap-0.5">
-                                      <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)} title="View" className="h-5 w-5 p-0">
-                                        <Eye className="h-3 w-3" />
-                                      </Button>
-                                      {savedInvoiceIds.has(invoice.id) && (
-                                        <>
-                                          <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            onClick={() => handleOpenSavedInvoicePdf(invoice)} 
-                                            data-testid="button-open-saved-invoice-pdf-doctor-table" 
-                                            title="Open Saved PDF"
-                                            className="text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 h-5 w-5 p-0"
-                                          >
-                                            <FileText className="h-3 w-3" />
-                                          </Button>
-                                          <Button variant="ghost" size="sm" onClick={() => handleDownloadInvoice(invoice.id.toString())} title="Download" className="h-5 w-5 p-0">
-                                            <Download className="h-3 w-3" />
-                                          </Button>
-                                          <Button variant="ghost" size="sm" onClick={() => handleSendInvoice(invoice.id)} title="Send" className="h-5 w-5 p-0">
-                                            <Send className="h-3 w-3" />
-                                          </Button>
-                                        </>
-                                      )}
-                                      {canDelete('billing') && (
-                                        <Button 
-                                          variant="ghost" 
-                                          size="sm" 
-                                          onClick={() => handleDeleteInvoice(invoice.id)}
-                                          className="text-red-600 hover:text-red-700 hover:bg-red-50 h-5 w-5 p-0"
-                                          title="Delete"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
+                                  <td className="px-2 py-1.5 text-[11px]">
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" data-testid="button-actions-menu-admin" title="Actions">
+                                          <MoreVertical className="h-4 w-4" />
                                         </Button>
-                                      )}
-                                    </div>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleViewInvoice(invoice)} data-testid="button-view-invoice">
+                                          <Eye className="h-4 w-4 mr-2" />
+                                          View
+                                        </DropdownMenuItem>
+                                        {canDelete('billing') && (
+                                          <DropdownMenuItem
+                                            onClick={() => handleDeleteInvoice(invoice.id)}
+                                            className="text-red-600 focus:text-red-600 dark:text-red-400 focus:dark:text-red-400"
+                                            data-testid="button-delete-invoice"
+                                          >
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Delete
+                                          </DropdownMenuItem>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </td>
                                 </tr>
                                 );
@@ -9242,7 +9286,6 @@ export default function BillingPage() {
                                       </SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="unpaid">Unpaid</SelectItem>
-                                        <SelectItem value="sent">Sent</SelectItem>
                                         <SelectItem value="paid">Paid</SelectItem>
                                         <SelectItem value="pending">Pending</SelectItem>
                                         <SelectItem value="overdue">Overdue</SelectItem>
@@ -9417,14 +9460,14 @@ export default function BillingPage() {
                       <table className="w-full">
                         <thead className="bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Invoice No.</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Patient Name</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Service Date</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Due Date</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Total</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                            <th className="px-4 py-3 text-left text-[11px] font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -10428,6 +10471,69 @@ export default function BillingPage() {
         </div>
       </div>
 
+      {/* Invoice status counts popup (admin) - opened when clicking a Quick Stats card */}
+      <Dialog open={showStatusCountsPopup} onOpenChange={setShowStatusCountsPopup}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Invoice status</DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            {(() => {
+              const c = getInvoiceStatusCounts();
+              const otherTotal = (c.sent || 0) + (c.other || 0);
+              const rows = [
+                { label: 'Paid', count: c.paid, icon: CheckCircle, className: 'text-green-600 dark:text-green-400' },
+                { label: 'Unpaid', count: c.unpaid, icon: CircleDollarSign, className: 'text-amber-600 dark:text-amber-400' },
+                { label: 'Overdue', count: c.overdue, icon: AlertTriangle, className: 'text-red-600 dark:text-red-400' },
+                { label: 'Pending', count: c.pending, icon: Clock, className: 'text-blue-600 dark:text-blue-400' },
+                { label: 'Cancelled', count: c.cancelled, icon: XCircle, className: 'text-gray-500 dark:text-gray-400' },
+                { label: 'Other', count: otherTotal, icon: FileText, className: 'text-gray-500 dark:text-gray-400' },
+              ];
+              return rows.map(({ label, count, icon: Icon, className }) => (
+                <div key={label} className="flex items-center gap-3">
+                  <Icon className={`h-5 w-5 shrink-0 ${className}`} />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                    {label} <span className="font-semibold">{count}</span>
+                  </span>
+                </div>
+              ));
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Month-wise invoice counts popup (admin) - opened when clicking "This Month" card */}
+      <Dialog open={showMonthWisePopup} onOpenChange={setShowMonthWisePopup}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Invoices by month</DialogTitle>
+          </DialogHeader>
+          <div className="py-2 h-[400px] overflow-y-auto space-y-4">
+            {getMonthWiseInvoiceCountsByYear().length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">No invoice data</p>
+            ) : (
+              getMonthWiseInvoiceCountsByYear().map(({ year, months }) => (
+                <div key={year}>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 sticky top-0 bg-white dark:bg-slate-950 py-1 -mt-1">
+                    {year}
+                  </p>
+                  <div className="space-y-2 pl-1">
+                    {months.map(({ monthName, count }) => (
+                      <div key={`${year}-${monthName}`} className="flex items-center gap-3">
+                        <CalendarDays className="h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                          {monthName} <span className="font-semibold">{count}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* New Invoice Dialog */}
       <Dialog open={showNewInvoice} onOpenChange={setShowNewInvoice}>
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -11179,7 +11285,6 @@ export default function BillingPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="paid">Paid</SelectItem>
-                              <SelectItem value="sent">Sent</SelectItem>
                               <SelectItem value="overdue">Overdue</SelectItem>
                               <SelectItem value="draft">Pending</SelectItem>
                             </SelectContent>
