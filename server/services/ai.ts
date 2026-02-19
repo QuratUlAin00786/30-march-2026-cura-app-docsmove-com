@@ -3747,7 +3747,8 @@ Provide analysis in this exact JSON structure:
 
 IMPORTANT: This is for informational purposes only. Always recommend professional medical consultation.`;
 
-      if (process.env.OPENAI_API_KEY) {
+      const openaiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR;
+      if (openaiKey && openaiKey !== "default_key") {
         const completion = await openai.chat.completions.create({
           model: "gpt-4o",
           messages: [
@@ -3764,7 +3765,9 @@ IMPORTANT: This is for informational purposes only. Always recommend professiona
           response_format: { type: "json_object" }
         });
 
-        const analysis = JSON.parse(completion.choices[0].message.content || "{}");
+        const raw = completion.choices[0]?.message?.content;
+        if (!raw) throw new Error("Empty AI response");
+        const analysis = JSON.parse(raw);
         return {
           potentialDiagnoses: analysis.potentialDiagnoses || [],
           recommendedSpecialists: analysis.recommendedSpecialists || [],

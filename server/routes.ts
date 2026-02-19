@@ -4266,24 +4266,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     next();
   });
   
-  app.post("/api/symptom-checker/analyze", authMiddleware, async (req: TenantRequest, res) => {
+  app.post("/api/symptom-checker/analyze", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    res.setHeader("Content-Type", "application/json");
     console.log("[SYMPTOM-CHECKER] Analyze endpoint called");
     console.log("[SYMPTOM-CHECKER] Request body:", req.body);
-    console.log("[SYMPTOM-CHECKER] User:", (req as any).user);
+    console.log("[SYMPTOM-CHECKER] User:", req.user);
     console.log("[SYMPTOM-CHECKER] Tenant:", req.tenant);
     
     try {
-      const userId = (req as any).user?.userId || (req as any).user?.id;
+      const userId = req.user?.id;
       if (!userId) {
         console.log("[SYMPTOM-CHECKER] No user ID found");
         return res.status(401).json({ error: "Unauthorized" });
       }
 
-      const orgId = req.tenant?.id;
-      if (!orgId) {
-        console.log("[SYMPTOM-CHECKER] No organization ID found");
-        return res.status(400).json({ error: "Organization ID is required" });
+      if (!req.tenant) {
+        console.log("[SYMPTOM-CHECKER] No organization context – ensure X-Tenant-Subdomain header is set");
+        return res.status(400).json({ error: "Organization context required. Please refresh and try again." });
       }
+      const orgId = req.tenant.id;
 
       const { symptoms, symptomDescription, duration, severity, patientId } = req.body;
       console.log("[SYMPTOM-CHECKER] Extracted data:", { symptoms, symptomDescription, duration, severity, patientId });
@@ -4293,42 +4294,48 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: "At least one symptom is required" });
       }
 
-      if (!symptomDescription || symptomDescription.trim().length < 10) {
+      const description = typeof symptomDescription === "string" ? symptomDescription.trim() : "";
+      if (description.length < 10) {
         return res.status(400).json({ error: "Symptom description must be at least 10 characters" });
       }
 
-      // Analyze symptoms using AI service
+      // Analyze symptoms using AI service (OpenAI when key set, else fallback)
       const analysis = await aiService.analyzeSymptoms({
         symptoms: symptoms as string[],
-        symptomDescription: symptomDescription as string,
+        symptomDescription: description,
         duration: duration as string | undefined,
         severity: severity as string | undefined,
       });
 
-      // Save to database
-      const [symptomCheck] = await db.insert(symptomChecks).values({
-        organizationId: orgId,
-        patientId: patientId ? parseInt(patientId) : null,
-        userId: userId,
-        symptoms: symptoms as string[],
-        symptomDescription: symptomDescription as string,
-        duration: duration || null,
-        severity: severity || null,
-        aiAnalysis: analysis,
-        status: "pending"
-      }).returning();
+      // Save to database (non-blocking for response: return analysis even if save fails)
+      let symptomCheckId: number | undefined;
+      try {
+        const [symptomCheck] = await db.insert(symptomChecks).values({
+          organizationId: orgId,
+          patientId: patientId ? parseInt(String(patientId), 10) : null,
+          userId: userId,
+          symptoms: symptoms as string[],
+          symptomDescription: description,
+          duration: duration || null,
+          severity: severity || null,
+          aiAnalysis: analysis,
+          status: "pending"
+        }).returning();
+        symptomCheckId = symptomCheck?.id;
+      } catch (saveErr: any) {
+        console.error("[SYMPTOM-CHECKER] Failed to save to DB (still returning analysis):", saveErr);
+      }
 
       res.json({
         success: true,
         analysis: analysis,
-        symptomCheckId: symptomCheck.id
+        symptomCheckId: symptomCheckId ?? null
       });
 
     } catch (error: any) {
       console.error("[SYMPTOM-CHECKER] Error analyzing symptoms:", error);
       console.error("[SYMPTOM-CHECKER] Error stack:", error.stack);
       
-      // Ensure we always return JSON, not HTML
       if (!res.headersSent) {
         res.status(500).json({ 
           error: error.message || "Failed to analyze symptoms. Please try again.",
@@ -6706,32 +6713,47 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  // Check multiple service names for duplicates
-  app.post("/api/pricing/doctors-fees/check-duplicates", authMiddleware, async (req: TenantRequest, res) => {
+  // Check multiple service names for duplicates (doctor/nurse: scoped to their doctorId when provided)
+  app.post("/api/pricing/doctors-fees/check-duplicates", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     try {
-      const { serviceNames } = req.body;
+      if (!req.tenant) {
+        return res.status(400).json({ error: "Organization context required. Ensure X-Tenant-Subdomain header is set." });
+      }
+      const { serviceNames, doctorId } = req.body;
       
       if (!Array.isArray(serviceNames) || serviceNames.length === 0) {
         return res.status(400).json({ error: "Service names array is required" });
       }
 
-      // Query the doctors_fee table for existing service names (case-insensitive)
-      // Use raw SQL query for case-insensitive comparison
-      const lowerServiceNames = serviceNames.map(name => name.toLowerCase());
-      const placeholders = lowerServiceNames.map((_, i) => `$${i + 2}`).join(', ');
-      const query = `
-        SELECT LOWER(service_name) as service_name
-        FROM doctors_fee
-        WHERE organization_id = $1
-        AND LOWER(service_name) IN (${placeholders})
-      `;
-      
-      const values = [req.tenant!.id, ...lowerServiceNames];
+      const organizationId = req.tenant.id;
+      // When doctor/nurse is saving their own fees, scope duplicate check to their doctorId (same service name for another doctor is allowed)
+      const scopeDoctorId = doctorId != null ? parseInt(doctorId, 10) : (req.user?.role === "doctor" || req.user?.role === "nurse" ? req.user.id : null);
+
+      let query: string;
+      const lowerServiceNames = serviceNames.map((name: string) => String(name).toLowerCase());
+      const placeholders = lowerServiceNames.map((_: string, i: number) => `$${i + 2}`).join(', ');
+      if (Number.isInteger(scopeDoctorId)) {
+        query = `
+          SELECT LOWER(service_name) as service_name
+          FROM doctors_fee
+          WHERE organization_id = $1 AND doctor_id = $${lowerServiceNames.length + 2}
+          AND LOWER(service_name) IN (${placeholders})
+        `;
+      } else {
+        query = `
+          SELECT LOWER(service_name) as service_name
+          FROM doctors_fee
+          WHERE organization_id = $1
+          AND LOWER(service_name) IN (${placeholders})
+        `;
+      }
+
+      const values = scopeDoctorId != null ? [organizationId, ...lowerServiceNames, scopeDoctorId] : [organizationId, ...lowerServiceNames];
       const result = await pool.query(query, values);
 
-      const existingNames = result.rows.map(row => row.service_name);
-      const duplicates = serviceNames.filter(name => 
-        existingNames.includes(name.toLowerCase())
+      const existingNames = result.rows.map((row: { service_name: string }) => row.service_name);
+      const duplicates = serviceNames.filter((name: string) => 
+        existingNames.includes(String(name).toLowerCase())
       );
 
       res.json({ duplicates });
@@ -6743,27 +6765,41 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
   // Get imaging pricing
 
-  // Get doctors fees pricing
-  app.get("/api/pricing/doctors-fees", authMiddleware, async (req: TenantRequest, res) => {
+  // Get doctors fees pricing (doctor/nurse: only their own fees when query param doctorId or current user is doctor/nurse)
+  app.get("/api/pricing/doctors-fees", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     try {
       if (!req.tenant) {
         return res.status(401).json({ error: "Organization not found" });
       }
 
       const organizationId = req.tenant.id;
+      const queryDoctorId = req.query.doctorId != null ? parseInt(String(req.query.doctorId), 10) : null;
+      const scopeToCurrentUser = (req.user?.role === "doctor" || req.user?.role === "nurse") && !queryDoctorId
+        ? req.user.id
+        : queryDoctorId;
 
-      // Fetch all doctors fees for this organization (including inactive ones)
-      const fees = await db
-        .select()
-        .from(schema.doctorsFee)
-        .where(
-          eq(schema.doctorsFee.organizationId, organizationId)
-        )
-        .orderBy(schema.doctorsFee.serviceName);
-
-      console.log(`[DOCTORS FEES] Fetched ${fees.length} doctors fees for organization ${organizationId}`);
+      let fees: any[];
+      if (Number.isInteger(scopeToCurrentUser)) {
+        fees = await db
+          .select()
+          .from(schema.doctorsFee)
+          .where(
+            and(
+              eq(schema.doctorsFee.organizationId, organizationId),
+              eq(schema.doctorsFee.doctorId, scopeToCurrentUser)
+            )
+          )
+          .orderBy(schema.doctorsFee.serviceName);
+        console.log(`[DOCTORS FEES] Fetched ${fees.length} doctors fees for organization ${organizationId}, doctorId ${scopeToCurrentUser}`);
+      } else {
+        fees = await db
+          .select()
+          .from(schema.doctorsFee)
+          .where(eq(schema.doctorsFee.organizationId, organizationId))
+          .orderBy(schema.doctorsFee.serviceName);
+        console.log(`[DOCTORS FEES] Fetched ${fees.length} doctors fees for organization ${organizationId}`);
+      }
       
-      // Return empty array if no fees found, not an error
       res.json(fees || []);
     } catch (error) {
       console.error("Error fetching doctors fees:", error);
@@ -7184,28 +7220,46 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  // Get treatments pricing
-  app.get("/api/pricing/treatments", authMiddleware, async (req: TenantRequest, res) => {
+  // Get treatments pricing (doctor/nurse: only their own when query param doctorId or current user is doctor/nurse)
+  app.get("/api/pricing/treatments", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     try {
       if (!req.tenant) {
         return res.status(401).json({ error: "Organization not found" });
       }
 
       const organizationId = req.tenant.id;
+      const queryDoctorId = req.query.doctorId != null ? parseInt(String(req.query.doctorId), 10) : null;
+      const scopeToCurrentUser = (req.user?.role === "doctor" || req.user?.role === "nurse") && !queryDoctorId
+        ? req.user.id
+        : queryDoctorId;
 
-      // Fetch all active treatments for this organization
-      const treatments = await db
-        .select()
-        .from(schema.treatments)
-        .where(
-          and(
-            eq(schema.treatments.organizationId, organizationId),
-            eq(schema.treatments.isActive, true)
+      let treatmentsList: any[];
+      if (Number.isInteger(scopeToCurrentUser)) {
+        treatmentsList = await db
+          .select()
+          .from(schema.treatments)
+          .where(
+            and(
+              eq(schema.treatments.organizationId, organizationId),
+              eq(schema.treatments.doctorId, scopeToCurrentUser),
+              eq(schema.treatments.isActive, true)
+            )
           )
-        )
-        .orderBy(schema.treatments.name);
+          .orderBy(schema.treatments.name);
+      } else {
+        treatmentsList = await db
+          .select()
+          .from(schema.treatments)
+          .where(
+            and(
+              eq(schema.treatments.organizationId, organizationId),
+              eq(schema.treatments.isActive, true)
+            )
+          )
+          .orderBy(schema.treatments.name);
+      }
 
-      res.json(treatments);
+      res.json(treatmentsList);
     } catch (error) {
       console.error("Error fetching treatments pricing:", error);
       res.status(500).json({ error: "Failed to fetch treatments pricing" });
@@ -10915,6 +10969,48 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Add patient drug interaction error:", error);
       res.status(500).json({ error: "Failed to add drug interaction" });
+    }
+  });
+
+  // DELETE a patient drug interaction (remove row from database)
+  app.delete("/api/clinical/patient-drug-interactions/:id", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (req.user?.role === "patient") {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+      if (!req.tenant) {
+        return res.status(400).json({ error: "Organization context required" });
+      }
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ error: "Invalid interaction ID" });
+      }
+      const organizationId = req.tenant.id;
+
+      const [existing] = await db
+        .select()
+        .from(patientDrugInteractions)
+        .where(and(
+          eq(patientDrugInteractions.id, id),
+          eq(patientDrugInteractions.organizationId, organizationId)
+        ))
+        .limit(1);
+
+      if (!existing) {
+        return res.status(404).json({ error: "Drug interaction not found" });
+      }
+
+      await db
+        .delete(patientDrugInteractions)
+        .where(and(
+          eq(patientDrugInteractions.id, id),
+          eq(patientDrugInteractions.organizationId, organizationId)
+        ));
+
+      res.json({ success: true, message: "Drug interaction deleted successfully" });
+    } catch (error) {
+      console.error("Delete patient drug interaction error:", error);
+      res.status(500).json({ error: "Failed to delete drug interaction" });
     }
   });
 
@@ -19926,7 +20022,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  const STRIPE_WEBHOOK_SECRET = 'whsec_WFdxWYvzMVRtKtBqLT7RO09PAtZBGHdr';
+  const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_ENV || '';
 
   async function ensureStripeCustomer(
     stripeClient: Stripe,
@@ -19934,7 +20030,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     organizationId: number,
   ): Promise<string> {
     if (user.stripeCustomerId) {
-      return user.stripeCustomerId;
+      try {
+        const existing = await stripeClient.customers.retrieve(user.stripeCustomerId);
+        if (existing && !existing.deleted) {
+          return existing.id;
+        }
+      } catch (err: any) {
+        // No such customer, or customer deleted in Stripe — create a new one
+        if (err?.code !== "resource_missing" && !/no such customer/i.test(err?.message || "")) {
+          throw err;
+        }
+      }
+      // Fall through to create new customer and update user
     }
 
     const customer = await stripeClient.customers.create({
@@ -20150,6 +20257,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   };
 
   app.post("/api/stripe/webhooks", express.raw({ type: "application/json" }), stripeWebhookHandler);
+  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
   app.post(
     "/api/stripe/webhook/:destinationId",
     express.raw({ type: "application/json" }),
@@ -22547,57 +22655,28 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  // Telemedicine API endpoints
+  // In-memory store for telemedicine consultations (drafts + scheduled) per organization
+  const telemedicineConsultationsStore = new Map<number, Array<{
+    id: string;
+    patientId: string;
+    patientName: string;
+    providerId: string;
+    providerName: string;
+    type: string;
+    status: string;
+    scheduledTime: string;
+    duration?: number;
+    notes?: string;
+    organizationId: number;
+    createdAt?: string;
+  }>>();
+
   app.get("/api/telemedicine/consultations", authMiddleware, async (req: TenantRequest, res) => {
     try {
-      // Mock consultation data for now - in production this would come from database
-      const consultations = [
-        {
-          id: "1",
-          patientId: "1",
-          patientName: "Sarah Johnson",
-          providerId: "1", 
-          providerName: "Dr. Smith",
-          type: "video",
-          status: "completed",
-          scheduledTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-          duration: 30,
-          notes: "Follow-up consultation for hypertension management. Patient reports improved blood pressure readings.",
-          vitalSigns: {
-            heartRate: 72,
-            bloodPressure: "128/82",
-            temperature: 98.6,
-            oxygenSaturation: 98
-          },
-          prescriptions: [
-            {
-              medication: "Lisinopril",
-              dosage: "10mg",
-              instructions: "Take once daily in the morning"
-            }
-          ]
-        },
-        {
-          id: "2", 
-          patientId: "2",
-          patientName: "Michael Chen",
-          providerId: "1",
-          providerName: "Dr. Smith", 
-          type: "video",
-          status: "scheduled",
-          scheduledTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
-          duration: 15,
-          notes: "Diabetes follow-up and medication review",
-          vitalSigns: {
-            heartRate: 78,
-            bloodPressure: "135/85", 
-            temperature: 98.6,
-            oxygenSaturation: 97
-          }
-        }
-      ];
-      
-      res.json(consultations);
+      const organizationId = req.organizationId ?? (req as any).tenant?.id;
+      const stored = organizationId ? (telemedicineConsultationsStore.get(organizationId) || []) : [];
+      // Return stored consultations (drafts + scheduled); optional mock entries can be merged if desired
+      res.json(stored);
     } catch (error) {
       console.error("Error fetching consultations:", error);
       res.status(500).json({ error: "Failed to fetch consultations" });
@@ -22669,26 +22748,128 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
   app.post("/api/telemedicine/consultations", authMiddleware, requireModulePermission('telemedicine', 'create'), async (req: TenantRequest, res) => {
     try {
-      const { patientId, scheduledTime, notes } = req.body;
-      
-      // In production, this would create a new consultation in database
-      const newConsultation = {
-        id: Date.now().toString(),
+      const organizationId = req.organizationId ?? (req as any).tenant?.id;
+      if (!organizationId) {
+        return res.status(400).json({ error: "Organization context missing" });
+      }
+      const {
         patientId,
-        patientName: "Patient", // Would be fetched from database
-        providerId: req.user!.id,
-        providerName: `${(req.user as any).firstName || ''} ${(req.user as any).lastName || ''}`,
-        type: "video",
-        status: "scheduled", 
+        patientName,
         scheduledTime,
+        notes,
+        isDraft,
+        providerId,
+        providerName,
+        type,
+        duration,
+      } = req.body;
+      const status = isDraft ? "draft" : "scheduled";
+      const id = Date.now().toString();
+      const newConsultation = {
+        id,
+        patientId: String(patientId ?? ""),
+        patientName: patientName || "Patient",
+        providerId: String(providerId ?? req.user!.id),
+        providerName: providerName || `${(req.user as any).firstName || ""} ${(req.user as any).lastName || ""}`.trim() || "Provider",
+        type: type || "video",
+        status,
+        scheduledTime: scheduledTime || new Date().toISOString(),
+        duration: duration != null ? Number(duration) : 15,
         notes: notes || "",
-        organizationId: req.tenant!.id
+        organizationId,
+        createdAt: new Date().toISOString(),
       };
-      
+      const list = telemedicineConsultationsStore.get(organizationId) || [];
+      list.push(newConsultation);
+      telemedicineConsultationsStore.set(organizationId, list);
       res.status(201).json(newConsultation);
     } catch (error) {
       console.error("Error creating consultation:", error);
       res.status(500).json({ error: "Failed to create consultation" });
+    }
+  });
+
+  app.put("/api/telemedicine/consultations/:id", authMiddleware, requireModulePermission('telemedicine', 'edit'), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = req.organizationId ?? (req as any).tenant?.id;
+      if (!organizationId) return res.status(400).json({ error: "Organization context missing" });
+      const { id } = req.params;
+      const list = telemedicineConsultationsStore.get(organizationId) || [];
+      const idx = list.findIndex((c) => c.id === id);
+      if (idx === -1) return res.status(404).json({ error: "Consultation not found" });
+      const {
+        patientId,
+        patientName,
+        scheduledTime,
+        notes,
+        status,
+        providerId,
+        providerName,
+        type,
+        duration,
+      } = req.body;
+      const updated = { ...list[idx] };
+      if (patientId != null) updated.patientId = String(patientId);
+      if (patientName != null) updated.patientName = patientName;
+      if (scheduledTime != null) updated.scheduledTime = scheduledTime;
+      if (notes != null) updated.notes = notes;
+      if (status != null) updated.status = status;
+      if (providerId != null) updated.providerId = String(providerId);
+      if (providerName != null) updated.providerName = providerName;
+      if (type != null) updated.type = type;
+      if (duration != null) updated.duration = Number(duration);
+      list[idx] = updated;
+      telemedicineConsultationsStore.set(organizationId, list);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating consultation:", error);
+      res.status(500).json({ error: "Failed to update consultation" });
+    }
+  });
+
+  app.delete("/api/telemedicine/consultations/:id", authMiddleware, requireModulePermission('telemedicine', 'delete'), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = req.organizationId ?? (req as any).tenant?.id;
+      if (!organizationId) return res.status(400).json({ error: "Organization context missing" });
+      const { id } = req.params;
+      const list = telemedicineConsultationsStore.get(organizationId) || [];
+      const filtered = list.filter((c) => c.id !== id);
+      if (filtered.length === list.length) return res.status(404).json({ error: "Consultation not found" });
+      telemedicineConsultationsStore.set(organizationId, filtered);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting consultation:", error);
+      res.status(500).json({ error: "Failed to delete consultation" });
+    }
+  });
+
+  app.post("/api/telemedicine/consultations/:id/send-reminder", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const organizationId = req.organizationId ?? (req as any).tenant?.id;
+      if (!organizationId) return res.status(400).json({ error: "Organization context missing" });
+      const { id } = req.params;
+      const list = telemedicineConsultationsStore.get(organizationId) || [];
+      const consultation = list.find((c) => c.id === id);
+      if (!consultation) return res.status(404).json({ error: "Consultation not found" });
+      const patientId = parseInt(consultation.patientId, 10);
+      if (!Number.isNaN(patientId)) {
+        const patient = await storage.getPatient(patientId, organizationId);
+        if (patient?.userId) {
+          const { createNotification } = await import("./notification-helper");
+          await createNotification({
+            organizationId,
+            userId: patient.userId,
+            title: "Telemedicine reminder",
+            message: `Your consultation is scheduled for ${new Date(consultation.scheduledTime).toLocaleString()}. Please join on time.`,
+            type: "appointment_reminder",
+            metadata: { patientId, patientName: consultation.patientName },
+          });
+        }
+      }
+      res.json({ success: true, message: "Reminder sent" });
+    } catch (error) {
+      console.error("Error sending reminder:", error);
+      res.status(500).json({ error: "Failed to send reminder" });
     }
   });
 

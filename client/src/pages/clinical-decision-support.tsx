@@ -2172,9 +2172,12 @@ function DrugInteractionsTab() {
   const [selectedPatient, setSelectedPatient] = React.useState<string>("all");
   const [selectedSeverity, setSelectedSeverity] = React.useState<string>("all");
   const [showAddInteractionDialog, setShowAddInteractionDialog] = React.useState(false);
+  const [showDeleteSuccessModal, setShowDeleteSuccessModal] = React.useState(false);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const canAddDrugInteraction = ['doctor', 'nurse', 'admin'].includes(user?.role || '');
+  const canDeleteDrugInteraction = ['doctor', 'nurse', 'admin'].includes(user?.role || '');
 
   // Fetch drug interactions data
   const { 
@@ -2227,6 +2230,40 @@ function DrugInteractionsTab() {
       description: "Refreshed Drug interactions data has been reloaded",
     });
   }, [toast]);
+
+  // Delete a manual drug interaction (only manual/addressed interactions have deletable id "manual-<id>")
+  const handleDeleteInteraction = React.useCallback(async (interaction: any) => {
+    if (interaction.source !== 'manual' || !String(interaction.id).startsWith('manual-')) return;
+    const dbId = String(interaction.id).replace(/^manual-/, '');
+    if (!dbId) return;
+    setDeletingId(interaction.id);
+    try {
+      const response = await fetch(buildUrl(`/api/clinical/patient-drug-interactions/${dbId}`), {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'X-Tenant-Subdomain': getActiveSubdomain(),
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to delete (${response.status})`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['/api/clinical/drug-interactions'] });
+      await refetch();
+      setShowDeleteSuccessModal(true);
+    } catch (e: any) {
+      toast({
+        title: "Delete failed",
+        description: e.message || "Could not delete drug interaction",
+        variant: "destructive"
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  }, [refetch, toast]);
 
   // Filter interactions by severity
   const filteredInteractions = React.useMemo(() => {
@@ -2409,10 +2446,28 @@ function DrugInteractionsTab() {
                       {interaction.description}
                     </p>
                   </div>
-                  <div className={`px-2 py-1 rounded-full text-xs border ${getSeverityColor(interaction.severity)}`}>
-                    <div className="flex items-center gap-1">
-                      {getSeverityIcon(interaction.severity)}
-                      {interaction.severity.toUpperCase()}
+                  <div className="flex items-center gap-2">
+                    {canDeleteDrugInteraction && interaction.source === 'manual' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50"
+                        onClick={() => handleDeleteInteraction(interaction)}
+                        disabled={deletingId === interaction.id}
+                        title="Delete drug interaction"
+                      >
+                        {deletingId === interaction.id ? (
+                          <span className="text-xs">...</span>
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
+                    <div className={`px-2 py-1 rounded-full text-xs border ${getSeverityColor(interaction.severity)}`}>
+                      <div className="flex items-center gap-1">
+                        {getSeverityIcon(interaction.severity)}
+                        {interaction.severity.toUpperCase()}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2500,6 +2555,24 @@ function DrugInteractionsTab() {
       refetch();
     }}
   />
+
+  {/* Successfully deleted modal */}
+  <Dialog open={showDeleteSuccessModal} onOpenChange={setShowDeleteSuccessModal}>
+    <DialogContent className="max-w-sm">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-green-700 dark:text-green-400">
+          <CheckCircle className="h-5 w-5" />
+          Successfully deleted
+        </DialogTitle>
+      </DialogHeader>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        The drug interaction has been removed from the database.
+      </p>
+      <div className="flex justify-end pt-2">
+        <Button onClick={() => setShowDeleteSuccessModal(false)}>OK</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
 </div>
 </div>
   );

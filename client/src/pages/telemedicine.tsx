@@ -1316,7 +1316,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
 
 export default function Telemedicine() {
   const [location, setLocation] = useLocation();
-  const [activeTab, setActiveTab] = useState("consultations");
+  const [activeTab, setActiveTab] = useState("start");
   const [currentCall, setCurrentCall] = useState<Consultation | null>(null);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
@@ -1374,13 +1374,48 @@ export default function Telemedicine() {
   const [patientSearchOpen, setPatientSearchOpen] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [editingConsultationId, setEditingConsultationId] = useState<string | null>(null);
+  // Schedule form state
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleProvider, setScheduleProvider] = useState("");
+  const [scheduleProviderName, setScheduleProviderName] = useState("");
+  const [scheduleType, setScheduleType] = useState("video");
+  const [scheduleDuration, setScheduleDuration] = useState("15");
+  const [scheduleNotes, setScheduleNotes] = useState("");
+  const reminderSentRef = useRef<Set<string>>(new Set());
+  const autoStartedConsultationIdsRef = useRef<Set<string>>(new Set());
+  const autoStartInProgressRef = useRef(false);
+  const pendingAutoStartRef = useRef<any>(null);
+  const durationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callNotesRef = useRef("");
+  const consultationsRef = useRef<any[]>([]);
+  const currentCallRef = useRef<Consultation | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const { toast } = useToast();
-  const { canCreate } = useRolePermissions();
+  const { canCreate, canEdit, canDelete } = useRolePermissions();
+
+  const providerOptions = [
+    { value: "provider_1", label: "Dr. Emily Watson" },
+    { value: "provider_2", label: "Dr. David Smith" },
+    { value: "provider_3", label: "Dr. Lisa Anderson" },
+  ];
 
   // Fetch consultations
-  const { data: consultations, isLoading: consultationsLoading } = useQuery({
+  const { data: consultations = [], isLoading: consultationsLoading, refetch: refetchConsultations } = useQuery({
     queryKey: ["/api/telemedicine/consultations"],
+    queryFn: async () => {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/telemedicine/consultations", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-Subdomain": getActiveSubdomain(),
+        },
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch consultations");
+      return res.json();
+    },
     enabled: true,
   });
 
@@ -1424,14 +1459,42 @@ export default function Telemedicine() {
       return response.json();
     },
     onSuccess: (data) => {
-      setCurrentCall(data);
+      const pending = pendingAutoStartRef.current;
+      const durationMins = pending?.duration ?? 15;
+      const callPayload = {
+        id: data.consultationId ?? data.id,
+        patientId: pending?.patientId ?? "",
+        patientName: pending?.patientName ?? "Patient",
+        providerId: pending?.providerId ?? "",
+        providerName: pending?.providerName ?? "",
+        type: (pending?.type ?? "video") as "video" | "audio" | "screen_share",
+        status: "in_progress" as const,
+        scheduledTime: pending?.scheduledTime ?? new Date().toISOString(),
+        duration: durationMins,
+        notes: pending?.notes,
+      };
+      setCurrentCall(callPayload);
+      pendingAutoStartRef.current = null;
+      autoStartInProgressRef.current = false;
       queryClient.invalidateQueries({
         queryKey: ["/api/telemedicine/consultations"],
       });
-      setSuccessMessage("Consultation started");
+      setSuccessMessage(`Consultation started with ${callPayload.patientName}`);
       setShowSuccessModal(true);
+      // Auto-disconnect after consultation duration
+      if (durationTimerRef.current) clearTimeout(durationTimerRef.current);
+      durationTimerRef.current = setTimeout(() => {
+        durationTimerRef.current = null;
+        endConsultationMutation.mutate({
+          consultationId: String(callPayload.id),
+          notes: callNotesRef.current || "",
+          duration: durationMins,
+        });
+      }, durationMins * 60 * 1000);
     },
     onError: () => {
+      pendingAutoStartRef.current = null;
+      autoStartInProgressRef.current = false;
       toast({ title: "Failed to start consultation", variant: "destructive" });
     },
   });
@@ -1467,6 +1530,230 @@ export default function Telemedicine() {
     },
   });
 
+  const createConsultationMutation = useMutation({
+    mutationFn: async (payload: { isDraft: boolean }) => {
+      const token = localStorage.getItem("auth_token");
+      const scheduled = scheduleDate && scheduleTime
+        ? new Date(`${scheduleDate}T${scheduleTime}`).toISOString()
+        : new Date().toISOString();
+      const res = await fetch("/api/telemedicine/consultations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-Subdomain": getActiveSubdomain(),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          patientId: selectedPatient?.id,
+          patientName: selectedPatient ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : "",
+          scheduledTime: scheduled,
+          notes: scheduleNotes,
+          isDraft: payload.isDraft,
+          providerId: scheduleProvider || undefined,
+          providerName: scheduleProviderName || undefined,
+          type: scheduleType,
+          duration: parseInt(scheduleDuration, 10),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to save consultation");
+      }
+      return res.json();
+    },
+    onSuccess: (_, { isDraft }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/telemedicine/consultations"] });
+      setScheduleOpen(false);
+      resetScheduleForm();
+      toast({
+        title: isDraft ? "Saved as draft" : "Consultation scheduled",
+        description: isDraft ? "Draft saved. You can edit it from the Consultations tab." : "Patient will be notified.",
+      });
+      if (isDraft) setActiveTab("consultations");
+    },
+    onError: (e: Error) => {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const updateConsultationMutation = useMutation({
+    mutationFn: async ({ id, ...payload }: { id: string; [key: string]: unknown }) => {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch(`/api/telemedicine/consultations/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-Subdomain": getActiveSubdomain(),
+        },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to update consultation");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/telemedicine/consultations"] });
+      setScheduleOpen(false);
+      setEditingConsultationId(null);
+      resetScheduleForm();
+      toast({ title: "Consultation updated" });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const deleteConsultationMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch(`/api/telemedicine/consultations/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Tenant-Subdomain": getActiveSubdomain(),
+        },
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || "Failed to delete consultation");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/telemedicine/consultations"] });
+      toast({ title: "Consultation deleted" });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  function resetScheduleForm() {
+    setSelectedPatient(null);
+    setScheduleDate("");
+    setScheduleTime("");
+    setScheduleProvider("");
+    setScheduleProviderName("");
+    setScheduleType("video");
+    setScheduleDuration("15");
+    setScheduleNotes("");
+    setEditingConsultationId(null);
+  }
+
+  function openScheduleDialogForEdit(consultation: any) {
+    setEditingConsultationId(consultation.id);
+    setSelectedPatient({ id: consultation.patientId, firstName: consultation.patientName?.split(" ")[0] || "", lastName: consultation.patientName?.split(" ").slice(1).join(" ") || "" });
+    setScheduleDate(consultation.scheduledTime ? format(new Date(consultation.scheduledTime), "yyyy-MM-dd") : "");
+    setScheduleTime(consultation.scheduledTime ? format(new Date(consultation.scheduledTime), "HH:mm") : "");
+    setScheduleProvider(consultation.providerId || "");
+    setScheduleProviderName(consultation.providerName || "");
+    setScheduleType(consultation.type || "video");
+    setScheduleDuration(String(consultation.duration || 15));
+    setScheduleNotes(consultation.notes || "");
+    setScheduleOpen(true);
+  }
+
+  useEffect(() => {
+    callNotesRef.current = callNotes;
+  }, [callNotes]);
+
+  consultationsRef.current = Array.isArray(consultations) ? consultations : [];
+  currentCallRef.current = currentCall;
+
+  // Auto-connect: run check every 10 seconds so we don't miss the scheduled minute
+  useEffect(() => {
+    function checkAndAutoConnect() {
+      const list = consultationsRef.current;
+      if (!list.length) return;
+      if (currentCallRef.current) return; // already in a call
+      if (autoStartInProgressRef.current) return; // start already triggered
+      const now = Date.now();
+      const windowMs = 2 * 60 * 1000; // auto-connect if scheduled time was 0–2 minutes ago
+      for (const c of list) {
+        if (c.status !== "scheduled" || !c.scheduledTime) continue;
+        const scheduled = new Date(c.scheduledTime).getTime();
+        const diff = now - scheduled;
+        if (diff >= 0 && diff < windowMs && !autoStartedConsultationIdsRef.current.has(c.id)) {
+          autoStartedConsultationIdsRef.current.add(c.id);
+          autoStartInProgressRef.current = true;
+          pendingAutoStartRef.current = c;
+          startConsultationMutation.mutate(c.id);
+          toast({
+            title: "Consultation started",
+            description: `Auto-connected with ${c.patientName || "Patient"} (${c.duration ?? 15} min). Call will end automatically.`,
+          });
+          return;
+        }
+      }
+    }
+    checkAndAutoConnect();
+    const t = setInterval(checkAndAutoConnect, 10 * 1000);
+    return () => clearInterval(t);
+  }, [consultations]);
+
+  // Poll consultations so list and ref stay fresh
+  useEffect(() => {
+    const t = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["/api/telemedicine/consultations"] });
+    }, 15 * 1000);
+    return () => clearInterval(t);
+  }, [queryClient]);
+
+  // Clear duration timer on unmount
+  useEffect(() => {
+    return () => {
+      if (durationTimerRef.current) clearTimeout(durationTimerRef.current);
+    };
+  }, []);
+
+  // Auto-send reminder to patient when consultation time is within 15 minutes
+  useEffect(() => {
+    if (!Array.isArray(consultations) || consultations.length === 0) return;
+    const now = Date.now();
+    const fifteenMins = 15 * 60 * 1000;
+    const token = localStorage.getItem("auth_token");
+    consultations.forEach((c: any) => {
+      if (c.status !== "scheduled" || !c.scheduledTime) return;
+      const scheduled = new Date(c.scheduledTime).getTime();
+      const diff = scheduled - now;
+      if (diff > 0 && diff <= fifteenMins && !reminderSentRef.current.has(c.id)) {
+        reminderSentRef.current.add(c.id);
+        fetch(`/api/telemedicine/consultations/${c.id}/send-reminder`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Tenant-Subdomain": getActiveSubdomain(),
+          },
+          credentials: "include",
+        })
+          .then((res) => {
+            if (res.ok) {
+              toast({
+                title: "Reminder sent",
+                description: `Patient ${c.patientName} has been notified about their consultation.`,
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }, [consultations, toast]);
+
+  // Poll consultations when on Consultations tab so reminder check runs
+  useEffect(() => {
+    if (activeTab !== "consultations") return;
+    const t = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["/api/telemedicine/consultations"] });
+    }, 60 * 1000);
+    return () => clearInterval(t);
+  }, [activeTab, queryClient]);
+
   // End consultation mutation
   const endConsultationMutation = useMutation({
     mutationFn: async (data: {
@@ -1487,6 +1774,10 @@ export default function Telemedicine() {
       return response.json();
     },
     onSuccess: () => {
+      if (durationTimerRef.current) {
+        clearTimeout(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
       // Stop video stream first
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
@@ -1506,6 +1797,10 @@ export default function Telemedicine() {
       setShowSuccessModal(true);
     },
     onError: (error) => {
+      if (durationTimerRef.current) {
+        clearTimeout(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
       // Even if the API call fails, still end the call locally
       console.error("Error ending consultation:", error);
 
@@ -1706,8 +2001,10 @@ export default function Telemedicine() {
                 </AvatarFallback>
               </Avatar>
               <div>
-                <div className="font-medium">{currentCall.patientName}</div>
-                <div className="text-sm opacity-75">Video Consultation</div>
+                <div className="font-medium">{currentCall.patientName || "Patient"}</div>
+                <div className="text-sm opacity-75">
+                  {currentCall.type === "audio" ? "Audio" : currentCall.type === "screen_share" ? "Screen Share" : "Video"} Consultation
+                </div>
               </div>
             </div>
           </div>
@@ -1840,9 +2137,13 @@ export default function Telemedicine() {
                   Schedule Consultation
                 </Button>
               </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogContent
+              className="max-w-2xl max-h-[80vh] overflow-y-auto"
+              onOpenAutoFocus={() => { if (!editingConsultationId) resetScheduleForm(); }}
+              onCloseAutoFocus={() => { setEditingConsultationId(null); resetScheduleForm(); }}
+            >
               <DialogHeader>
-                <DialogTitle>Schedule New Consultation</DialogTitle>
+                <DialogTitle>{editingConsultationId ? "Edit Consultation" : "Schedule New Consultation"}</DialogTitle>
               </DialogHeader>
               <div className="space-y-6">
                 {/* Patient Selection */}
@@ -1899,7 +2200,7 @@ export default function Telemedicine() {
                                     <div>
                                       {patient.firstName} {patient.lastName}
                                     </div>
-                                    <div className="text-xs text-gray-500">
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">
                                       ID: {patient.patientId || patient.id}
                                     </div>
                                   </div>
@@ -1918,11 +2219,19 @@ export default function Telemedicine() {
                   <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     Provider
                   </label>
-                  <select className="w-full p-2 border rounded-md">
+                  <select
+                    value={scheduleProvider}
+                    onChange={(e) => {
+                      const opt = providerOptions.find((o) => o.value === e.target.value);
+                      setScheduleProvider(e.target.value);
+                      setScheduleProviderName(opt?.label || "");
+                    }}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 text-gray-900 focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
                     <option value="">Select a provider...</option>
-                    <option value="provider_1">Dr. Emily Watson</option>
-                    <option value="provider_2">Dr. David Smith</option>
-                    <option value="provider_3">Dr. Lisa Anderson</option>
+                    {providerOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1935,13 +2244,19 @@ export default function Telemedicine() {
                     <Input
                       type="date"
                       min={new Date().toISOString().split("T")[0]}
+                      value={scheduleDate}
+                      onChange={(e) => setScheduleDate(e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
                       Time
                     </label>
-                    <Input type="time" />
+                    <Input
+                      type="time"
+                      value={scheduleTime}
+                      onChange={(e) => setScheduleTime(e.target.value)}
+                    />
                   </div>
                 </div>
 
@@ -1950,7 +2265,11 @@ export default function Telemedicine() {
                   <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     Consultation Type
                   </label>
-                  <select className="w-full p-2 border rounded-md">
+                  <select
+                    value={scheduleType}
+                    onChange={(e) => setScheduleType(e.target.value)}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 text-gray-900 focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
                     <option value="video">Video Consultation</option>
                     <option value="audio">Audio Only</option>
                     <option value="screen_share">Screen Share</option>
@@ -1962,7 +2281,11 @@ export default function Telemedicine() {
                   <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     Duration
                   </label>
-                  <select className="w-full p-2 border rounded-md">
+                  <select
+                    value={scheduleDuration}
+                    onChange={(e) => setScheduleDuration(e.target.value)}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 text-gray-900 focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
                     <option value="15">15 minutes</option>
                     <option value="30">30 minutes</option>
                     <option value="45">45 minutes</option>
@@ -1976,29 +2299,69 @@ export default function Telemedicine() {
                     Notes (Optional)
                   </label>
                   <textarea
-                    className="w-full p-2 border rounded-md h-20 resize-none"
+                    className="w-full p-2 border rounded-md h-20 resize-none bg-white dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 text-gray-900 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent"
                     placeholder="Add any special instructions or notes for this consultation..."
+                    value={scheduleNotes}
+                    onChange={(e) => setScheduleNotes(e.target.value)}
                   />
                 </div>
 
                 {/* Actions */}
-                <div className="flex gap-3 pt-4 border-t">
-                  <Button
-                    onClick={() => {
-                      toast({
-                        title: "Consultation Scheduled",
-                        description:
-                          "New consultation has been scheduled successfully. Patient will receive confirmation.",
-                      });
-                      setScheduleOpen(false);
-                    }}
-                    className="flex-1"
-                  >
-                    Schedule Consultation
-                  </Button>
-                  <Button variant="outline" className="flex-1">
-                    Save as Draft
-                  </Button>
+                <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  {editingConsultationId ? (
+                    <Button
+                      className="flex-1"
+                      disabled={updateConsultationMutation.isPending}
+                      onClick={() => {
+                        const scheduled = scheduleDate && scheduleTime
+                          ? new Date(`${scheduleDate}T${scheduleTime}`).toISOString()
+                          : new Date().toISOString();
+                        updateConsultationMutation.mutate({
+                          id: editingConsultationId,
+                          patientId: String(selectedPatient?.id ?? ""),
+                          patientName: selectedPatient ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : "",
+                          scheduledTime: scheduled,
+                          notes: scheduleNotes,
+                          providerId: scheduleProvider || undefined,
+                          providerName: scheduleProviderName || undefined,
+                          type: scheduleType,
+                          duration: parseInt(scheduleDuration, 10),
+                        });
+                      }}
+                    >
+                      {updateConsultationMutation.isPending ? "Saving..." : "Save changes"}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        className="flex-1"
+                        disabled={createConsultationMutation.isPending || !selectedPatient}
+                        onClick={() => {
+                          if (!selectedPatient) {
+                            toast({ title: "Select a patient", variant: "destructive" });
+                            return;
+                          }
+                          createConsultationMutation.mutate({ isDraft: false });
+                        }}
+                      >
+                        {createConsultationMutation.isPending ? "Scheduling..." : "Schedule Consultation"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        disabled={createConsultationMutation.isPending || !selectedPatient}
+                        onClick={() => {
+                          if (!selectedPatient) {
+                            toast({ title: "Select a patient", variant: "destructive" });
+                            return;
+                          }
+                          createConsultationMutation.mutate({ isDraft: true });
+                        }}
+                      >
+                        Save as Draft
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </DialogContent>
@@ -2012,11 +2375,11 @@ export default function Telemedicine() {
                 Settings
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
+            <DialogContent className="max-w-[min(42rem,calc(100vw-2rem))] max-h-[min(90vh,calc(100dvh-2rem))] flex flex-col overflow-hidden p-4 sm:p-6">
+              <DialogHeader className="flex-shrink-0">
                 <DialogTitle>Telemedicine Settings</DialogTitle>
               </DialogHeader>
-              <div className="space-y-6">
+              <div className="space-y-6 overflow-y-auto flex-1 min-h-0 pr-1 -mr-1">
                 {/* Video & Audio Settings */}
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -2275,21 +2638,102 @@ export default function Telemedicine() {
         </div>
       </div>
 
-      {/* Patient Selection for New Consultation */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="w-5 h-5" />
-            Consultation via Audio or Video
-          </CardTitle>
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            Start a new telemedicine consultation
-          </p>
-        </CardHeader>
-        <CardContent>
-          <PatientList telemedicineSettings={telemedicineSettings} />
-        </CardContent>
-      </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-2 mb-4">
+          <TabsTrigger value="start">Start Consultation</TabsTrigger>
+          <TabsTrigger value="consultations">Consultations</TabsTrigger>
+        </TabsList>
+        <TabsContent value="start" className="mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Consultation via Audio or Video
+              </CardTitle>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Start a new telemedicine consultation
+              </p>
+            </CardHeader>
+            <CardContent>
+              <PatientList telemedicineSettings={telemedicineSettings} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="consultations" className="mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="w-5 h-5" />
+                Scheduled & Draft Consultations
+              </CardTitle>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                View, edit, or delete consultations. Patients are notified before their scheduled time.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {consultationsLoading ? (
+                <div className="flex justify-center py-8 text-gray-500 dark:text-gray-400">Loading...</div>
+              ) : Array.isArray(consultations) && consultations.length === 0 ? (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                  <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No consultations yet.</p>
+                  <p className="text-sm mt-1">Schedule one or save a draft from the Schedule New Consultation dialog.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(consultations as any[]).map((c: any) => (
+                    <div
+                      key={c.id}
+                      className="flex flex-wrap items-center justify-between gap-2 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                          {c.patientName || "Patient"} · {c.providerName || "Provider"}
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                          {c.scheduledTime ? format(new Date(c.scheduledTime), "PPp") : "—"} · {c.duration ?? 15} min · {c.type === "video" ? "Video" : c.type === "audio" ? "Audio" : "Screen share"}
+                        </div>
+                        {c.notes && (
+                          <p className="text-xs text-gray-500 dark:text-gray-500 mt-1 truncate max-w-md">{c.notes}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge variant={c.status === "draft" ? "secondary" : c.status === "scheduled" ? "default" : "outline"}>
+                          {c.status}
+                        </Badge>
+                        {canEdit("telemedicine") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openScheduleDialogForEdit(c)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        {canDelete("telemedicine") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            disabled={deleteConsultationMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm("Delete this consultation?")) {
+                                deleteConsultationMutation.mutate(c.id);
+                              }
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
 
       {/* Success Modal */}

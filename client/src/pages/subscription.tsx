@@ -169,11 +169,13 @@ export default function Subscription() {
         window.location.href = data.url;
       } else {
         console.error('No checkout URL received:', data);
-        alert('Failed to create checkout session. Please try again.');
+        setStripeAlertMessage(data?.error || data?.message || 'Failed to create checkout session. Please try again.');
+        setStripeAlertOpen(true);
       }
     } catch (error) {
       console.error('Error creating Stripe checkout:', error);
-      alert('Failed to connect to payment service. Please try again.');
+      setStripeAlertMessage('Failed to connect to payment service. Please try again.');
+      setStripeAlertOpen(true);
     } finally {
       setLoadingPlanId(null);
     }
@@ -209,11 +211,13 @@ export default function Subscription() {
         window.location.href = data.url;
       } else {
         console.error('No checkout URL received:', data);
-        alert('Failed to create checkout session. Please try again.');
+        setStripeAlertMessage(data?.error || data?.message || 'Failed to create checkout session. Please try again.');
+        setStripeAlertOpen(true);
       }
     } catch (error) {
       console.error('Error creating Stripe checkout:', error);
-      alert('Failed to connect to payment service. Please try again.');
+      setStripeAlertMessage('Failed to connect to payment service. Please try again.');
+      setStripeAlertOpen(true);
     } finally {
       setIsStripeLoading(false);
     }
@@ -425,6 +429,7 @@ export default function Subscription() {
               </Alert>
             );
           })()}
+
           {/* Current Subscription */}
           {subscription && (
             <Card className="border border-gray-200 dark:border-gray-700">
@@ -1022,7 +1027,7 @@ export default function Subscription() {
     <Dialog open={stripeAlertOpen} onOpenChange={setStripeAlertOpen}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Stripe Price Required</DialogTitle>
+          <DialogTitle>Stripe</DialogTitle>
         </DialogHeader>
         <div className="py-4">
           <p className="text-sm text-gray-700">{stripeAlertMessage}</p>

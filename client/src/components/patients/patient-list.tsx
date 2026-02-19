@@ -3301,8 +3301,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                       )}
                       {patient.isInsured && (
                         <Badge
-                          className="text-[10px] sm:text-xs text-black flex-shrink-0 whitespace-nowrap"
-                          style={{ backgroundColor: "#FFFACD" }}
+                          className="text-[10px] sm:text-xs flex-shrink-0 whitespace-nowrap bg-amber-200 text-amber-900 border-0 dark:bg-amber-600/80 dark:text-amber-100"
                           data-testid={`badge-insured-${patient.id}`}
                         >
                           Insured
@@ -3473,16 +3472,11 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                     <div className="flex gap-1.5 sm:gap-2">
                       <Button
                         size="sm"
-                        variant="outline"
                         onClick={() => {
                           const subdomain = getTenantSubdomain();
                           setLocation(`/${subdomain}/patients/${patient.id}/records`);
                         }}
-                        className="flex-1 text-xs sm:text-sm text-white min-w-0"
-                        style={{
-                          borderColor: "#4A7DFF",
-                          backgroundColor: "#4A7DFF",
-                        }}
+                        className="flex-1 text-xs sm:text-sm min-w-0 bg-blue-600 hover:bg-blue-700 text-white border-0 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-white"
                       >
                         <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 flex-shrink-0" />
                         <span className="truncate">Records</span>
@@ -3490,8 +3484,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                       <Button
                         size="sm"
                         onClick={() => handleBookAppointment(patient)}
-                        className="flex-1 text-xs sm:text-sm text-white min-w-0"
-                        style={{ backgroundColor: "#7279FB" }}
+                        className="flex-1 text-xs sm:text-sm min-w-0 bg-blue-600 hover:bg-blue-700 text-white border-0 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-white"
                       >
                         <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 flex-shrink-0" />
                         <span className="truncate">Book</span>
@@ -3500,7 +3493,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
 
                     {/* Secondary actions - icon only by default; label on hover to prevent overlapping */}
                     <div
-                      className={`flex items-center justify-between gap-1 flex-wrap`}
+                      className="flex items-center justify-between gap-1 flex-wrap"
                     >
                       <TooltipProvider>
                         <Tooltip>
@@ -3509,7 +3502,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                               size="icon"
                               variant="ghost"
                               onClick={() => handleViewPatient(patient)}
-                              className="h-8 w-8 shrink-0"
+                              className="h-8 w-8 shrink-0 text-gray-700 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-700"
                               data-testid={`button-view-${patient.id}`}
                             >
                               <Eye className="h-4 w-4" />
@@ -3526,7 +3519,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                                 size="icon"
                                 variant="ghost"
                                 onClick={() => handleEditPatient(patient)}
-                                className="h-8 w-8 shrink-0"
+                                className="h-8 w-8 shrink-0 text-gray-700 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-700"
                                 data-testid={`button-edit-${patient.id}`}
                               >
                                 <Edit className="h-4 w-4" />
@@ -3543,7 +3536,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                               size="icon"
                               variant="ghost"
                               onClick={() => handleRemindPatient(patient)}
-                              className="h-8 w-8 shrink-0"
+                              className="h-8 w-8 shrink-0 text-gray-700 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-700"
                               data-testid={`button-remind-${patient.id}`}
                             >
                               <Bell className="h-4 w-4" />
@@ -3559,7 +3552,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                               size="icon"
                               variant="ghost"
                               onClick={() => handleFlagPatient(patient)}
-                              className="h-8 w-8 shrink-0"
+                              className="h-8 w-8 shrink-0 text-gray-700 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-700"
                               data-testid={`button-flag-${patient.id}`}
                             >
                               <Flag className="h-4 w-4" />
@@ -3576,8 +3569,8 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                                 size="icon"
                                 variant="ghost"
                                 onClick={() => handleDeletePatient(patient)}
+                                className="h-8 w-8 shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-gray-700"
                                 disabled={deletePatientMutation.isPending}
-                                className="h-8 w-8 shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950 dark:text-red-400 dark:hover:text-red-300"
                                 data-testid={`button-delete-${patient.id}`}
                               >
                                 <Trash2 className="h-4 w-4" />

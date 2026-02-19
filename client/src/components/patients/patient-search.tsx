@@ -97,14 +97,14 @@ export function PatientSearch({ onSearch, onClear }: PatientSearchProps) {
           </SelectContent>
         </Select>
 
-        <Button onClick={handleSearch} className="bg-medical-blue hover:bg-blue-700">
+        <Button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-white border-0">
           Search
         </Button>
         
         <Button 
           variant="outline" 
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="relative"
+          className="relative border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
           <Filter className="h-4 w-4 mr-2" />
           Filters
@@ -116,7 +116,7 @@ export function PatientSearch({ onSearch, onClear }: PatientSearchProps) {
         </Button>
 
         {(query || activeFiltersCount > 0) && (
-          <Button variant="ghost" onClick={handleClear}>
+          <Button variant="ghost" onClick={handleClear} className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800">
             <X className="h-4 w-4" />
           </Button>
         )}

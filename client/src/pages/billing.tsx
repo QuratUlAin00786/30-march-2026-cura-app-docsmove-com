@@ -688,14 +688,17 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
     return pathMap[tab] || tab;
   };
 
+  const doctorsFeesQueryUrl = scopeToCurrentUser?.userId
+    ? `/api/pricing/doctors-fees?doctorId=${scopeToCurrentUser.userId}`
+    : "/api/pricing/doctors-fees";
   const { data: doctorsFeesData = [], isLoading: loadingDoctors, refetch: refetchDoctorsFees } = useQuery<any[], Error>({
-    queryKey: ["/api/pricing/doctors-fees"],
-    queryFn: () => fetchResource("/api/pricing/doctors-fees"),
+    queryKey: ["/api/pricing/doctors-fees", scopeToCurrentUser?.userId],
+    queryFn: () => fetchResource(doctorsFeesQueryUrl),
     enabled: pricingTab === "doctors" || !!scopeToCurrentUser
   });
   const doctorsFees: any[] = doctorsFeesData ?? [];
   const displayDoctorsFees = scopeToCurrentUser
-    ? doctorsFees.filter((f: any) => String(f.doctorName || "").trim().toLowerCase() === scopeToCurrentUser.displayName.trim().toLowerCase())
+    ? doctorsFees.filter((f: any) => !scopeToCurrentUser.displayName || String(f.doctorName || "").trim().toLowerCase() === scopeToCurrentUser.displayName.trim().toLowerCase())
     : doctorsFees;
 
   const { data: labTestsData = [], isLoading: loadingLabs, refetch: refetchLabTests } = useQuery<any[], Error>({
@@ -725,14 +728,17 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
   });
   const imaging: any[] = imagingData ?? [];
 
+  const treatmentsQueryUrl = scopeToCurrentUser?.userId
+    ? `/api/pricing/treatments?doctorId=${scopeToCurrentUser.userId}`
+    : "/api/pricing/treatments";
   const { data: treatmentsData = [], isLoading: loadingTreatments, refetch: refetchTreatments } = useQuery<any[], Error>({
-    queryKey: ["/api/pricing/treatments"],
-    queryFn: () => fetchResource("/api/pricing/treatments"),
+    queryKey: ["/api/pricing/treatments", scopeToCurrentUser?.userId],
+    queryFn: () => fetchResource(treatmentsQueryUrl),
     enabled: pricingTab === "treatments" || !!scopeToCurrentUser
   });
   const treatments: any[] = treatmentsData ?? [];
   const displayTreatments = scopeToCurrentUser
-    ? treatments.filter((t: any) => String(t.doctorName || "").trim().toLowerCase() === scopeToCurrentUser.displayName.trim().toLowerCase())
+    ? treatments.filter((t: any) => !scopeToCurrentUser.displayName || String(t.doctorName || "").trim().toLowerCase() === scopeToCurrentUser.displayName.trim().toLowerCase())
     : treatments;
   const { data: treatmentsInfoList = [], isLoading: loadingTreatmentsInfo } = useQuery<any[], Error>({
     queryKey: ["/api/treatments-info"],
@@ -1772,7 +1778,9 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         if (pricingTab === "doctors") {
           try {
             const serviceNames = validServices.map(s => s.serviceName);
-            const checkResponse = await apiRequest('POST', '/api/pricing/doctors-fees/check-duplicates', { serviceNames });
+            const body: { serviceNames: string[]; doctorId?: number } = { serviceNames };
+            if (scopeToCurrentUser?.userId) body.doctorId = scopeToCurrentUser.userId;
+            const checkResponse = await apiRequest('POST', '/api/pricing/doctors-fees/check-duplicates', body);
             const checkData = await checkResponse.json();
             
             if (checkData.duplicates && checkData.duplicates.length > 0) {

@@ -32,7 +32,6 @@ import rolesManagementScreenshot from "@assets/user-manual/roles-management.png"
 import editRoleScreenshot from "@assets/user-manual/edit-role.png";
 import shiftsManagementScreenshot from "@assets/user-manual/shifts-management.png";
 import billingManagementScreenshot from "@assets/user-manual/billing-management.png";
-import formsInterfaceScreenshot from "@assets/user-manual/forms-interface.png";
 import createClinicInfoScreenshot from "@assets/user-manual/create-clinic-info.png";
 import savedClinicInfoScreenshot from "@assets/user-manual/saved-clinic-info.png";
 
@@ -1181,33 +1180,6 @@ export default function UserManual() {
                     <Separator />
 
                     <div>
-                      <h3 className="font-semibold mb-3">Forms interface (optional)</h3>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Create and manage medical forms, letters, and documents with templates and custom clinic information.
-                      </p>
-                      
-                      <div 
-                        className="cursor-pointer border rounded-lg overflow-hidden hover:shadow-lg transition-shadow max-w-2xl"
-                        onClick={() => {
-                          const subdomain = localStorage.getItem('user_subdomain') || 'demo';
-                          setLocation(`/${subdomain}/forms`);
-                        }}
-                        data-testid="img-forms-interface"
-                      >
-                        <img 
-                          src={formsInterfaceScreenshot} 
-                          alt="Forms Interface" 
-                          className="w-full h-auto"
-                        />
-                        <div className="p-2 bg-muted text-center text-sm text-muted-foreground">
-                          Click to go to Forms
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    <div>
                       <h3 className="font-semibold mb-3">Saved Clinic Header & Footer</h3>
                       <p className="text-sm text-muted-foreground mb-4">
                         Step 2: Preview of saved clinic header showing "Clinical Care Hospital" with contact details and saved footer for use in all PDF documents.
@@ -1217,7 +1189,7 @@ export default function UserManual() {
                         className="cursor-pointer border rounded-lg overflow-hidden hover:shadow-lg transition-shadow max-w-2xl"
                         onClick={() => {
                           const subdomain = localStorage.getItem('user_subdomain') || 'demo';
-                          setLocation(`/${subdomain}/forms`);
+                          setLocation(`/${subdomain}/settings`);
                         }}
                         data-testid="img-saved-clinic-info"
                       >
@@ -1227,7 +1199,7 @@ export default function UserManual() {
                           className="w-full h-auto"
                         />
                         <div className="p-2 bg-muted text-center text-sm text-muted-foreground">
-                          Click to go to Forms
+                          Click to go to Settings
                         </div>
                       </div>
                     </div>

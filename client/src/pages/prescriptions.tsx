@@ -6334,29 +6334,31 @@ export default function PrescriptionsPage() {
                                   variant="outline"
                                   role="combobox"
                                   aria-expanded={patientSearchOpen}
-                                  className="w-full justify-between"
+                                  className="w-full justify-between min-h-10 h-auto py-2 text-left whitespace-normal"
                                   data-testid="select-patient"
                                 >
-                                  {formData.patientId
-                                    ? patients.find(
-                                        (patient: any) => patient.id.toString() === formData.patientId
-                                      )
-                                      ? `${
-                                          patients.find(
-                                            (patient: any) => patient.id.toString() === formData.patientId
-                                          )?.firstName
-                                        } ${
-                                          patients.find(
-                                            (patient: any) => patient.id.toString() === formData.patientId
-                                          )?.lastName
-                                        } (${
-                                          patients.find(
-                                            (patient: any) => patient.id.toString() === formData.patientId
-                                          )?.patientId
-                                        })`
-                                      : "Select patient"
-                                    : "Select patient"}
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  <span className="flex-1 min-w-0 break-words pr-2">
+                                    {formData.patientId
+                                      ? patients.find(
+                                          (patient: any) => patient.id.toString() === formData.patientId
+                                        )
+                                        ? `${
+                                            patients.find(
+                                              (patient: any) => patient.id.toString() === formData.patientId
+                                            )?.firstName
+                                          } ${
+                                            patients.find(
+                                              (patient: any) => patient.id.toString() === formData.patientId
+                                            )?.lastName
+                                          } (${
+                                            patients.find(
+                                              (patient: any) => patient.id.toString() === formData.patientId
+                                            )?.patientId
+                                          })`
+                                        : "Select patient"
+                                      : "Select patient"}
+                                  </span>
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50 flex-shrink-0" />
                                 </Button>
                               </PopoverTrigger>
                               <PopoverContent className="w-[300px] p-0" align="start">
@@ -6375,15 +6377,18 @@ export default function PrescriptionsPage() {
                                           }));
                                           setPatientSearchOpen(false);
                                         }}
+                                        className="whitespace-normal break-words py-2"
                                       >
                                         <Check
-                                          className={`mr-2 h-4 w-4 ${
+                                          className={`mr-2 h-4 w-4 shrink-0 mt-0.5 ${
                                             formData.patientId === patient.id.toString()
                                               ? "opacity-100"
                                               : "opacity-0"
                                           }`}
                                         />
-                                        {patient.firstName} {patient.lastName} ({patient.patientId})
+                                        <span className="break-words">
+                                          {patient.firstName} {patient.lastName} ({patient.patientId})
+                                        </span>
                                       </CommandItem>
                                     ))}
                                   </CommandGroup>
