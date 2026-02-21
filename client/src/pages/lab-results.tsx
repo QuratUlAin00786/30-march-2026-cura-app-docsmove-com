@@ -13,6 +13,7 @@ import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
+import { useTheme } from "@/hooks/use-theme";
 
 // Load Stripe
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY || '');
@@ -672,6 +673,7 @@ function StripePaymentForm({ onSuccess, onCancel }: { onSuccess: (paymentIntentI
 
 export default function LabResultsPage() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const { isDoctor, isAdmin, canCreate, canEdit, canDelete } = useRolePermissions();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -699,8 +701,8 @@ export default function LabResultsPage() {
   const [fillResultFormData, setFillResultFormData] = useState<any>({});
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
-  const [customFields, setCustomFields] = useState<Record<string, Array<{name: string, unit: string, referenceRange: string}>>>({});
-  
+  const [customFields, setCustomFields] = useState<Record<string, Array<{ name: string, unit: string, referenceRange: string }>>>({});
+
   // Invoice workflow states
   const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
@@ -731,8 +733,7 @@ export default function LabResultsPage() {
   const [pendingPdfSave, setPendingPdfSave] = useState<{ resultId: number } | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
-  const isSignatureDarkTheme = () =>
-    typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const isSignatureDarkTheme = () => theme === "dark";
 
   /** When dark theme, user draws in white; convert to black-on-white for PDF/save. */
   const getSignatureDataForPdf = (canvas: HTMLCanvasElement): string => {
@@ -881,7 +882,7 @@ export default function LabResultsPage() {
       const decimals = referenceRange.includes('.') ? 1 : 0;
       return value.toFixed(decimals);
     }
-    
+
     // Skip other formats (e.g., "negative", "positive", etc.)
     return null;
   };
@@ -907,31 +908,31 @@ export default function LabResultsPage() {
       // Check if the current user role is Patient
       if (user.role === "patient") {
         // Get the patient ID from session/auth - match by email first for accuracy
-        console.log("🔍 LAB RESULTS: Looking for patient matching user:", { 
-          userEmail: user.email, 
+        console.log("🔍 LAB RESULTS: Looking for patient matching user:", {
+          userEmail: user.email,
           userName: `${user.firstName} ${user.lastName}`,
-          userId: user.id 
+          userId: user.id
         });
-        console.log("📋 LAB RESULTS: Available patients:", patients.map((p: any) => ({ 
-          id: p.id, 
-          email: p.email, 
-          name: `${p.firstName} ${p.lastName}` 
+        console.log("📋 LAB RESULTS: Available patients:", patients.map((p: any) => ({
+          id: p.id,
+          email: p.email,
+          name: `${p.firstName} ${p.lastName}`
         })));
-        
+
         // Try email match first (most reliable)
-        let currentPatient = patients.find((patient: any) => 
+        let currentPatient = patients.find((patient: any) =>
           patient.email && user.email && patient.email.toLowerCase() === user.email.toLowerCase()
         );
-        
+
         // If no email match, try exact name match
         if (!currentPatient) {
-          currentPatient = patients.find((patient: any) => 
+          currentPatient = patients.find((patient: any) =>
             patient.firstName && user.firstName && patient.lastName && user.lastName &&
-            patient.firstName.toLowerCase() === user.firstName.toLowerCase() && 
+            patient.firstName.toLowerCase() === user.firstName.toLowerCase() &&
             patient.lastName.toLowerCase() === user.lastName.toLowerCase()
           );
         }
-        
+
         if (currentPatient) {
           console.log("✅ LAB RESULTS: Found matching patient:", currentPatient);
           // Fetch lab results filtered by patient ID
@@ -949,7 +950,7 @@ export default function LabResultsPage() {
         const response = await apiRequest("GET", "/api/lab-results");
         const allResults = await response.json();
         // Filter results where doctor_name matches logged in doctor's name
-        const doctorResults = allResults.filter((result: any) => 
+        const doctorResults = allResults.filter((result: any) =>
           result.doctorName === doctorFullName
         );
         console.log("✅ LAB RESULTS: Filtered results for doctor:", doctorResults.length);
@@ -958,12 +959,12 @@ export default function LabResultsPage() {
         // For other roles (admin, etc.), show all lab results
         const response = await apiRequest("GET", "/api/lab-results");
         const allResults = await response.json();
-        
+
         // Log summary for organization 20
         if (user?.organizationId === 20) {
           console.log(`\n[LAB RESULTS SUMMARY] Organization ID: 20`);
           console.log(`Total records: ${allResults.length}\n`);
-          
+
           // Use the same normalization logic as the actual filtering
           const normalizeBool = (val: any): boolean => {
             if (val === null || val === undefined) return false;
@@ -976,7 +977,7 @@ export default function LabResultsPage() {
             if (typeof val === 'number') return val === 1;
             return false;
           };
-          
+
           const tabDistribution = {
             requestReport: allResults.filter((r: any) => {
               const ready = normalizeBool(r.ready_to_generate_lab);
@@ -994,28 +995,28 @@ export default function LabResultsPage() {
               return ready === true && generated === true;
             }),
           };
-          
+
           console.log(`📋 Request Report Tab: ${tabDistribution.requestReport.length} records`);
           tabDistribution.requestReport.forEach((r: any) => {
             console.log(`   ✓ TestID: ${r.testId}`);
             console.log(`     ready_to_generate_lab: ${r.ready_to_generate_lab} (${typeof r.ready_to_generate_lab})`);
             console.log(`     lab_result_generated_report: ${r.lab_result_generated_report} (${typeof r.lab_result_generated_report})\n`);
           });
-          
+
           console.log(`📊 Generate Reports Tab: ${tabDistribution.generateReports.length} records`);
           tabDistribution.generateReports.forEach((r: any) => {
             console.log(`   ✓ TestID: ${r.testId}`);
             console.log(`     ready_to_generate_lab: ${r.ready_to_generate_lab} (${typeof r.ready_to_generate_lab})`);
             console.log(`     lab_result_generated_report: ${r.lab_result_generated_report} (${typeof r.lab_result_generated_report})\n`);
           });
-          
+
           console.log(`✅ Lab Results Tab: ${tabDistribution.labResults.length} records`);
           tabDistribution.labResults.forEach((r: any) => {
             console.log(`   ✓ TestID: ${r.testId}`);
             console.log(`     ready_to_generate_lab: ${r.ready_to_generate_lab} (${typeof r.ready_to_generate_lab})`);
             console.log(`     lab_result_generated_report: ${r.lab_result_generated_report} (${typeof r.lab_result_generated_report})\n`);
           });
-          
+
           // Verification message
           console.log(`\n[VERIFICATION]`);
           console.log(`Expected: Request Report = 1 row, Generate Reports = 1 row`);
@@ -1028,7 +1029,7 @@ export default function LabResultsPage() {
           }
           console.log(`\n[END SUMMARY]\n`);
         }
-        
+
         return allResults;
       }
     },
@@ -1051,9 +1052,9 @@ export default function LabResultsPage() {
         .split(' | ')
         .map((t: string) => t.trim());
       const testTypesWithoutDefs = allTestTypes.filter(t => !TEST_FIELD_DEFINITIONS[t]);
-      
+
       setCustomFields(prev => {
-        const newFields: Record<string, Array<{name: string, unit: string, referenceRange: string}>> = {};
+        const newFields: Record<string, Array<{ name: string, unit: string, referenceRange: string }>> = {};
         testTypesWithoutDefs.forEach(testType => {
           // Keep existing custom fields if they exist, otherwise initialize empty
           newFields[testType] = prev[testType] || [];
@@ -1071,7 +1072,7 @@ export default function LabResultsPage() {
       if (!labResults || labResults.length === 0) return;
 
       const existenceChecks: Record<number, boolean> = {};
-      
+
       for (const result of labResults) {
         try {
           const token = localStorage.getItem("auth_token");
@@ -1151,8 +1152,8 @@ export default function LabResultsPage() {
     selectedSpecialtyCategory || selectedSubSpecialty
       ? filteredDoctorsData?.doctors || []
       : medicalStaffData?.staff?.filter(
-          (staff: any) => isDoctorLike(staff.role),
-        ) || [];
+        (staff: any) => isDoctorLike(staff.role),
+      ) || [];
 
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
@@ -1175,7 +1176,7 @@ export default function LabResultsPage() {
   const dynamicTestTypes = Array.from(
     new Set(labTestPricing.map((item: any) => item.testName).filter(Boolean))
   );
-  
+
   // Use dynamic test types if available, otherwise fall back to default TEST_TYPES
   const availableTestTypes = dynamicTestTypes.length > 0 ? dynamicTestTypes : TEST_TYPES;
 
@@ -1195,14 +1196,14 @@ export default function LabResultsPage() {
         testTypes: orderFormData.testType,
         testId: labResult.testId  // Store the generated testId
       });
-      
+
       // Prepare invoice items from test types
       const testTypes = orderFormData.testType;
       const invoiceItems = testTypes.map((testType: string, index: number) => {
         // Find matching price from lab_test_pricing table where test_name equals description
         const pricingData = labTestPricing.find((item: any) => item.testName === testType);
         const unitPrice = pricingData?.basePrice || 50.00; // Use base_price or default to 50.00
-        
+
         return {
           code: `LAB-${(index + 1).toString().padStart(3, '0')}`,
           description: testType,
@@ -1211,12 +1212,12 @@ export default function LabResultsPage() {
           total: unitPrice * 1
         };
       });
-      
+
       const totalAmount = invoiceItems.reduce((sum, item) => sum + item.total, 0);
-      
+
       // Service date should be today (order date) for new lab orders
       const serviceDate = new Date().toISOString().split('T')[0];
-      
+
       setInvoiceData({
         ...invoiceData,
         serviceDate: serviceDate,
@@ -1227,13 +1228,13 @@ export default function LabResultsPage() {
         paymentMethod: 'cash', // Set default payment method
         invoiceType: 'self_pay' // Set default invoice type
       });
-      
+
       // Close order dialog and open order summary dialog (skip invoice dialog)
       setShowOrderDialog(false);
       setShowSummaryDialog(true);
-      
+
       queryClient.invalidateQueries({ queryKey: ["/api/lab-results"] });
-      
+
       // Don't reset form data yet - we'll need it for the summary
     },
     onError: (error: any) => {
@@ -1257,7 +1258,7 @@ export default function LabResultsPage() {
         `/api/lab-results/${updateData.id}`,
         updateData.data,
       );
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         const error: any = new Error(errorData.error || "Failed to update lab result");
@@ -1265,7 +1266,7 @@ export default function LabResultsPage() {
         error.data = errorData;
         throw error;
       }
-      
+
       const updatedData = await response.json();
       return { updateData, updatedData };
     },
@@ -1273,7 +1274,7 @@ export default function LabResultsPage() {
       setIsEditMode(false);
       setEditingStatusId(null);
       setEditStatusDialog(null);
-      
+
       // Update selectedResult with the new data
       if (selectedResult && result.updateData.id === selectedResult.id) {
         setSelectedResult({
@@ -1281,9 +1282,9 @@ export default function LabResultsPage() {
           ...result.updateData.data
         });
       }
-      
+
       queryClient.invalidateQueries({ queryKey: ["/api/lab-results"] });
-      
+
       // Show status-update success modal when status was updated from the edit dialog
       if (variables?.data?.status != null) {
         setStatusUpdateSuccessModal(variables.data.status);
@@ -1295,14 +1296,14 @@ export default function LabResultsPage() {
       }
     },
     onError: (error: any) => {
-if (error.status === 403) {
-          // Skip showing permission error for doctors/admins - they should have access
-          if (isDoctor() || isAdmin()) {
-            console.log('Permission error suppressed for doctor/admin role');
-            setEditingStatusId(null);
-            setEditStatusDialog(null);
-            return;
-          }
+      if (error.status === 403) {
+        // Skip showing permission error for doctors/admins - they should have access
+        if (isDoctor() || isAdmin()) {
+          console.log('Permission error suppressed for doctor/admin role');
+          setEditingStatusId(null);
+          setEditStatusDialog(null);
+          return;
+        }
         setPermissionErrorMessage(error.data?.error || "Insufficient permissions");
         setShowPermissionErrorDialog(true);
         setEditingStatusId(null);
@@ -1335,16 +1336,16 @@ if (error.status === 403) {
     onError: (error: any) => {
       // For doctors and admins, suppress permission errors
       const errorMessage = error.message || "Failed to delete lab result";
-      const isPermissionError = errorMessage.includes('403') || 
-                                 errorMessage.toLowerCase().includes('permission') ||
-                                 errorMessage.toLowerCase().includes('forbidden');
-      
+      const isPermissionError = errorMessage.includes('403') ||
+        errorMessage.toLowerCase().includes('permission') ||
+        errorMessage.toLowerCase().includes('forbidden');
+
       // Skip showing error for doctors/admins with permission issues - they should have access
       if ((isDoctor() || isAdmin()) && isPermissionError) {
         console.log('Permission error suppressed for doctor/admin role on delete');
         return;
       }
-      
+
       toast({
         title: "Error",
         description: errorMessage,
@@ -1370,7 +1371,7 @@ if (error.status === 403) {
           console.error("Failed to update Lab_Request_Generated:", error);
         }
       }
-      
+
       setPaymentResult({
         invoiceId: data.invoice.invoiceNumber,
         patientName: pendingOrderData?.patientName,
@@ -1415,14 +1416,14 @@ if (error.status === 403) {
     // For patient role users, automatically set their patient ID
     if (user?.role === "patient") {
       // Find the current patient based on user authentication data
-      const currentPatient = patients.find((patient: any) => 
+      const currentPatient = patients.find((patient: any) =>
         patient.email && user.email && patient.email.toLowerCase() === user.email.toLowerCase()
-      ) || patients.find((patient: any) => 
+      ) || patients.find((patient: any) =>
         patient.firstName && user.firstName && patient.lastName && user.lastName &&
-        patient.firstName.toLowerCase() === user.firstName.toLowerCase() && 
+        patient.firstName.toLowerCase() === user.firstName.toLowerCase() &&
         patient.lastName.toLowerCase() === user.lastName.toLowerCase()
       );
-      
+
       if (currentPatient) {
         setOrderFormData((prev) => ({
           ...prev,
@@ -1440,14 +1441,14 @@ if (error.status === 403) {
         selectedUserName: `${user.firstName} ${user.lastName}`,
       }));
     }
-    
+
     setShowOrderDialog(true);
   };
 
   const handleViewResult = (result: DatabaseLabResult) => {
     console.log("handleViewResult called with:", result);
     setSelectedResult(result);
-    
+
     // Initialize edit mode and form data automatically
     const testTypes = result.testType ? result.testType.split(' | ').filter(t => t.trim()) : [];
     setEditFormData({
@@ -1462,7 +1463,7 @@ if (error.status === 403) {
     setSelectedEditRole("");
     setSelectedTestTypes(testTypes);
     setIsEditMode(true);
-    
+
     setShowViewDialog(true);
     console.log("showViewDialog set to true");
   };
@@ -1470,13 +1471,13 @@ if (error.status === 403) {
   const handleCreateInvoiceForTest = (result: DatabaseLabResult) => {
     // Parse test types from the result
     const testTypes = result.testType.split(' | ');
-    
+
     // Prepare invoice items from test types
     const invoiceItems = testTypes.map((testType: string, index: number) => {
       // Find matching price from lab_test_pricing table where test_name equals description
       const pricingData = labTestPricing.find((item: any) => item.testName === testType);
       const unitPrice = pricingData?.basePrice || 50.00; // Use base_price or default to 50.00
-      
+
       return {
         code: `LAB-${(index + 1).toString().padStart(3, '0')}`,
         description: testType,
@@ -1485,9 +1486,9 @@ if (error.status === 403) {
         total: unitPrice * 1
       };
     });
-    
+
     const totalAmount = invoiceItems.reduce((sum, item) => sum + item.total, 0);
-    
+
     // Set pending order data with the existing test
     setPendingOrderData({
       patientId: result.patientId,
@@ -1495,15 +1496,15 @@ if (error.status === 403) {
       testTypes: testTypes,
       testId: result.testId
     });
-    
+
     // Populate invoice form with test details
     // Extract service date from test result (orderDate or createdAt)
-    const serviceDate = result.orderDate 
+    const serviceDate = result.orderDate
       ? new Date(result.orderDate).toISOString().split('T')[0]
-      : result.createdAt 
-      ? new Date(result.createdAt).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0];
-    
+      : result.createdAt
+        ? new Date(result.createdAt).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
     setInvoiceData({
       serviceDate: serviceDate,
       invoiceDate: new Date().toISOString().split('T')[0],
@@ -1514,7 +1515,7 @@ if (error.status === 403) {
       insuranceProvider: '',
       notes: ''
     });
-    
+
     // Open the invoice dialog
     setShowInvoiceDialog(true);
   };
@@ -1526,11 +1527,11 @@ if (error.status === 403) {
         "GET",
         `/api/invoices/by-service?serviceType=lab_result&serviceId=${result.testId}`
       );
-      
+
       if (response.ok) {
         // Invoice exists - populate form with existing data for editing
         const existingInvoice = await response.json();
-        
+
         // Set pending order data
         setPendingOrderData({
           patientId: result.patientId,
@@ -1538,7 +1539,7 @@ if (error.status === 403) {
           testTypes: result.testType.split(' | '),
           testId: result.testId
         });
-        
+
         // Populate invoice form with existing invoice data
         setInvoiceData({
           id: existingInvoice.id,
@@ -1552,7 +1553,7 @@ if (error.status === 403) {
           insuranceProvider: existingInvoice.insurance?.provider || '',
           notes: existingInvoice.notes || ''
         });
-        
+
         // Open the invoice dialog for editing
         setShowInvoiceDialog(true);
       } else if (response.status === 404) {
@@ -1597,11 +1598,11 @@ if (error.status === 403) {
               const medicationsText =
                 medications.length > 0
                   ? medications
-                      .map(
-                        (med: any) =>
-                          `  - ${med.name}: ${med.dosage}, ${med.frequency}, Duration: ${med.duration}\n    Instructions: ${med.instructions}\n    Quantity: ${med.quantity}, Refills: ${med.refills}`,
-                      )
-                      .join("\n")
+                    .map(
+                      (med: any) =>
+                        `  - ${med.name}: ${med.dosage}, ${med.frequency}, Duration: ${med.duration}\n    Instructions: ${med.instructions}\n    Quantity: ${med.quantity}, Refills: ${med.refills}`,
+                    )
+                    .join("\n")
                   : `  - ${prescription.medicationName}: ${prescription.dosage || "N/A"}, ${prescription.frequency || "N/A"}\n    Instructions: ${prescription.instructions || "N/A"}`;
 
               return `Prescription #${prescription.prescriptionNumber || prescription.id}
@@ -2485,36 +2486,33 @@ Report generated from Cura EMR System`;
                   <strong>Name:</strong>
                   <span style="margin-left: 0.5rem;">${selectedResult.doctorName || "Doctor"}</span>
                 </div>
-                ${
-                  selectedResult.mainSpecialty
-                    ? `
+                ${selectedResult.mainSpecialty
+        ? `
                 <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
                   <strong>Specialization:</strong>
                   <span style="margin-left: 0.5rem;">${selectedResult.mainSpecialty}</span>
                 </div>
                 `
-                    : ""
-                }
-                ${
-                  (selectedResult as any).doctorEmail
-                    ? `
+        : ""
+      }
+                ${(selectedResult as any).doctorEmail
+        ? `
                 <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
                   <strong>Email:</strong>
                   <span style="margin-left: 0.5rem;">${(selectedResult as any).doctorEmail}</span>
                 </div>
                 `
-                    : ""
-                }
-                ${
-                  (selectedResult as any).doctorDepartment
-                    ? `
+        : ""
+      }
+                ${(selectedResult as any).doctorDepartment
+        ? `
                 <div style="font-size: 9px; margin-bottom: 0.3rem; line-height: 1.4;">
                   <strong>Department:</strong>
                   <span style="margin-left: 0.5rem;">${(selectedResult as any).doctorDepartment}</span>
                 </div>
                 `
-                    : ""
-                }
+        : ""
+      }
               </div>
             </div>
 
@@ -2541,48 +2539,45 @@ Report generated from Cura EMR System`;
                 </div>
               </div>
 </div>
-              ${
-                selectedResult.results && selectedResult.results.length > 0
-                  ? `
+              ${selectedResult.results && selectedResult.results.length > 0
+        ? `
               <div class="test-results">
                 <div class="results-title">Test Results:</div>
                 ${selectedResult.results
-                  .map(
-                    (testResult: any) => `
+          .map(
+            (testResult: any) => `
                   <div class="result-item">
                     <strong>${testResult.name}:</strong> ${testResult.value} ${testResult.unit} 
                     (Reference: ${testResult.referenceRange}) - Status: ${testResult.status.replace("_", " ").toUpperCase()}
                   </div>
                 `,
-                  )
-                  .join("")}
+          )
+          .join("")}
               </div>
               `
-                  : ""
-              }
+        : ""
+      }
 
-              ${
-                selectedResult.notes
-                  ? `
+              ${selectedResult.notes
+        ? `
               <div class="notes-section">
                 <strong>Clinical Notes:</strong><br>
                 ${selectedResult.notes}
               </div>
               `
-                  : ""
-              }
+        : ""
+      }
             </div>
 
-            ${
-              selectedResult.criticalValues
-                ? `
+            ${selectedResult.criticalValues
+        ? `
             <div style="margin-top: 20px; padding: 15px; background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px;">
               <strong style="color: #dc2626;">⚠️ CRITICAL VALUES DETECTED</strong><br>
               <span style="color: #991b1b;">This lab result contains critical values that require immediate attention.</span>
             </div>
             `
-                : ""
-            }
+        : ""
+      }
 
             <!-- Footer -->
             <div style="margin-top: 50px; text-align: center; border-top: 1px solid #ddd; padding-top: 20px;">
@@ -2810,7 +2805,7 @@ Report generated from Cura EMR System`;
 
       if (response.ok) {
         const labResultData = await response.json();
-        
+
         // Check if signature exists in database
         if (
           labResultData.signature?.doctorSignature &&
@@ -2822,10 +2817,10 @@ Report generated from Cura EMR System`;
             if (!canvas) return;
             const ctx = canvas.getContext("2d");
             if (!ctx) return;
-            
+
             // Clear canvas first
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
+
             // Draw the signature image onto canvas
             ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
             setSignature(labResultData.signature.doctorSignature);
@@ -2853,7 +2848,7 @@ Report generated from Cura EMR System`;
           if (!canvas) return;
           const ctx = canvas.getContext("2d");
           if (!ctx) return;
-          
+
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
           setSignature(signatureData);
@@ -2937,7 +2932,7 @@ Report generated from Cura EMR System`;
           clearSignature();
           setShowESignDialog(false);
           setSignatureSaved(false);
-          
+
           // If there's a pending PDF save, proceed with it
           if (pendingPdfSave) {
             handleSavePrescriptionPdf(pendingPdfSave.resultId);
@@ -3016,11 +3011,11 @@ Report generated from Cura EMR System`;
       }
 
       const data = await response.json();
-      
+
       // Invalidate queries to refresh the lab results list
       // This ensures the record moves from "Request Report" to "Generate Reports" tab
       queryClient.invalidateQueries({ queryKey: ["/api/lab-results"] });
-      
+
       toast({
         title: "Success",
         description: "Prescription PDF saved successfully. Record moved to Generate Reports tab.",
@@ -3041,132 +3036,132 @@ Report generated from Cura EMR System`;
   // For summary statistics - only apply search filter, not status filter
   const searchFilteredResults = Array.isArray(labResults)
     ? labResults.filter((result: DatabaseLabResult) => {
-        const patientName = getPatientName(result.patientId);
-        const matchesSearch =
-          !searchQuery ||
-          patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          result.testType.toLowerCase().includes(searchQuery.toLowerCase());
+      const patientName = getPatientName(result.patientId);
+      const matchesSearch =
+        !searchQuery ||
+        patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        result.testType.toLowerCase().includes(searchQuery.toLowerCase());
 
-        return matchesSearch;
-      })
+      return matchesSearch;
+    })
     : [];
 
   // For display area - apply both search and status filters
   const filteredResults = Array.isArray(labResults)
     ? labResults.filter((result: DatabaseLabResult) => {
-        const patientName = getPatientName(result.patientId);
-        const matchesSearch =
-          !searchQuery ||
-          patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          result.testType.toLowerCase().includes(searchQuery.toLowerCase());
+      const patientName = getPatientName(result.patientId);
+      const matchesSearch =
+        !searchQuery ||
+        patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        result.testType.toLowerCase().includes(searchQuery.toLowerCase());
 
-        const matchesStatus =
-          statusFilter === "all" || result.status === statusFilter;
+      const matchesStatus =
+        statusFilter === "all" || result.status === statusFilter;
 
-        const matchesTestId =
-          !filterTestId || result.testId === filterTestId;
+      const matchesTestId =
+        !filterTestId || result.testId === filterTestId;
 
-        // Workflow-based tab filtering with explicit boolean checks:
-        // Request Report: ready_to_generate_lab = false AND lab_result_generated_report = false (treat null/undefined as false)
-        // Generate Reports: ready_to_generate_lab = true AND lab_result_generated_report = false (treat null/undefined as false)
-        // Lab Results: ready_to_generate_lab = true AND lab_result_generated_report = true
-        // Handle undefined/null as false for backward compatibility with existing records
-        // Also handle string "true"/"false" values that might come from the database
-        // Support both camelCase (readyToGenerateLab) and snake_case (ready_to_generate_lab) field names
-        
-        // Normalize boolean values (handle string "true"/"false" and actual booleans)
-        const normalizeBoolean = (value: any): boolean => {
-          // Handle null/undefined
-          if (value === null || value === undefined) return false;
-          
-          // Handle actual boolean
-          if (typeof value === 'boolean') return value;
-          
-          // Handle string values (case-insensitive)
-          if (typeof value === 'string') {
-            const lowerValue = value.toLowerCase().trim();
-            if (lowerValue === 'true' || lowerValue === '1') return true;
-            if (lowerValue === 'false' || lowerValue === '0' || lowerValue === '') return false;
-          }
-          
-          // Handle numbers
-          if (typeof value === 'number') {
-            return value === 1;
-          }
-          
-          // Default to false for any other type
-          return false;
-        };
-        
-        // Get values directly from database - Drizzle ORM returns camelCase, but we check both
-        const resultAny = result as any;
-        
-        // Drizzle ORM returns camelCase (readyToGenerateLab, labResultGeneratedReport)
-        // But we also check snake_case (ready_to_generate_lab, lab_result_generated_report) for compatibility
-        // Priority: camelCase first (Drizzle default), then snake_case (database column names)
-        const readyToGenerateLabValue = resultAny.readyToGenerateLab !== undefined && resultAny.readyToGenerateLab !== null
-          ? resultAny.readyToGenerateLab
-          : (resultAny.ready_to_generate_lab !== undefined && resultAny.ready_to_generate_lab !== null
-            ? resultAny.ready_to_generate_lab
-            : undefined);
-        const labResultGeneratedReportValue = resultAny.labResultGeneratedReport !== undefined && resultAny.labResultGeneratedReport !== null
-          ? resultAny.labResultGeneratedReport
-          : (resultAny.lab_result_generated_report !== undefined && resultAny.lab_result_generated_report !== null
-            ? resultAny.lab_result_generated_report
-            : undefined);
-        
-        // Normalize to strict booleans (handles true, false, null, undefined, "true", "false", etc.)
-        const readyToGenerateLab = normalizeBoolean(readyToGenerateLabValue);
-        const labResultGeneratedReport = normalizeBoolean(labResultGeneratedReportValue);
-        
-        // Determine which tab this record belongs to
-        let belongsToTab = "";
-        if (readyToGenerateLab === false && labResultGeneratedReport === false) {
-          belongsToTab = "Request Report";
-        } else if (readyToGenerateLab === true && labResultGeneratedReport === false) {
-          belongsToTab = "Generate Reports";
-        } else if (readyToGenerateLab === true && labResultGeneratedReport === true) {
-          belongsToTab = "Lab Results";
-        } else {
-          belongsToTab = "NONE (Invalid State)";
+      // Workflow-based tab filtering with explicit boolean checks:
+      // Request Report: ready_to_generate_lab = false AND lab_result_generated_report = false (treat null/undefined as false)
+      // Generate Reports: ready_to_generate_lab = true AND lab_result_generated_report = false (treat null/undefined as false)
+      // Lab Results: ready_to_generate_lab = true AND lab_result_generated_report = true
+      // Handle undefined/null as false for backward compatibility with existing records
+      // Also handle string "true"/"false" values that might come from the database
+      // Support both camelCase (readyToGenerateLab) and snake_case (ready_to_generate_lab) field names
+
+      // Normalize boolean values (handle string "true"/"false" and actual booleans)
+      const normalizeBoolean = (value: any): boolean => {
+        // Handle null/undefined
+        if (value === null || value === undefined) return false;
+
+        // Handle actual boolean
+        if (typeof value === 'boolean') return value;
+
+        // Handle string values (case-insensitive)
+        if (typeof value === 'string') {
+          const lowerValue = value.toLowerCase().trim();
+          if (lowerValue === 'true' || lowerValue === '1') return true;
+          if (lowerValue === 'false' || lowerValue === '0' || lowerValue === '') return false;
         }
-        
-        // Debug logging - log all records to see what's coming from database
-        console.log(`[LAB FILTER] TestID: ${result.testId}`, {
-          databaseValues: {
-            ready_to_generate_lab: readyToGenerateLabValue,
-            ready_to_generate_lab_type: typeof readyToGenerateLabValue,
-            lab_result_generated_report: labResultGeneratedReportValue,
-            lab_result_generated_report_type: typeof labResultGeneratedReportValue,
-          },
-          normalizedBooleans: {
-            readyToGenerateLab,
-            labResultGeneratedReport,
-          },
-          belongsToTab: belongsToTab,
-          currentTab: activeTab,
-          willShowInCurrentTab: activeTab === "request" 
-            ? (readyToGenerateLab === false && labResultGeneratedReport === false)
-            : activeTab === "generate"
+
+        // Handle numbers
+        if (typeof value === 'number') {
+          return value === 1;
+        }
+
+        // Default to false for any other type
+        return false;
+      };
+
+      // Get values directly from database - Drizzle ORM returns camelCase, but we check both
+      const resultAny = result as any;
+
+      // Drizzle ORM returns camelCase (readyToGenerateLab, labResultGeneratedReport)
+      // But we also check snake_case (ready_to_generate_lab, lab_result_generated_report) for compatibility
+      // Priority: camelCase first (Drizzle default), then snake_case (database column names)
+      const readyToGenerateLabValue = resultAny.readyToGenerateLab !== undefined && resultAny.readyToGenerateLab !== null
+        ? resultAny.readyToGenerateLab
+        : (resultAny.ready_to_generate_lab !== undefined && resultAny.ready_to_generate_lab !== null
+          ? resultAny.ready_to_generate_lab
+          : undefined);
+      const labResultGeneratedReportValue = resultAny.labResultGeneratedReport !== undefined && resultAny.labResultGeneratedReport !== null
+        ? resultAny.labResultGeneratedReport
+        : (resultAny.lab_result_generated_report !== undefined && resultAny.lab_result_generated_report !== null
+          ? resultAny.lab_result_generated_report
+          : undefined);
+
+      // Normalize to strict booleans (handles true, false, null, undefined, "true", "false", etc.)
+      const readyToGenerateLab = normalizeBoolean(readyToGenerateLabValue);
+      const labResultGeneratedReport = normalizeBoolean(labResultGeneratedReportValue);
+
+      // Determine which tab this record belongs to
+      let belongsToTab = "";
+      if (readyToGenerateLab === false && labResultGeneratedReport === false) {
+        belongsToTab = "Request Report";
+      } else if (readyToGenerateLab === true && labResultGeneratedReport === false) {
+        belongsToTab = "Generate Reports";
+      } else if (readyToGenerateLab === true && labResultGeneratedReport === true) {
+        belongsToTab = "Lab Results";
+      } else {
+        belongsToTab = "NONE (Invalid State)";
+      }
+
+      // Debug logging - log all records to see what's coming from database
+      console.log(`[LAB FILTER] TestID: ${result.testId}`, {
+        databaseValues: {
+          ready_to_generate_lab: readyToGenerateLabValue,
+          ready_to_generate_lab_type: typeof readyToGenerateLabValue,
+          lab_result_generated_report: labResultGeneratedReportValue,
+          lab_result_generated_report_type: typeof labResultGeneratedReportValue,
+        },
+        normalizedBooleans: {
+          readyToGenerateLab,
+          labResultGeneratedReport,
+        },
+        belongsToTab: belongsToTab,
+        currentTab: activeTab,
+        willShowInCurrentTab: activeTab === "request"
+          ? (readyToGenerateLab === false && labResultGeneratedReport === false)
+          : activeTab === "generate"
             ? (readyToGenerateLab === true && labResultGeneratedReport === false)
             : (readyToGenerateLab === true && labResultGeneratedReport === true),
-        });
-        
-        // Strict boolean matching for each tab based on database values
-        // Request Report: ready_to_generate_lab = false AND lab_result_generated_report = false
-        // Generate Reports: ready_to_generate_lab = true AND lab_result_generated_report = false
-        // Lab Results: ready_to_generate_lab = true AND lab_result_generated_report = true
-        const matchesTab =
-          activeTab === "request"
-            ? readyToGenerateLab === false && labResultGeneratedReport === false
-            : activeTab === "generate"
+      });
+
+      // Strict boolean matching for each tab based on database values
+      // Request Report: ready_to_generate_lab = false AND lab_result_generated_report = false
+      // Generate Reports: ready_to_generate_lab = true AND lab_result_generated_report = false
+      // Lab Results: ready_to_generate_lab = true AND lab_result_generated_report = true
+      const matchesTab =
+        activeTab === "request"
+          ? readyToGenerateLab === false && labResultGeneratedReport === false
+          : activeTab === "generate"
             ? readyToGenerateLab === true && labResultGeneratedReport === false
             : activeTab === "generated"
-            ? readyToGenerateLab === true && labResultGeneratedReport === true
-            : false; // Default to false for any other tab value
+              ? readyToGenerateLab === true && labResultGeneratedReport === true
+              : false; // Default to false for any other tab value
 
-        return matchesSearch && matchesStatus && matchesTestId && matchesTab;
-      })
+      return matchesSearch && matchesStatus && matchesTestId && matchesTab;
+    })
     : [];
 
   const getStatusColor = (status: string) => {
@@ -3306,1304 +3301,1304 @@ Report generated from Cura EMR System`;
             </TabsList>
             <TabsContent value={activeTab} className="mt-0">
 
-          {/* Filters */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-4">
-                <div className="relative flex-1 max-w-sm">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    placeholder="Search lab results..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Filter by status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="collected">Collected</SelectItem>
-                    <SelectItem value="processing">Processing</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Test ID Filter (Admin Only) */}
-                {isAdmin() && uniqueTestIds.length > 0 && (
-                  <Popover open={testIdPopoverOpen} onOpenChange={setTestIdPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={testIdPopoverOpen}
-                        className="w-[220px] justify-between"
-                        data-testid="button-filter-testid"
-                      >
-                        {filterTestId || "Filter by Test ID"}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[220px] p-0">
-                      <Command>
-                        <CommandInput placeholder="Search test ID..." />
-                        <CommandList>
-                          <CommandEmpty>No test ID found.</CommandEmpty>
-                          <CommandGroup>
-                            <CommandItem
-                              value=""
-                              onSelect={() => {
-                                setFilterTestId("");
-                                setTestIdPopoverOpen(false);
-                              }}
-                              data-testid="option-testid-all"
-                            >
-                              <Check
-                                className={`mr-2 h-4 w-4 ${filterTestId === "" ? "opacity-100" : "opacity-0"}`}
-                              />
-                              All Test IDs
-                            </CommandItem>
-                            {uniqueTestIds.map((testId) => (
-                              <CommandItem
-                                key={testId}
-                                value={testId}
-                                onSelect={(currentValue) => {
-                                  setFilterTestId(currentValue === filterTestId ? "" : currentValue);
-                                  setTestIdPopoverOpen(false);
-                                }}
-                                data-testid={`option-testid-${testId}`}
-                              >
-                                <Check
-                                  className={`mr-2 h-4 w-4 ${filterTestId === testId ? "opacity-100" : "opacity-0"}`}
-                                />
-                                {testId}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                )}
-
-                {/* View Mode Toggle */}
-                <div className="flex gap-1 border rounded-lg p-1">
-                  <Button
-                    variant={viewMode === "grid" ? "default" : "ghost"}
-                    size="sm"
-                    onClick={() => setViewMode("grid")}
-                    className="h-8 w-8 p-0"
-                    data-testid="button-view-grid"
-                  >
-                    <Grid className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={viewMode === "list" ? "default" : "ghost"}
-                    size="sm"
-                    onClick={() => setViewMode("list")}
-                    className="h-8 w-8 p-0"
-                    data-testid="button-view-list"
-                  >
-                    <List className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                {/* Right Side: Buttons */}
-                {user?.role !== "patient" && activeTab === "request" && canCreate('lab_results') && (
-                  <div className="flex gap-3 ml-auto">
-                    <Button
-                      onClick={handleOrderTest}
-                      className="bg-medical-blue hover:bg-blue-700"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Order Lab Test
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Lab Results List */}
-          <div className="space-y-4">
-            {isLoading ? (
-              /* Loading State - Show skeleton for table */
-              viewMode === "list" ? (
-                <Card className="w-full max-w-full overflow-hidden">
-                  <CardContent className="p-0 w-full max-w-full">
-                    <div className="w-full max-w-full overflow-hidden">
-                      <table className="w-full text-[11px]" style={{ tableLayout: 'fixed', width: '100%' }}>
-                        <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                          <tr>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '8%' }}>Test ID</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '10%' }}>Patient</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '12%' }}>Test Type</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '7%' }}>Ordered</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '6%' }}>Priority</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '7%' }}>Sample</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '7%' }}>Report</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '6%' }}>T.Status</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '7%', minWidth: '7rem' }}>Status</th>
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '8%' }}>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-card divide-y divide-gray-200 dark:divide-gray-700">
-                          {[1, 2, 3, 4, 5].map((i) => (
-                            <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((j) => (
-                                <td key={j} className="px-1 py-1.5">
-                                  <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded animate-pulse"></div>
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+              {/* Filters */}
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-4">
+                    <div className="relative flex-1 max-w-sm">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        placeholder="Search lab results..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
                     </div>
-                  </CardContent>
-                </Card>
-              ) : (
-                /* Loading State - Show skeleton for cards */
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[1, 2, 3, 4, 5, 6].map((i) => (
-                    <Card key={i} className="bg-white dark:bg-slate-800 border dark:border-slate-600">
-                      <CardContent className="p-6">
-                        <div className="animate-pulse space-y-4">
-                          <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-3/4"></div>
-                          <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-1/2"></div>
-                          <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-2/3"></div>
-                          <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-1/3"></div>
+
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-40">
+                        <SelectValue placeholder="Filter by status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="collected">Collected</SelectItem>
+                        <SelectItem value="processing">Processing</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Test ID Filter (Admin Only) */}
+                    {isAdmin() && uniqueTestIds.length > 0 && (
+                      <Popover open={testIdPopoverOpen} onOpenChange={setTestIdPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={testIdPopoverOpen}
+                            className="w-[220px] justify-between"
+                            data-testid="button-filter-testid"
+                          >
+                            {filterTestId || "Filter by Test ID"}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[220px] p-0">
+                          <Command>
+                            <CommandInput placeholder="Search test ID..." />
+                            <CommandList>
+                              <CommandEmpty>No test ID found.</CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem
+                                  value=""
+                                  onSelect={() => {
+                                    setFilterTestId("");
+                                    setTestIdPopoverOpen(false);
+                                  }}
+                                  data-testid="option-testid-all"
+                                >
+                                  <Check
+                                    className={`mr-2 h-4 w-4 ${filterTestId === "" ? "opacity-100" : "opacity-0"}`}
+                                  />
+                                  All Test IDs
+                                </CommandItem>
+                                {uniqueTestIds.map((testId) => (
+                                  <CommandItem
+                                    key={testId}
+                                    value={testId}
+                                    onSelect={(currentValue) => {
+                                      setFilterTestId(currentValue === filterTestId ? "" : currentValue);
+                                      setTestIdPopoverOpen(false);
+                                    }}
+                                    data-testid={`option-testid-${testId}`}
+                                  >
+                                    <Check
+                                      className={`mr-2 h-4 w-4 ${filterTestId === testId ? "opacity-100" : "opacity-0"}`}
+                                    />
+                                    {testId}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    )}
+
+                    {/* View Mode Toggle */}
+                    <div className="flex gap-1 border rounded-lg p-1">
+                      <Button
+                        variant={viewMode === "grid" ? "default" : "ghost"}
+                        size="sm"
+                        onClick={() => setViewMode("grid")}
+                        className="h-8 w-8 p-0"
+                        data-testid="button-view-grid"
+                      >
+                        <Grid className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant={viewMode === "list" ? "default" : "ghost"}
+                        size="sm"
+                        onClick={() => setViewMode("list")}
+                        className="h-8 w-8 p-0"
+                        data-testid="button-view-list"
+                      >
+                        <List className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {/* Right Side: Buttons */}
+                    {user?.role !== "patient" && activeTab === "request" && canCreate('lab_results') && (
+                      <div className="flex gap-3 ml-auto">
+                        <Button
+                          onClick={handleOrderTest}
+                          className="bg-medical-blue hover:bg-blue-700"
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Order Lab Test
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Lab Results List */}
+              <div className="space-y-4">
+                {isLoading ? (
+                  /* Loading State - Show skeleton for table */
+                  viewMode === "list" ? (
+                    <Card className="w-full max-w-full overflow-hidden">
+                      <CardContent className="p-0 w-full max-w-full">
+                        <div className="w-full max-w-full overflow-hidden">
+                          <table className="w-full text-[11px]" style={{ tableLayout: 'fixed', width: '100%' }}>
+                            <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                              <tr>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '8%' }}>Test ID</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '10%' }}>Patient</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '12%' }}>Test Type</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '7%' }}>Ordered</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '6%' }}>Priority</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '7%' }}>Sample</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '7%' }}>Report</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '6%' }}>T.Status</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '7%', minWidth: '7rem' }}>Status</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase" style={{ width: '8%' }}>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white dark:bg-card divide-y divide-gray-200 dark:divide-gray-700">
+                              {[1, 2, 3, 4, 5].map((i) => (
+                                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((j) => (
+                                    <td key={j} className="px-1 py-1.5">
+                                      <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded animate-pulse"></div>
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
-                </div>
-              )
-            ) : filteredResults.length === 0 ? (
-              <Card>
-                <CardContent className="p-12 text-center">
-                  <FileText className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-600 dark:text-gray-300 mb-2">
-                    No lab results found
-                  </h3>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Try adjusting your search terms or filters
-                  </p>
-                </CardContent>
-              </Card>
-            ) : viewMode === "list" ? (
-              /* List View - Table Format */
-              <Card className="w-full max-w-full overflow-hidden">
-                <CardContent className="p-0 w-full max-w-full">
-                  <div className="w-full max-w-full overflow-hidden">
-                    <table className="w-full min-w-0 text-[11px]" style={{ tableLayout: 'fixed', width: '100%' }}>
-                      <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                        <tr>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Test ID</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '9%' }}>Patient</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '10%' }}>Test Type</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Ordered</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Priority</th>
-                          {activeTab === "generated" && (
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Rx</th>
-                          )}
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Sample</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Report</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>T.Status</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '6%', minWidth: '7rem' }}>Status</th>
-                          <th className="px-1 py-1.5 text-center text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '2%', minWidth: '1.5rem' }}>.</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Pay</th>
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '4%' }}>Signed</th>
-                          {activeTab === "request" && (
-                            <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Inv/Sign</th>
-                          )}
-                          <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '7%', minWidth: '4.5rem' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white dark:bg-card divide-y divide-gray-200 dark:divide-gray-700">
-                        {filteredResults.map((result) => (
-                          <tr
-                            key={result.id}
-                            className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                            data-testid={`row-lab-result-${result.id}`}
-                          >
-                            <td className="px-1 py-1.5 text-[11px] font-medium text-gray-900 dark:text-gray-100 min-w-0">
-                              <div className="truncate" title={result.testId}>
-                                {result.testId}
-                              </div>
-{activeTab === "generated" && (
-                              <Button
-                                  variant="link"
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedResult(result);
-                                    setShowPrescriptionDialog(true);
-                                  }}
-                                  className="h-auto p-0 text-xs text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-300"
-                                  data-testid={`link-view-prescription-${result.id}`}
-                                >
-                                  View
-                                </Button>
+                  ) : (
+                    /* Loading State - Show skeleton for cards */
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <Card key={i} className="bg-white dark:bg-slate-800 border dark:border-slate-600">
+                          <CardContent className="p-6">
+                            <div className="animate-pulse space-y-4">
+                              <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-3/4"></div>
+                              <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-1/2"></div>
+                              <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-2/3"></div>
+                              <div className="h-4 bg-gray-200 dark:bg-slate-600 rounded w-1/3"></div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )
+                ) : filteredResults.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-12 text-center">
+                      <FileText className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600 dark:text-gray-300 mb-2">
+                        No lab results found
+                      </h3>
+                      <p className="text-gray-600 dark:text-gray-400">
+                        Try adjusting your search terms or filters
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : viewMode === "list" ? (
+                  /* List View - Table Format */
+                  <Card className="w-full max-w-full overflow-hidden">
+                    <CardContent className="p-0 w-full max-w-full">
+                      <div className="w-full max-w-full overflow-hidden">
+                        <table className="w-full min-w-0 text-[11px]" style={{ tableLayout: 'fixed', width: '100%' }}>
+                          <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                            <tr>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Test ID</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '9%' }}>Patient</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '10%' }}>Test Type</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Ordered</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Priority</th>
+                              {activeTab === "generated" && (
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Rx</th>
                               )}
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 min-w-0">
-                              <div className="truncate" title={getPatientName(result.patientId)}>
-                                {getPatientName(result.patientId)}
-                              </div>
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 min-w-0">
-                              <div className="truncate" title={result.testType}>
-                                {(() => {
-                                  const tests = result.testType.split(' | ');
-                                  if (tests.length <= 2) {
-                                    return result.testType;
-                                  }
-                                  const visibleTests = tests.slice(0, 2).join(' | ');
-                                  const hiddenCount = tests.length - 2;
-                                  return (
-                                    <div className="group relative inline-block w-full">
-                                      <span className="truncate block">{visibleTests} <span className="text-blue-600 dark:text-gray-100 cursor-help">+{hiddenCount}</span></span>
-                                      <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[300px]">
-                                        <div className="text-sm font-medium mb-2">All Tests:</div>
-                                        <div className="space-y-1">
-                                          {tests.map((test, idx) => (
-                                            <div key={idx} className="text-sm">{test}</div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-                              </div>
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] text-gray-500 dark:text-gray-400 min-w-0">
-                              <div className="truncate" title={format(new Date(result.orderedAt), "MMM dd, yyyy")}>
-                                {format(new Date(result.orderedAt), "MMM dd, yyyy")}
-                              </div>
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                              <Badge
-                                variant={result.priority === "urgent" ? "destructive" : "secondary"}
-                                className="text-[10px] px-1 py-0"
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Sample</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Report</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>T.Status</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '6%', minWidth: '7rem' }}>Status</th>
+                              <th className="px-1 py-1.5 text-center text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '2%', minWidth: '1.5rem' }}>.</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Pay</th>
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '4%' }}>Signed</th>
+                              {activeTab === "request" && (
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Inv/Sign</th>
+                              )}
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase shrink-0" style={{ width: '7%', minWidth: '4.5rem' }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white dark:bg-card divide-y divide-gray-200 dark:divide-gray-700">
+                            {filteredResults.map((result) => (
+                              <tr
+                                key={result.id}
+                                className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                data-testid={`row-lab-result-${result.id}`}
                               >
-                                {result.priority || "routine"}
-                              </Badge>
-                            </td>
-                            {activeTab === "generated" && (
-                              <td className="px-1 py-1.5 text-[11px] min-w-0">
-                                <div className="flex items-center justify-center gap-0.5 flex-shrink-0">
-                                  {/* Save/View Prescription PDF Button */}
-                                  {activeTab === "generated" && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={async () => {
-                                        try {
-                                          const token = localStorage.getItem("auth_token");
-                                          const headers: Record<string, string> = {
-                                            "X-Tenant-Subdomain": getActiveSubdomain(),
-                                          };
-                                          if (token) {
-                                            headers["Authorization"] = `Bearer ${token}`;
-                                          }
-
-                                          // Get signed URL for the prescription PDF
-                                          const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=prescription`, {
-                                            headers,
-                                            credentials: "include",
-                                          });
-
-                                          if (!signedUrlResponse.ok) {
-                                            const errorData = await signedUrlResponse.json();
-                                            throw new Error(errorData.error || "Failed to get PDF URL");
-                                          }
-
-                                          const { signedUrl } = await signedUrlResponse.json();
-                                          
-                                          // Set PDF URL and open viewer
-                                          setPdfViewerUrl(signedUrl);
-                                          setSelectedResult(result);
-                                          setShowPdfViewerDialog(true);
-                                        } catch (error: any) {
-                                          console.error("Error opening PDF:", error);
-                                          toast({
-                                            title: "Error",
-                                            description: error.message || "Failed to open PDF. Please try again.",
-                                            variant: "destructive",
-                                          });
-                                        }
-                                      }}
-                                      className="h-5 w-5 p-0"
-                                      data-testid={`button-prescription-pdf-${result.id}`}
-                                      title="View Prescription PDF"
-                                    >
-                                      <Save className="h-2.5 w-2.5 text-yellow-600 dark:text-yellow-400" />
-                                    </Button>
-                                  )}
-                                  
-                                  {/* Print Prescription PDF Button */}
-                                  {activeTab === "generated" && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={async () => {
-                                        try {
-                                          const token = localStorage.getItem("auth_token");
-                                          const headers: Record<string, string> = {
-                                            "X-Tenant-Subdomain": getActiveSubdomain(),
-                                          };
-                                          if (token) {
-                                            headers["Authorization"] = `Bearer ${token}`;
-                                          }
-
-                                          // Get signed URL for the prescription PDF
-                                          const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=prescription`, {
-                                            headers,
-                                            credentials: "include",
-                                          });
-
-                                          if (!signedUrlResponse.ok) {
-                                            const errorData = await signedUrlResponse.json();
-                                            throw new Error(errorData.error || "Failed to get PDF URL");
-                                          }
-
-                                          const { signedUrl } = await signedUrlResponse.json();
-                                          
-                                          // Open PDF in new window for printing
-                                          const printWindow = window.open(signedUrl, '_blank');
-                                          if (printWindow) {
-                                            printWindow.onload = () => {
-                                              printWindow.print();
-                                            };
-                                          }
-                                        } catch (error: any) {
-                                          console.error("Error printing PDF:", error);
-                                          toast({
-                                            title: "Error",
-                                            description: error.message || "Failed to print PDF. Please try again.",
-                                            variant: "destructive",
-                                          });
-                                        }
-                                      }}
-                                      className="h-5 w-5 p-0"
-                                      data-testid={`button-prescription-print-${result.id}`}
-                                      title="Print Prescription PDF"
-                                    >
-                                      <Printer className="h-2.5 w-2.5 text-blue-600 dark:text-gray-100" />
-                                    </Button>
-                                  )}
-                                  
-                                  {/* Download Prescription PDF Button */}
-                                  {activeTab === "generated" && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={async () => {
-                                        try {
-                                          const token = localStorage.getItem("auth_token");
-                                          const headers: Record<string, string> = {
-                                            "X-Tenant-Subdomain": getActiveSubdomain(),
-                                          };
-                                          if (token) {
-                                            headers["Authorization"] = `Bearer ${token}`;
-                                          }
-
-                                          // Get signed URL for the prescription PDF (same as save/print)
-                                          const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=prescription`, {
-                                            headers,
-                                            credentials: "include",
-                                          });
-
-                                          if (!signedUrlResponse.ok) {
-                                            const errorData = await signedUrlResponse.json();
-                                            throw new Error(errorData.error || "Failed to get PDF URL");
-                                          }
-
-                                          const { signedUrl } = await signedUrlResponse.json();
-                                          
-                                          // Download the PDF from the signed URL
-                                          const response = await fetch(signedUrl);
-
-                                          if (!response.ok) {
-                                            throw new Error("Failed to download PDF.");
-                                          }
-
-                                          const blob = await response.blob();
-                                          const url = window.URL.createObjectURL(blob);
-                                          const a = document.createElement('a');
-                                          a.href = url;
-                                          a.download = `${result.testId}_prescription.pdf`;
-                                          document.body.appendChild(a);
-                                          a.click();
-                                          window.URL.revokeObjectURL(url);
-                                          document.body.removeChild(a);
-
-                                          toast({
-                                            title: "Success",
-                                            description: "Prescription PDF downloaded successfully.",
-                                          });
-                                        } catch (error: any) {
-                                          console.error("Error downloading PDF:", error);
-                                          toast({
-                                            title: "Error",
-                                            description: error.message || "Failed to download PDF. Please try again.",
-                                            variant: "destructive",
-                                          });
-                                        }
-                                      }}
-                                      className="h-5 w-5 p-0"
-                                      data-testid={`button-prescription-download-${result.id}`}
-                                      title="Download Prescription PDF"
-                                    >
-                                      <Download className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
-                                    </Button>
-                                  )}
-                                </div>
-                              </td>
-                            )}
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                              {result.sampleCollected ? (
-                                <div className="flex items-center justify-center" title="Sample Collected">
-                                  <CheckCircle className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-center" title="not collected">
-                                  <X className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                                {result.labReportGenerated ? (
-                                <div className="flex items-center justify-center" title="Report Generated">
-                                  <CheckCircle className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
-                                </div>
-                                ) : (
-                                <div className="flex items-center justify-center" title="Report Not Generated">
-                                  <Clock className="h-2.5 w-2.5 text-yellow-600 dark:text-yellow-400" />
-                                </div>
-                                )}
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                              <Badge
-                                variant={result.criticalValues ? "destructive" : "secondary"}
-                                className="text-[10px] px-1 py-0"
-                              >
-                                {result.criticalValues ? "Critical" : "Normal"}
-                              </Badge>
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0 overflow-hidden" style={{ maxWidth: '7rem' }}>
-                              <Badge className={`${getStatusColor(result.status)} text-[10px] px-1 py-0 shrink-0`}>
-                                {result.status}
-                              </Badge>
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0 w-[1.5rem] shrink-0 text-center">
-                              {user?.role !== 'patient' && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditStatusDialog({ id: result.id, status: result.status });
-                                    setEditStatusDraft(result.status);
-                                  }}
-                                  className="h-[18px] w-[18px] min-w-[18px] p-0 shrink-0 inline-flex items-center justify-center"
-                                  data-testid={`button-edit-status-${result.id}`}
-                                >
-                                  <Edit className="w-[9px] h-[9px] shrink-0" style={{ width: 9, height: 9 }} />
-                                </Button>
-                              )}
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-gray-100 border-blue-200 dark:border-blue-700 text-[10px] px-1 py-0 truncate max-w-full">
-                                <span className="truncate block">{(result as any).paymentMethod || 'N/A'}</span>
-                              </Badge>
-                            </td>
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                              <div className="flex items-center justify-center">
-                                {result.signature?.doctorSignature && 
-                                 String(result.signature.doctorSignature).trim() !== "" ? (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                    className="h-5 px-1 flex items-center gap-0.5 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                    onClick={() => {
-                                      setSelectedSignatureData({
-                                        signedAt: result.signature?.signedAt,
-                                        signedBy: result.signature?.signedBy || "N/A",
-                                        signerId: result.signature?.signerId,
-                                        doctorSignature: result.signature?.doctorSignature,
-                                      });
-                                      setShowSignatureDetailsDialog(true);
-                                    }}
-                                    title="View signature details"
-                                      >
-                                    <CheckCircle className="h-2.5 w-2.5" />
-                                    <span className="text-[10px]">✓</span>
-                                      </Button>
-                                ) : (
-                                  <div className="flex items-center gap-0.5 text-red-600">
-                                    <X className="h-2.5 w-2.5" />
-                                    <span className="text-[10px]">✗</span>
+                                <td className="px-1 py-1.5 text-[11px] font-medium text-gray-900 dark:text-gray-100 min-w-0">
+                                  <div className="truncate" title={result.testId}>
+                                    {result.testId}
                                   </div>
-                                )}
-                              </div>
-                            </td>
-                            {activeTab === "request" && (
-                            <td className="px-1 py-1.5 text-[11px] min-w-0">
-                              <div className="flex items-center gap-0.5 justify-center flex-shrink-0 flex-wrap">
-                                {user?.role !== 'patient' && (
-                                  <>
-                                      {activeTab === "request" && (
+                                  {activeTab === "generated" && (
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedResult(result);
+                                        setShowPrescriptionDialog(true);
+                                      }}
+                                      className="h-auto p-0 text-xs text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-300"
+                                      data-testid={`link-view-prescription-${result.id}`}
+                                    >
+                                      View
+                                    </Button>
+                                  )}
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 min-w-0">
+                                  <div className="truncate" title={getPatientName(result.patientId)}>
+                                    {getPatientName(result.patientId)}
+                                  </div>
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] text-gray-900 dark:text-gray-100 min-w-0">
+                                  <div className="truncate" title={result.testType}>
+                                    {(() => {
+                                      const tests = result.testType.split(' | ');
+                                      if (tests.length <= 2) {
+                                        return result.testType;
+                                      }
+                                      const visibleTests = tests.slice(0, 2).join(' | ');
+                                      const hiddenCount = tests.length - 2;
+                                      return (
+                                        <div className="group relative inline-block w-full">
+                                          <span className="truncate block">{visibleTests} <span className="text-blue-600 dark:text-gray-100 cursor-help">+{hiddenCount}</span></span>
+                                          <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[300px]">
+                                            <div className="text-sm font-medium mb-2">All Tests:</div>
+                                            <div className="space-y-1">
+                                              {tests.map((test, idx) => (
+                                                <div key={idx} className="text-sm">{test}</div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] text-gray-500 dark:text-gray-400 min-w-0">
+                                  <div className="truncate" title={format(new Date(result.orderedAt), "MMM dd, yyyy")}>
+                                    {format(new Date(result.orderedAt), "MMM dd, yyyy")}
+                                  </div>
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                  <Badge
+                                    variant={result.priority === "urgent" ? "destructive" : "secondary"}
+                                    className="text-[10px] px-1 py-0"
+                                  >
+                                    {result.priority || "routine"}
+                                  </Badge>
+                                </td>
+                                {activeTab === "generated" && (
+                                  <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                    <div className="flex items-center justify-center gap-0.5 flex-shrink-0">
+                                      {/* Save/View Prescription PDF Button */}
+                                      {activeTab === "generated" && (
                                         <Button
                                           variant="ghost"
                                           size="sm"
                                           onClick={async () => {
-                                            // Check if signature exists
-                                            const hasSignature = result.signature?.doctorSignature && 
-                                              String(result.signature.doctorSignature).trim() !== "";
-                                            
-                                            if (!hasSignature) {
-                                              // No signature - show required signature dialog
+                                            try {
+                                              const token = localStorage.getItem("auth_token");
+                                              const headers: Record<string, string> = {
+                                                "X-Tenant-Subdomain": getActiveSubdomain(),
+                                              };
+                                              if (token) {
+                                                headers["Authorization"] = `Bearer ${token}`;
+                                              }
+
+                                              // Get signed URL for the prescription PDF
+                                              const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=prescription`, {
+                                                headers,
+                                                credentials: "include",
+                                              });
+
+                                              if (!signedUrlResponse.ok) {
+                                                const errorData = await signedUrlResponse.json();
+                                                throw new Error(errorData.error || "Failed to get PDF URL");
+                                              }
+
+                                              const { signedUrl } = await signedUrlResponse.json();
+
+                                              // Set PDF URL and open viewer
+                                              setPdfViewerUrl(signedUrl);
                                               setSelectedResult(result);
-                                              setShowRequiredSignatureDialog(true);
-                                              return;
+                                              setShowPdfViewerDialog(true);
+                                            } catch (error: any) {
+                                              console.error("Error opening PDF:", error);
+                                              toast({
+                                                title: "Error",
+                                                description: error.message || "Failed to open PDF. Please try again.",
+                                                variant: "destructive",
+                                              });
                                             }
-                                            
-                                            // Signature exists - proceed with PDF save
-                                            await handleSavePrescriptionPdf(result.id);
                                           }}
                                           className="h-5 w-5 p-0"
-                                          data-testid={`button-save-pdf-${result.id}`}
-                                          title="Save Prescription PDF"
+                                          data-testid={`button-prescription-pdf-${result.id}`}
+                                          title="View Prescription PDF"
                                         >
-                                          <Save className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
+                                          <Save className="h-2.5 w-2.5 text-yellow-600 dark:text-yellow-400" />
                                         </Button>
                                       )}
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleManageInvoice(result)}
-                                        className="h-5 w-5 p-0"
-                                        data-testid={`button-manage-invoice-${result.id}`}
-                                        title="Manage Invoice"
-                                      >
-                                        <PoundSterling className="h-2.5 w-2.5 text-gray-600 dark:text-gray-400" />
-                                      </Button>
-                                    {(activeTab === "request" || activeTab === "generated") && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setSelectedResult(result);
-                                          setHideTabs(true);
-                                          setShowESignDialog(true);
-                                        }}
-                                        className="h-5 w-5 p-0"
-                                        data-testid={`button-esign-${result.id}`}
-                                        title="E-Sign"
-                                      >
-                                        <PenTool className="h-2.5 w-2.5 text-gray-600 dark:text-gray-400" />
-                                      </Button>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                            )}
-                            <td className="px-1 py-1.5 text-[11px] min-w-[4.5rem] w-[4.5rem] shrink-0">
-                              <div className="flex items-center gap-0.5 justify-center flex-shrink-0">
-                                {activeTab === "request" ? (
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 min-w-6 p-0 shrink-0"
-                                        data-testid={`button-actions-${result.id}`}
-                                        title="Actions"
-                                      >
-                                        <MoreVertical className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="min-w-[10rem]">
-                                      {user?.role !== 'patient' && canEdit('lab_results') && (
-                                        <DropdownMenuItem
-                                          onClick={() => handleViewResult(result)}
-                                          data-testid={`button-edit-${result.id}`}
-                                        >
-                                          <Edit className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                          Edit
-                                        </DropdownMenuItem>
-                                      )}
-                                      <DropdownMenuItem
-                                        onClick={() => handleGeneratePrescription(result)}
-                                        data-testid={`button-prescription-${result.id}`}
-                                      >
-                                        <Eye className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                        {user?.role === 'patient' ? 'View Prescription' : 'View'}
-                                      </DropdownMenuItem>
-                                      {user?.role !== 'patient' && canDelete('lab_results') && (
-                                        <DropdownMenuItem
-                                          onClick={() => handleDeleteResult(result.id)}
-                                          className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
-                                          data-testid={`button-delete-${result.id}`}
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                          Delete
-                                        </DropdownMenuItem>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                ) : activeTab === "generate" ? (
-                                  <>
-                                    {user?.role !== 'patient' && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setSelectedLabOrder(result);
-                                          setShowFillResultDialog(true);
-                                        }}
-                                        className="h-5 w-5 p-0"
-                                        data-testid={`button-generate-${result.id}`}
-                                      >
-                                        <FileText className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
-                                      </Button>
-                                    )}
-                                  </>
-                                ) : (
-                                  /* Lab Results tab: kebab dropdown with Save, Print, Download, Delete */
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 min-w-6 p-0 shrink-0"
-                                        data-testid={`button-actions-${result.id}`}
-                                        title="Actions"
-                                      >
-                                        <MoreVertical className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="min-w-[10rem]">
-                                      <DropdownMenuItem
-                                        onClick={async () => {
-                                          try {
-                                            const token = localStorage.getItem("auth_token");
-                                            const headers: Record<string, string> = {
-                                              "X-Tenant-Subdomain": getActiveSubdomain(),
-                                            };
-                                            if (token) {
-                                              headers["Authorization"] = `Bearer ${token}`;
-                                            }
-                                            const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, { headers });
-                                            if (!response.ok) {
-                                              const errorData = await response.json().catch(() => ({ error: "Failed to download PDF" }));
-                                              throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-                                            }
-                                            const blob = await response.blob();
-                                            const blobUrl = URL.createObjectURL(blob);
-                                            setPdfViewerUrl(blobUrl);
-                                            setShowPdfViewerDialog(true);
-                                          } catch (error: any) {
-                                            console.error("Error opening PDF:", error);
-                                            toast({
-                                              title: "Error",
-                                              description: error.message || "Failed to open PDF. Please try again.",
-                                              variant: "destructive",
-                                            });
-                                          }
-                                        }}
-                                        data-testid={`button-save-pdf-viewer-${result.id}`}
-                                      >
-                                        <Save className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                        Save
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={async () => {
-                                          try {
-                                            const token = localStorage.getItem("auth_token");
-                                            const headers: Record<string, string> = {
-                                              "X-Tenant-Subdomain": getActiveSubdomain(),
-                                            };
-                                            if (token) {
-                                              headers["Authorization"] = `Bearer ${token}`;
-                                            }
-                                            const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=testresult`, {
-                                              headers,
-                                              credentials: "include",
-                                            });
-                                            if (!signedUrlResponse.ok) {
-                                              const errorData = await signedUrlResponse.json();
-                                              throw new Error(errorData.error || "Failed to get PDF URL");
-                                            }
-                                            const { signedUrl } = await signedUrlResponse.json();
-                                            const printWindow = window.open(signedUrl, '_blank');
-                                            if (printWindow) {
-                                              printWindow.onload = () => {
-                                                printWindow.print();
+
+                                      {/* Print Prescription PDF Button */}
+                                      {activeTab === "generated" && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={async () => {
+                                            try {
+                                              const token = localStorage.getItem("auth_token");
+                                              const headers: Record<string, string> = {
+                                                "X-Tenant-Subdomain": getActiveSubdomain(),
                                               };
+                                              if (token) {
+                                                headers["Authorization"] = `Bearer ${token}`;
+                                              }
+
+                                              // Get signed URL for the prescription PDF
+                                              const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=prescription`, {
+                                                headers,
+                                                credentials: "include",
+                                              });
+
+                                              if (!signedUrlResponse.ok) {
+                                                const errorData = await signedUrlResponse.json();
+                                                throw new Error(errorData.error || "Failed to get PDF URL");
+                                              }
+
+                                              const { signedUrl } = await signedUrlResponse.json();
+
+                                              // Open PDF in new window for printing
+                                              const printWindow = window.open(signedUrl, '_blank');
+                                              if (printWindow) {
+                                                printWindow.onload = () => {
+                                                  printWindow.print();
+                                                };
+                                              }
+                                            } catch (error: any) {
+                                              console.error("Error printing PDF:", error);
+                                              toast({
+                                                title: "Error",
+                                                description: error.message || "Failed to print PDF. Please try again.",
+                                                variant: "destructive",
+                                              });
                                             }
-                                          } catch (error: any) {
-                                            console.error("Error printing PDF:", error);
-                                            toast({
-                                              title: "Error",
-                                              description: error.message || "Failed to print PDF. Please try again.",
-                                              variant: "destructive",
-                                            });
-                                          }
-                                        }}
-                                        data-testid={`button-print-${result.id}`}
-                                      >
-                                        <Printer className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                        Print
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={async () => {
-                                          try {
-                                            const token = localStorage.getItem("auth_token");
-                                            const headers: Record<string, string> = {
-                                              "X-Tenant-Subdomain": getActiveSubdomain(),
-                                            };
-                                            if (token) {
-                                              headers["Authorization"] = `Bearer ${token}`;
-                                            }
-                                            const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, { headers });
-                                            if (!response.ok) {
-                                              const errorData = await response.json().catch(() => ({ error: "Failed to download PDF" }));
-                                              throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-                                            }
-                                            const blob = await response.blob();
-                                            const url = window.URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = `${result.testId}_test_result.pdf`;
-                                            document.body.appendChild(a);
-                                            a.click();
-                                            window.URL.revokeObjectURL(url);
-                                            document.body.removeChild(a);
-                                            toast({
-                                              title: "Success",
-                                              description: "Test result PDF downloaded successfully.",
-                                            });
-                                          } catch (error: any) {
-                                            console.error("Error downloading PDF:", error);
-                                            toast({
-                                              title: "Error",
-                                              description: error.message || "Failed to download PDF. Please try again.",
-                                              variant: "destructive",
-                                            });
-                                          }
-                                        }}
-                                        data-testid={`button-download-${result.id}`}
-                                      >
-                                        <Download className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                        Download
-                                      </DropdownMenuItem>
-                                      {user?.role !== 'patient' && canDelete('lab_results') && (
-                                        <DropdownMenuItem
-                                          onClick={() => handleDeleteResult(result.id)}
-                                          className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
-                                          data-testid={`button-delete-${result.id}`}
+                                          }}
+                                          className="h-5 w-5 p-0"
+                                          data-testid={`button-prescription-print-${result.id}`}
+                                          title="Print Prescription PDF"
                                         >
-                                          <Trash2 className="w-3.5 h-3.5 mr-2 shrink-0" />
-                                          Delete
-                                        </DropdownMenuItem>
+                                          <Printer className="h-2.5 w-2.5 text-blue-600 dark:text-gray-100" />
+                                        </Button>
                                       )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              filteredResults.map((result) => (
-                <Card
-                  key={result.id}
-                  className="hover:shadow-md transition-shadow"
-                >
-                  <CardContent className="p-6 relative">
-                    {/* Doctor information - Top Right Position */}
-                    <div className="absolute top-6 right-6 w-70">
-                      <div className="p-4 bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-600 rounded-lg">
-                        <div className="flex items-center gap-2 mb-3">
-                          <User className="h-4 w-4 text-blue-600 dark:text-gray-100" />
-                          <h4 className="font-semibold text-blue-900 dark:text-white">
-                            {result.doctorName || "Dr. Sarah Williams"}
-                          </h4>
-                        </div>
 
-                        <div className="space-y-2">
-                          <div className="text-sm">
-                            <span className="font-medium text-gray-800 dark:text-gray-300">
-                              Main Specialization:
-                            </span>
-                            <div className="text-blue-600 dark:text-gray-100">
-                              {result.mainSpecialty || "Diagnostic Specialties"}
-                            </div>
-                          </div>
-                          <div className="text-sm">
-                            <span className="font-medium text-gray-800 dark:text-gray-300">
-                              Sub-Specialization:
-                            </span>
-                            <div className="text-blue-600 dark:text-gray-100">
-                              {result.subSpecialty || "Neurosurgeon"}
-                            </div>
-                          </div>
-                          <div className="text-sm">
-                            <span className="font-medium text-gray-800 dark:text-gray-300">
-                              Priority:
-                            </span>
-                            <div className="text-green-600 dark:text-green-400">
-                              {result.priority || "urgent"}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                                      {/* Download Prescription PDF Button */}
+                                      {activeTab === "generated" && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={async () => {
+                                            try {
+                                              const token = localStorage.getItem("auth_token");
+                                              const headers: Record<string, string> = {
+                                                "X-Tenant-Subdomain": getActiveSubdomain(),
+                                              };
+                                              if (token) {
+                                                headers["Authorization"] = `Bearer ${token}`;
+                                              }
 
-                    {/* Header with patient name and status - with right margin for blue box */}
-                    <div className="flex items-center gap-3 mb-4 mr-72">
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                        {getPatientName(result.patientId)}
-                      </h3>
-                      <div className="flex items-center gap-2">
-                        <Badge className={getStatusColor(result.status)}>
-                          {result.status}
-                        </Badge>
-                        {user?.role !== 'patient' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setEditStatusDialog({ id: result.id, status: result.status });
-                              setEditStatusDraft(result.status);
-                            }}
-                            className="h-[18px] w-[18px] min-w-[18px] p-0 shrink-0 inline-flex items-center justify-center"
-                            data-testid="button-edit-status-list"
-                          >
-                            <Edit className="w-[9px] h-[9px] shrink-0" style={{ width: 9, height: 9 }} />
-                          </Button>
-                        )}
-                      </div>
-                      {result.criticalValues && (
-                        <Badge
-                          variant="destructive"
-                          className="flex items-center gap-1"
-                        >
-                          <AlertTriangle className="h-2.5 w-2.5" />
-                          Critical
-                        </Badge>
-                      )}
-                        {result.sampleCollected ? (
-                        <div className="flex items-center" title="Sample Collected">
-                          <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-                        </div>
-                      ) : (
-                        <div className="flex items-center" title="not collected">
-                          <X className="h-5 w-5 text-red-600 dark:text-red-400" />
-                        </div>
-                      )}
-                        {result.labReportGenerated ? (
-                        <div className="flex items-center" title="Report Generated">
-                          <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-                        </div>
-                        ) : (
-                        <div className="flex items-center" title="Report Not Generated">
-                          <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-                        </div>
-                        )}
-                    </div>
+                                              // Get signed URL for the prescription PDF (same as save/print)
+                                              const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=prescription`, {
+                                                headers,
+                                                credentials: "include",
+                                              });
 
-                    {/* Main content area - with right margin for blue box */}
-                    <div className="mr-72">
-                      {/* Test details and Notes */}
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <div className="text-sm text-gray-600 dark:text-gray-300">
-                            <span className="font-medium">Ordered:</span>{" "}
-                            {format(
-                              new Date(result.orderedAt),
-                              "MMM dd, yyyy HH:mm",
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-300">
-                            <span className="font-medium">Test:</span>{" "}
-                            {(() => {
-                              const tests = result.testType.split(' | ');
-                              if (tests.length <= 3) {
-                                return result.testType;
-                              }
-                              const visibleTests = tests.slice(0, 3).join(' | ');
-                              const hiddenCount = tests.length - 3;
-                              return (
-                                <span className="group relative inline-block">
-                                  <span>{visibleTests} <span className="text-blue-600 dark:text-gray-100 cursor-help font-medium">+{hiddenCount} more</span></span>
-                                  <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[400px] max-w-[600px]">
-                                    <div className="text-sm font-semibold mb-2 text-gray-900 dark:text-gray-100">All Tests ({tests.length}):</div>
-                                    <div className="space-y-1 max-h-[300px] overflow-y-auto">
-                                      {tests.map((test, idx) => (
-                                        <div key={idx} className="text-sm text-gray-700 dark:text-gray-300 py-0.5">{test}</div>
-                                      ))}
+                                              if (!signedUrlResponse.ok) {
+                                                const errorData = await signedUrlResponse.json();
+                                                throw new Error(errorData.error || "Failed to get PDF URL");
+                                              }
+
+                                              const { signedUrl } = await signedUrlResponse.json();
+
+                                              // Download the PDF from the signed URL
+                                              const response = await fetch(signedUrl);
+
+                                              if (!response.ok) {
+                                                throw new Error("Failed to download PDF.");
+                                              }
+
+                                              const blob = await response.blob();
+                                              const url = window.URL.createObjectURL(blob);
+                                              const a = document.createElement('a');
+                                              a.href = url;
+                                              a.download = `${result.testId}_prescription.pdf`;
+                                              document.body.appendChild(a);
+                                              a.click();
+                                              window.URL.revokeObjectURL(url);
+                                              document.body.removeChild(a);
+
+                                              toast({
+                                                title: "Success",
+                                                description: "Prescription PDF downloaded successfully.",
+                                              });
+                                            } catch (error: any) {
+                                              console.error("Error downloading PDF:", error);
+                                              toast({
+                                                title: "Error",
+                                                description: error.message || "Failed to download PDF. Please try again.",
+                                                variant: "destructive",
+                                              });
+                                            }
+                                          }}
+                                          className="h-5 w-5 p-0"
+                                          data-testid={`button-prescription-download-${result.id}`}
+                                          title="Download Prescription PDF"
+                                        >
+                                          <Download className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
+                                        </Button>
+                                      )}
                                     </div>
+                                  </td>
+                                )}
+                                <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                  {result.sampleCollected ? (
+                                    <div className="flex items-center justify-center" title="Sample Collected">
+                                      <CheckCircle className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-center" title="not collected">
+                                      <X className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                  {result.labReportGenerated ? (
+                                    <div className="flex items-center justify-center" title="Report Generated">
+                                      <CheckCircle className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-center" title="Report Not Generated">
+                                      <Clock className="h-2.5 w-2.5 text-yellow-600 dark:text-yellow-400" />
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                  <Badge
+                                    variant={result.criticalValues ? "destructive" : "secondary"}
+                                    className="text-[10px] px-1 py-0"
+                                  >
+                                    {result.criticalValues ? "Critical" : "Normal"}
+                                  </Badge>
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0 overflow-hidden" style={{ maxWidth: '7rem' }}>
+                                  <Badge className={`${getStatusColor(result.status)} text-[10px] px-1 py-0 shrink-0`}>
+                                    {result.status}
+                                  </Badge>
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0 w-[1.5rem] shrink-0 text-center">
+                                  {user?.role !== 'patient' && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setEditStatusDialog({ id: result.id, status: result.status });
+                                        setEditStatusDraft(result.status);
+                                      }}
+                                      className="h-[18px] w-[18px] min-w-[18px] p-0 shrink-0 inline-flex items-center justify-center"
+                                      data-testid={`button-edit-status-${result.id}`}
+                                    >
+                                      <Edit className="w-[9px] h-[9px] shrink-0" style={{ width: 9, height: 9 }} />
+                                    </Button>
+                                  )}
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                  <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-gray-100 border-blue-200 dark:border-blue-700 text-[10px] px-1 py-0 truncate max-w-full">
+                                    <span className="truncate block">{(result as any).paymentMethod || 'N/A'}</span>
+                                  </Badge>
+                                </td>
+                                <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                  <div className="flex items-center justify-center">
+                                    {result.signature?.doctorSignature &&
+                                      String(result.signature.doctorSignature).trim() !== "" ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-5 px-1 flex items-center gap-0.5 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                        onClick={() => {
+                                          setSelectedSignatureData({
+                                            signedAt: result.signature?.signedAt,
+                                            signedBy: result.signature?.signedBy || "N/A",
+                                            signerId: result.signature?.signerId,
+                                            doctorSignature: result.signature?.doctorSignature,
+                                          });
+                                          setShowSignatureDetailsDialog(true);
+                                        }}
+                                        title="View signature details"
+                                      >
+                                        <CheckCircle className="h-2.5 w-2.5" />
+                                        <span className="text-[10px]">✓</span>
+                                      </Button>
+                                    ) : (
+                                      <div className="flex items-center gap-0.5 text-red-600">
+                                        <X className="h-2.5 w-2.5" />
+                                        <span className="text-[10px]">✗</span>
+                                      </div>
+                                    )}
                                   </div>
+                                </td>
+                                {activeTab === "request" && (
+                                  <td className="px-1 py-1.5 text-[11px] min-w-0">
+                                    <div className="flex items-center gap-0.5 justify-center flex-shrink-0 flex-wrap">
+                                      {user?.role !== 'patient' && (
+                                        <>
+                                          {activeTab === "request" && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={async () => {
+                                                // Check if signature exists
+                                                const hasSignature = result.signature?.doctorSignature &&
+                                                  String(result.signature.doctorSignature).trim() !== "";
+
+                                                if (!hasSignature) {
+                                                  // No signature - show required signature dialog
+                                                  setSelectedResult(result);
+                                                  setShowRequiredSignatureDialog(true);
+                                                  return;
+                                                }
+
+                                                // Signature exists - proceed with PDF save
+                                                await handleSavePrescriptionPdf(result.id);
+                                              }}
+                                              className="h-5 w-5 p-0"
+                                              data-testid={`button-save-pdf-${result.id}`}
+                                              title="Save Prescription PDF"
+                                            >
+                                              <Save className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
+                                            </Button>
+                                          )}
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleManageInvoice(result)}
+                                            className="h-5 w-5 p-0"
+                                            data-testid={`button-manage-invoice-${result.id}`}
+                                            title="Manage Invoice"
+                                          >
+                                            <PoundSterling className="h-2.5 w-2.5 text-gray-600 dark:text-gray-400" />
+                                          </Button>
+                                          {(activeTab === "request" || activeTab === "generated") && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => {
+                                                setSelectedResult(result);
+                                                setHideTabs(true);
+                                                setShowESignDialog(true);
+                                              }}
+                                              className="h-5 w-5 p-0"
+                                              data-testid={`button-esign-${result.id}`}
+                                              title="E-Sign"
+                                            >
+                                              <PenTool className="h-2.5 w-2.5 text-gray-600 dark:text-gray-400" />
+                                            </Button>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                )}
+                                <td className="px-1 py-1.5 text-[11px] min-w-[4.5rem] w-[4.5rem] shrink-0">
+                                  <div className="flex items-center gap-0.5 justify-center flex-shrink-0">
+                                    {activeTab === "request" ? (
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 min-w-6 p-0 shrink-0"
+                                            data-testid={`button-actions-${result.id}`}
+                                            title="Actions"
+                                          >
+                                            <MoreVertical className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="min-w-[10rem]">
+                                          {user?.role !== 'patient' && canEdit('lab_results') && (
+                                            <DropdownMenuItem
+                                              onClick={() => handleViewResult(result)}
+                                              data-testid={`button-edit-${result.id}`}
+                                            >
+                                              <Edit className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                              Edit
+                                            </DropdownMenuItem>
+                                          )}
+                                          <DropdownMenuItem
+                                            onClick={() => handleGeneratePrescription(result)}
+                                            data-testid={`button-prescription-${result.id}`}
+                                          >
+                                            <Eye className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                            {user?.role === 'patient' ? 'View Prescription' : 'View'}
+                                          </DropdownMenuItem>
+                                          {user?.role !== 'patient' && canDelete('lab_results') && (
+                                            <DropdownMenuItem
+                                              onClick={() => handleDeleteResult(result.id)}
+                                              className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                                              data-testid={`button-delete-${result.id}`}
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                              Delete
+                                            </DropdownMenuItem>
+                                          )}
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    ) : activeTab === "generate" ? (
+                                      <>
+                                        {user?.role !== 'patient' && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                              setSelectedLabOrder(result);
+                                              setShowFillResultDialog(true);
+                                            }}
+                                            className="h-5 w-5 p-0"
+                                            data-testid={`button-generate-${result.id}`}
+                                          >
+                                            <FileText className="h-2.5 w-2.5 text-green-600 dark:text-green-400" />
+                                          </Button>
+                                        )}
+                                      </>
+                                    ) : (
+                                      /* Lab Results tab: kebab dropdown with Save, Print, Download, Delete */
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 min-w-6 p-0 shrink-0"
+                                            data-testid={`button-actions-${result.id}`}
+                                            title="Actions"
+                                          >
+                                            <MoreVertical className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="min-w-[10rem]">
+                                          <DropdownMenuItem
+                                            onClick={async () => {
+                                              try {
+                                                const token = localStorage.getItem("auth_token");
+                                                const headers: Record<string, string> = {
+                                                  "X-Tenant-Subdomain": getActiveSubdomain(),
+                                                };
+                                                if (token) {
+                                                  headers["Authorization"] = `Bearer ${token}`;
+                                                }
+                                                const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, { headers });
+                                                if (!response.ok) {
+                                                  const errorData = await response.json().catch(() => ({ error: "Failed to download PDF" }));
+                                                  throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+                                                }
+                                                const blob = await response.blob();
+                                                const blobUrl = URL.createObjectURL(blob);
+                                                setPdfViewerUrl(blobUrl);
+                                                setShowPdfViewerDialog(true);
+                                              } catch (error: any) {
+                                                console.error("Error opening PDF:", error);
+                                                toast({
+                                                  title: "Error",
+                                                  description: error.message || "Failed to open PDF. Please try again.",
+                                                  variant: "destructive",
+                                                });
+                                              }
+                                            }}
+                                            data-testid={`button-save-pdf-viewer-${result.id}`}
+                                          >
+                                            <Save className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                            Save
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={async () => {
+                                              try {
+                                                const token = localStorage.getItem("auth_token");
+                                                const headers: Record<string, string> = {
+                                                  "X-Tenant-Subdomain": getActiveSubdomain(),
+                                                };
+                                                if (token) {
+                                                  headers["Authorization"] = `Bearer ${token}`;
+                                                }
+                                                const signedUrlResponse = await fetch(`/api/files/${result.id}/signed-url?type=testresult`, {
+                                                  headers,
+                                                  credentials: "include",
+                                                });
+                                                if (!signedUrlResponse.ok) {
+                                                  const errorData = await signedUrlResponse.json();
+                                                  throw new Error(errorData.error || "Failed to get PDF URL");
+                                                }
+                                                const { signedUrl } = await signedUrlResponse.json();
+                                                const printWindow = window.open(signedUrl, '_blank');
+                                                if (printWindow) {
+                                                  printWindow.onload = () => {
+                                                    printWindow.print();
+                                                  };
+                                                }
+                                              } catch (error: any) {
+                                                console.error("Error printing PDF:", error);
+                                                toast({
+                                                  title: "Error",
+                                                  description: error.message || "Failed to print PDF. Please try again.",
+                                                  variant: "destructive",
+                                                });
+                                              }
+                                            }}
+                                            data-testid={`button-print-${result.id}`}
+                                          >
+                                            <Printer className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                            Print
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={async () => {
+                                              try {
+                                                const token = localStorage.getItem("auth_token");
+                                                const headers: Record<string, string> = {
+                                                  "X-Tenant-Subdomain": getActiveSubdomain(),
+                                                };
+                                                if (token) {
+                                                  headers["Authorization"] = `Bearer ${token}`;
+                                                }
+                                                const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, { headers });
+                                                if (!response.ok) {
+                                                  const errorData = await response.json().catch(() => ({ error: "Failed to download PDF" }));
+                                                  throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+                                                }
+                                                const blob = await response.blob();
+                                                const url = window.URL.createObjectURL(blob);
+                                                const a = document.createElement('a');
+                                                a.href = url;
+                                                a.download = `${result.testId}_test_result.pdf`;
+                                                document.body.appendChild(a);
+                                                a.click();
+                                                window.URL.revokeObjectURL(url);
+                                                document.body.removeChild(a);
+                                                toast({
+                                                  title: "Success",
+                                                  description: "Test result PDF downloaded successfully.",
+                                                });
+                                              } catch (error: any) {
+                                                console.error("Error downloading PDF:", error);
+                                                toast({
+                                                  title: "Error",
+                                                  description: error.message || "Failed to download PDF. Please try again.",
+                                                  variant: "destructive",
+                                                });
+                                              }
+                                            }}
+                                            data-testid={`button-download-${result.id}`}
+                                          >
+                                            <Download className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                            Download
+                                          </DropdownMenuItem>
+                                          {user?.role !== 'patient' && canDelete('lab_results') && (
+                                            <DropdownMenuItem
+                                              onClick={() => handleDeleteResult(result.id)}
+                                              className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                                              data-testid={`button-delete-${result.id}`}
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                              Delete
+                                            </DropdownMenuItem>
+                                          )}
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  filteredResults.map((result) => (
+                    <Card
+                      key={result.id}
+                      className="hover:shadow-md transition-shadow"
+                    >
+                      <CardContent className="p-6 relative">
+                        {/* Doctor information - Top Right Position */}
+                        <div className="absolute top-6 right-6 w-70">
+                          <div className="p-4 bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-600 rounded-lg">
+                            <div className="flex items-center gap-2 mb-3">
+                              <User className="h-4 w-4 text-blue-600 dark:text-gray-100" />
+                              <h4 className="font-semibold text-blue-900 dark:text-white">
+                                {result.doctorName || "Dr. Sarah Williams"}
+                              </h4>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-sm">
+                                <span className="font-medium text-gray-800 dark:text-gray-300">
+                                  Main Specialization:
                                 </span>
-                              );
-                            })()}
+                                <div className="text-blue-600 dark:text-gray-100">
+                                  {result.mainSpecialty || "Diagnostic Specialties"}
+                                </div>
+                              </div>
+                              <div className="text-sm">
+                                <span className="font-medium text-gray-800 dark:text-gray-300">
+                                  Sub-Specialization:
+                                </span>
+                                <div className="text-blue-600 dark:text-gray-100">
+                                  {result.subSpecialty || "Neurosurgeon"}
+                                </div>
+                              </div>
+                              <div className="text-sm">
+                                <span className="font-medium text-gray-800 dark:text-gray-300">
+                                  Priority:
+                                </span>
+                                <div className="text-green-600 dark:text-green-400">
+                                  {result.priority || "urgent"}
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-300">
-                            <span className="font-medium">Test ID:</span>{" "}
-                            {result.testId}
-                            {activeTab !== "request" && (
+                        </div>
+
+                        {/* Header with patient name and status - with right margin for blue box */}
+                        <div className="flex items-center gap-3 mb-4 mr-72">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            {getPatientName(result.patientId)}
+                          </h3>
+                          <div className="flex items-center gap-2">
+                            <Badge className={getStatusColor(result.status)}>
+                              {result.status}
+                            </Badge>
+                            {user?.role !== 'patient' && (
                               <Button
-                                variant="link"
+                                variant="ghost"
                                 size="sm"
                                 onClick={() => {
-                                  setSelectedResult(result);
-                                  setShowPrescriptionDialog(true);
+                                  setEditStatusDialog({ id: result.id, status: result.status });
+                                  setEditStatusDraft(result.status);
                                 }}
-                                className="h-auto p-0 ml-2 text-xs text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-300"
-                                data-testid={`link-view-prescription-card-${result.id}`}
+                                className="h-[18px] w-[18px] min-w-[18px] p-0 shrink-0 inline-flex items-center justify-center"
+                                data-testid="button-edit-status-list"
                               >
-                                View Prescription
+                                <Edit className="w-[9px] h-[9px] shrink-0" style={{ width: 9, height: 9 }} />
                               </Button>
                             )}
                           </div>
-                          {result.completedAt && (
-                            <div className="text-sm text-gray-600 dark:text-gray-300">
-                              <span className="font-medium">Completed:</span>{" "}
-                              {format(
-                                new Date(result.completedAt),
-                                "MMM dd, yyyy HH:mm",
-                              )}
+                          {result.criticalValues && (
+                            <Badge
+                              variant="destructive"
+                              className="flex items-center gap-1"
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5" />
+                              Critical
+                            </Badge>
+                          )}
+                          {result.sampleCollected ? (
+                            <div className="flex items-center" title="Sample Collected">
+                              <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                            </div>
+                          ) : (
+                            <div className="flex items-center" title="not collected">
+                              <X className="h-5 w-5 text-red-600 dark:text-red-400" />
+                            </div>
+                          )}
+                          {result.labReportGenerated ? (
+                            <div className="flex items-center" title="Report Generated">
+                              <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                            </div>
+                          ) : (
+                            <div className="flex items-center" title="Report Not Generated">
+                              <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
                             </div>
                           )}
                         </div>
 
-                        {/* Notes section */}
-                        <div>
-                          <h4 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">
-                            Notes
-                          </h4>
-                          <p className="text-sm text-gray-600 dark:text-gray-300">
-                            {result.notes || "no no"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Test Results section (if available) - with right margin for blue box */}
-                    {result.results && result.results.length > 0 && activeTab !== "generate" && (
-                      <div className="mt-6 mr-72">
-                        <button
-                          onClick={() => {
-                            setExpandedResults((prev) => {
-                              const newSet = new Set(prev);
-                              if (newSet.has(result.id)) {
-                                newSet.delete(result.id);
-                              } else {
-                                newSet.add(result.id);
-                              }
-                              return newSet;
-                            });
-                          }}
-                          className="flex items-center gap-2 font-medium mb-3 text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-gray-300 transition-colors"
-                          data-testid="button-toggle-test-results"
-                        >
-                          {expandedResults.has(result.id) ? (
-                            <ChevronDown className="h-5 w-5" />
-                          ) : (
-                            <ChevronRight className="h-5 w-5" />
-                          )}
-                          <span>Test Results:</span>
-                        </button>
-                        
-                        {expandedResults.has(result.id) && (
-                          <div className="grid gap-3">
-                            {result.results.map(
-                              (testResult: any, index: number) => (
-                                <div
-                                  key={index}
-                                  className="p-3 rounded-lg border bg-gray-50 border-gray-200"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-medium">
-                                      {testResult.name}
+                        {/* Main content area - with right margin for blue box */}
+                        <div className="mr-72">
+                          {/* Test details and Notes */}
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <div className="text-sm text-gray-600 dark:text-gray-300">
+                                <span className="font-medium">Ordered:</span>{" "}
+                                {format(
+                                  new Date(result.orderedAt),
+                                  "MMM dd, yyyy HH:mm",
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-600 dark:text-gray-300">
+                                <span className="font-medium">Test:</span>{" "}
+                                {(() => {
+                                  const tests = result.testType.split(' | ');
+                                  if (tests.length <= 3) {
+                                    return result.testType;
+                                  }
+                                  const visibleTests = tests.slice(0, 3).join(' | ');
+                                  const hiddenCount = tests.length - 3;
+                                  return (
+                                    <span className="group relative inline-block">
+                                      <span>{visibleTests} <span className="text-blue-600 dark:text-gray-100 cursor-help font-medium">+{hiddenCount} more</span></span>
+                                      <div className="invisible group-hover:visible absolute left-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-3 min-w-[400px] max-w-[600px]">
+                                        <div className="text-sm font-semibold mb-2 text-gray-900 dark:text-gray-100">All Tests ({tests.length}):</div>
+                                        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+                                          {tests.map((test, idx) => (
+                                            <div key={idx} className="text-sm text-gray-700 dark:text-gray-300 py-0.5">{test}</div>
+                                          ))}
+                                        </div>
+                                      </div>
                                     </span>
-                                    <Badge
-                                      className={getResultStatusColor(
-                                        testResult.status,
-                                      )}
-                                    >
-                                      {testResult.status
-                                        .replace("_", " ")
-                                        .toUpperCase()}
-                                    </Badge>
-                                  </div>
-                                  <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                                    <span className="font-medium">
-                                      {testResult.value} {testResult.unit}
-                                    </span>
-                                    <span className="ml-2">
-                                      Ref: {testResult.referenceRange}
-                                    </span>
-                                  </div>
+                                  );
+                                })()}
+                              </div>
+                              <div className="text-sm text-gray-600 dark:text-gray-300">
+                                <span className="font-medium">Test ID:</span>{" "}
+                                {result.testId}
+                                {activeTab !== "request" && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedResult(result);
+                                      setShowPrescriptionDialog(true);
+                                    }}
+                                    className="h-auto p-0 ml-2 text-xs text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-300"
+                                    data-testid={`link-view-prescription-card-${result.id}`}
+                                  >
+                                    View Prescription
+                                  </Button>
+                                )}
+                              </div>
+                              {result.completedAt && (
+                                <div className="text-sm text-gray-600 dark:text-gray-300">
+                                  <span className="font-medium">Completed:</span>{" "}
+                                  {format(
+                                    new Date(result.completedAt),
+                                    "MMM dd, yyyy HH:mm",
+                                  )}
                                 </div>
-                              ),
+                              )}
+                            </div>
+
+                            {/* Notes section */}
+                            <div>
+                              <h4 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">
+                                Notes
+                              </h4>
+                              <p className="text-sm text-gray-600 dark:text-gray-300">
+                                {result.notes || "no no"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Test Results section (if available) - with right margin for blue box */}
+                        {result.results && result.results.length > 0 && activeTab !== "generate" && (
+                          <div className="mt-6 mr-72">
+                            <button
+                              onClick={() => {
+                                setExpandedResults((prev) => {
+                                  const newSet = new Set(prev);
+                                  if (newSet.has(result.id)) {
+                                    newSet.delete(result.id);
+                                  } else {
+                                    newSet.add(result.id);
+                                  }
+                                  return newSet;
+                                });
+                              }}
+                              className="flex items-center gap-2 font-medium mb-3 text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-gray-300 transition-colors"
+                              data-testid="button-toggle-test-results"
+                            >
+                              {expandedResults.has(result.id) ? (
+                                <ChevronDown className="h-5 w-5" />
+                              ) : (
+                                <ChevronRight className="h-5 w-5" />
+                              )}
+                              <span>Test Results:</span>
+                            </button>
+
+                            {expandedResults.has(result.id) && (
+                              <div className="grid gap-3">
+                                {result.results.map(
+                                  (testResult: any, index: number) => (
+                                    <div
+                                      key={index}
+                                      className="p-3 rounded-lg border bg-gray-50 border-gray-200"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-medium">
+                                          {testResult.name}
+                                        </span>
+                                        <Badge
+                                          className={getResultStatusColor(
+                                            testResult.status,
+                                          )}
+                                        >
+                                          {testResult.status
+                                            .replace("_", " ")
+                                            .toUpperCase()}
+                                        </Badge>
+                                      </div>
+                                      <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                                        <span className="font-medium">
+                                          {testResult.value} {testResult.unit}
+                                        </span>
+                                        <span className="ml-2">
+                                          Ref: {testResult.referenceRange}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ),
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
-                      </div>
-                    )}
 
-                    {/* Action buttons at bottom - with right margin for blue box */}
-                      <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-200">
-                      {activeTab === "request" ? (
-                        <>
-                          {user?.role !== 'patient' && canEdit('lab_results') && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleViewResult(result)}
-                            >
-                              <Edit className="h-4 w-4 mr-2" />
-                              Edit
-                            </Button>
+                        {/* Action buttons at bottom - with right margin for blue box */}
+                        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-200">
+                          {activeTab === "request" ? (
+                            <>
+                              {user?.role !== 'patient' && canEdit('lab_results') && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewResult(result)}
+                                >
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </Button>
+                              )}
+                              {user?.role !== 'patient' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleManageInvoice(result)}
+                                  className="text-xs sm:text-sm px-2 sm:px-3"
+                                  data-testid={`button-manage-invoice-card-${result.id}`}
+                                >
+                                  <PoundSterling className="h-2.5 w-2.5 sm:h-4 sm:w-4 mr-1" />
+                                  <span className="hidden lg:inline">Invoice</span>
+                                  <span className="lg:hidden">£</span>
+                                </Button>
+                              )}
+                              {user?.role !== 'patient' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedResult(result);
+                                    setHideTabs(true);
+                                    setShowESignDialog(true);
+                                  }}
+                                  className="text-xs sm:text-sm px-2 sm:px-3"
+                                  data-testid="button-esign-card"
+                                >
+                                  <PenTool className="h-2.5 w-2.5 sm:h-4 sm:w-4 mr-1" />
+                                  <span className="hidden lg:inline">E-Sign</span>
+                                  <span className="lg:hidden">Sign</span>
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleGeneratePrescription(result)}
+                                className="bg-white hover:bg-gray-50 text-gray-900 border-gray-300"
+                              >
+                                <FileText className="h-4 w-4 mr-2" />
+                                {user?.role === 'patient' ? 'View Prescription' : 'Generate Prescription'}
+                              </Button>
+                              {user?.role !== 'patient' && canDelete('lab_results') && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeleteResult(result.id)}
+                                  className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                                  data-testid="button-delete-lab-result"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </Button>
+                              )}
+                            </>
+                          ) : activeTab === "generate" ? (
+                            <>
+                              {user?.role !== 'patient' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedLabOrder(result);
+                                    setShowFillResultDialog(true);
+                                  }}
+                                  className="bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800"
+                                  data-testid="button-generate-lab-result"
+                                >
+                                  <FileText className="h-4 w-4 mr-2" />
+                                  Generate Test Result
+                                </Button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    const token = localStorage.getItem("auth_token");
+                                    const headers: Record<string, string> = {
+                                      "X-Tenant-Subdomain": getActiveSubdomain(),
+                                    };
+                                    if (token) {
+                                      headers["Authorization"] = `Bearer ${token}`;
+                                    }
+
+                                    const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, {
+                                      headers,
+                                      credentials: "include",
+                                    });
+
+                                    if (!response.ok) {
+                                      const errorData = await response.json();
+                                      throw new Error(errorData.error || "File not found");
+                                    }
+
+                                    const blob = await response.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    window.open(url, '_blank');
+
+                                    toast({
+                                      title: "Success",
+                                      description: "Opening lab result PDF",
+                                    });
+                                  } catch (error: any) {
+                                    console.error("Error opening PDF:", error);
+                                    toast({
+                                      title: "Error",
+                                      description: error.message || "Failed to open PDF. Please generate the report first.",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                data-testid={`button-prescription-card-${result.id}`}
+                              >
+                                <FileText className="h-4 w-4 mr-2" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    const token = localStorage.getItem("auth_token");
+                                    const headers: Record<string, string> = {
+                                      "X-Tenant-Subdomain": getActiveSubdomain(),
+                                    };
+                                    if (token) {
+                                      headers["Authorization"] = `Bearer ${token}`;
+                                    }
+
+                                    const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, {
+                                      headers,
+                                      credentials: "include",
+                                    });
+
+                                    if (!response.ok) {
+                                      const errorData = await response.json();
+                                      throw new Error(errorData.error || "File not found");
+                                    }
+
+                                    const blob = await response.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    const printWindow = window.open(url, '_blank');
+                                    if (printWindow) {
+                                      printWindow.onload = () => {
+                                        printWindow.print();
+                                      };
+                                    }
+
+                                    toast({
+                                      title: "Success",
+                                      description: "Opening lab result for printing",
+                                    });
+                                  } catch (error: any) {
+                                    console.error("Error printing PDF:", error);
+                                    toast({
+                                      title: "Error",
+                                      description: error.message || "Failed to print. Please generate the report first.",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                data-testid={`button-print-card-${result.id}`}
+                              >
+                                <Printer className="h-4 w-4 mr-2" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    const token = localStorage.getItem("auth_token");
+                                    const headers: Record<string, string> = {
+                                      "X-Tenant-Subdomain": getActiveSubdomain(),
+                                    };
+                                    if (token) {
+                                      headers["Authorization"] = `Bearer ${token}`;
+                                    }
+
+                                    const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, {
+                                      headers,
+                                      credentials: "include",
+                                    });
+
+                                    if (!response.ok) {
+                                      const errorData = await response.json();
+                                      throw new Error(errorData.error || "File not found");
+                                    }
+
+                                    const blob = await response.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${result.testId || result.id}.pdf`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    window.URL.revokeObjectURL(url);
+
+                                    toast({
+                                      title: "Success",
+                                      description: "Lab result PDF downloaded successfully",
+                                    });
+                                  } catch (error: any) {
+                                    console.error("Error downloading PDF:", error);
+                                    toast({
+                                      title: "Error",
+                                      description: error.message || "Failed to download PDF. Please generate the report first.",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                                data-testid={`button-download-card-${result.id}`}
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                              </Button>
+                            </>
                           )}
-                          {user?.role !== 'patient' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleManageInvoice(result)}
-                              className="text-xs sm:text-sm px-2 sm:px-3"
-                              data-testid={`button-manage-invoice-card-${result.id}`}
-                            >
-                              <PoundSterling className="h-2.5 w-2.5 sm:h-4 sm:w-4 mr-1" />
-                              <span className="hidden lg:inline">Invoice</span>
-                              <span className="lg:hidden">£</span>
-                            </Button>
-                          )}
-                          {user?.role !== 'patient' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedResult(result);
-                                setHideTabs(true);
-                                setShowESignDialog(true);
-                              }}
-                              className="text-xs sm:text-sm px-2 sm:px-3"
-                              data-testid="button-esign-card"
-                            >
-                              <PenTool className="h-2.5 w-2.5 sm:h-4 sm:w-4 mr-1" />
-                              <span className="hidden lg:inline">E-Sign</span>
-                              <span className="lg:hidden">Sign</span>
-                            </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleGeneratePrescription(result)}
-                            className="bg-white hover:bg-gray-50 text-gray-900 border-gray-300"
-                          >
-                            <FileText className="h-4 w-4 mr-2" />
-                            {user?.role === 'patient' ? 'View Prescription' : 'Generate Prescription'}
-                          </Button>
-                          {user?.role !== 'patient' && canDelete('lab_results') && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeleteResult(result.id)}
-                              className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
-                              data-testid="button-delete-lab-result"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </Button>
-                          )}
-                        </>
-                      ) : activeTab === "generate" ? (
-                        <>
-                          {user?.role !== 'patient' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedLabOrder(result);
-                                setShowFillResultDialog(true);
-                              }}
-                              className="bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800"
-                              data-testid="button-generate-lab-result"
-                            >
-                              <FileText className="h-4 w-4 mr-2" />
-                              Generate Test Result
-                            </Button>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              try {
-                                const token = localStorage.getItem("auth_token");
-                                const headers: Record<string, string> = {
-                                  "X-Tenant-Subdomain": getActiveSubdomain(),
-                                };
-                                if (token) {
-                                  headers["Authorization"] = `Bearer ${token}`;
-                                }
-
-                                const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, {
-                                  headers,
-                                  credentials: "include",
-                                });
-
-                                if (!response.ok) {
-                                  const errorData = await response.json();
-                                  throw new Error(errorData.error || "File not found");
-                                }
-
-                                const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                window.open(url, '_blank');
-                                
-                                toast({
-                                  title: "Success",
-                                  description: "Opening lab result PDF",
-                                });
-                              } catch (error: any) {
-                                console.error("Error opening PDF:", error);
-                                toast({
-                                  title: "Error",
-                                  description: error.message || "Failed to open PDF. Please generate the report first.",
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                            data-testid={`button-prescription-card-${result.id}`}
-                          >
-                            <FileText className="h-4 w-4 mr-2" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              try {
-                                const token = localStorage.getItem("auth_token");
-                                const headers: Record<string, string> = {
-                                  "X-Tenant-Subdomain": getActiveSubdomain(),
-                                };
-                                if (token) {
-                                  headers["Authorization"] = `Bearer ${token}`;
-                                }
-
-                                const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, {
-                                  headers,
-                                  credentials: "include",
-                                });
-
-                                if (!response.ok) {
-                                  const errorData = await response.json();
-                                  throw new Error(errorData.error || "File not found");
-                                }
-
-                                const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const printWindow = window.open(url, '_blank');
-                                if (printWindow) {
-                                  printWindow.onload = () => {
-                                    printWindow.print();
-                                  };
-                                }
-                                
-                                toast({
-                                  title: "Success",
-                                  description: "Opening lab result for printing",
-                                });
-                              } catch (error: any) {
-                                console.error("Error printing PDF:", error);
-                                toast({
-                                  title: "Error",
-                                  description: error.message || "Failed to print. Please generate the report first.",
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                            data-testid={`button-print-card-${result.id}`}
-                          >
-                            <Printer className="h-4 w-4 mr-2" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              try {
-                                const token = localStorage.getItem("auth_token");
-                                const headers: Record<string, string> = {
-                                  "X-Tenant-Subdomain": getActiveSubdomain(),
-                                };
-                                if (token) {
-                                  headers["Authorization"] = `Bearer ${token}`;
-                                }
-
-                                const response = await fetch(`/api/lab-results/${result.id}/download-pdf`, {
-                                  headers,
-                                  credentials: "include",
-                                });
-
-                                if (!response.ok) {
-                                  const errorData = await response.json();
-                                  throw new Error(errorData.error || "File not found");
-                                }
-
-                                const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `${result.testId || result.id}.pdf`;
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                                window.URL.revokeObjectURL(url);
-                                
-                                toast({
-                                  title: "Success",
-                                  description: "Lab result PDF downloaded successfully",
-                                });
-                              } catch (error: any) {
-                                console.error("Error downloading PDF:", error);
-                                toast({
-                                  title: "Error",
-                                  description: error.message || "Failed to download PDF. Please generate the report first.",
-                                  variant: "destructive",
-                                });
-                              }
-                            }}
-                            className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
-                            data-testid={`button-download-card-${result.id}`}
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
             </TabsContent>
           </Tabs>
         </div>
@@ -4670,12 +4665,11 @@ Report generated from Cura EMR System`;
                               className="min-w-0 w-full whitespace-normal break-words items-start py-2"
                             >
                               <Check
-                                className={`mt-0.5 mr-2 h-4 w-4 shrink-0 ${
-                                  orderFormData.patientId ===
+                                className={`mt-0.5 mr-2 h-4 w-4 shrink-0 ${orderFormData.patientId ===
                                   patient.id.toString()
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                }`}
+                                  ? "opacity-100"
+                                  : "opacity-0"
+                                  }`}
                               />
                               <span className="min-w-0 flex-1 break-words">
                                 {`${patient.firstName} ${patient.lastName} (${patient.patientId})`}
@@ -4766,11 +4760,10 @@ Report generated from Cura EMR System`;
                                     }}
                                   >
                                     <Check
-                                      className={`mr-2 h-4 w-4 ${
-                                        orderFormData.selectedRole === role.name
-                                          ? "opacity-100"
-                                          : "opacity-0"
-                                      }`}
+                                      className={`mr-2 h-4 w-4 ${orderFormData.selectedRole === role.name
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                        }`}
                                     />
                                     {role.displayName || role.name}
                                   </CommandItem>
@@ -4797,11 +4790,9 @@ Report generated from Cura EMR System`;
                             >
                               {orderFormData.selectedUserId
                                 ? users.find((u: any) => u.id.toString() === orderFormData.selectedUserId)
-                                  ? `${
-                                      users.find((u: any) => u.id.toString() === orderFormData.selectedUserId)?.firstName
-                                    } ${
-                                      users.find((u: any) => u.id.toString() === orderFormData.selectedUserId)?.lastName
-                                    }`
+                                  ? `${users.find((u: any) => u.id.toString() === orderFormData.selectedUserId)?.firstName
+                                  } ${users.find((u: any) => u.id.toString() === orderFormData.selectedUserId)?.lastName
+                                  }`
                                   : "Select a user"
                                 : "Select a user"}
                               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -4828,11 +4819,10 @@ Report generated from Cura EMR System`;
                                       }}
                                     >
                                       <Check
-                                        className={`mr-2 h-4 w-4 ${
-                                          orderFormData.selectedUserId === u.id.toString()
-                                            ? "opacity-100"
-                                            : "opacity-0"
-                                        }`}
+                                        className={`mr-2 h-4 w-4 ${orderFormData.selectedUserId === u.id.toString()
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                          }`}
                                       />
                                       {u.firstName} {u.lastName} ({u.email})
                                     </CommandItem>
@@ -5022,7 +5012,7 @@ Report generated from Cura EMR System`;
           <DialogHeader>
             <DialogTitle className="text-xl font-semibold">Create New Invoice</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             {/* Row 1: Patient & Service Date */}
             <div className="grid grid-cols-2 gap-4">
@@ -5177,8 +5167,8 @@ Report generated from Cura EMR System`;
                 <Label className="text-sm font-medium">Insurance Provider</Label>
                 <Select
                   value={invoiceData.insuranceProvider || "none"}
-                  onValueChange={(value) => setInvoiceData({ 
-                    ...invoiceData, 
+                  onValueChange={(value) => setInvoiceData({
+                    ...invoiceData,
                     insuranceProvider: value === 'none' ? '' : value,
                     invoiceType: (value === 'none' || value === '' || value === 'Self-Pay') ? 'payment' : 'insurance_claim'
                   })}
@@ -5221,7 +5211,7 @@ Report generated from Cura EMR System`;
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Invoice Type:</span>
                     <Badge className={
-                      invoiceData.invoiceType === 'insurance_claim' 
+                      invoiceData.invoiceType === 'insurance_claim'
                         ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 border-blue-300 dark:border-blue-700"
                         : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 border-green-300 dark:border-green-700"
                     }>
@@ -5229,7 +5219,7 @@ Report generated from Cura EMR System`;
                     </Badge>
                   </div>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {invoiceData.invoiceType === 'insurance_claim' 
+                    {invoiceData.invoiceType === 'insurance_claim'
                       ? 'This invoice will be submitted to the insurance provider for payment'
                       : 'This invoice will be paid directly by the patient'
                     }
@@ -5308,7 +5298,7 @@ Report generated from Cura EMR System`;
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-medical-blue">Order Summary</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-6">
             {/* Order Details */}
             <div className="border rounded-lg p-4 space-y-3">
@@ -5360,7 +5350,7 @@ Report generated from Cura EMR System`;
               <Button
                 onClick={async () => {
                   // Get patient name from pendingOrderData or find from patients list
-                  const patientName = pendingOrderData?.patientName || 
+                  const patientName = pendingOrderData?.patientName ||
                     (() => {
                       const patient = patients.find((p: any) => p.id === pendingOrderData?.patientId);
                       return patient ? `${patient.firstName} ${patient.lastName}` : '';
@@ -5403,7 +5393,7 @@ Report generated from Cura EMR System`;
                       };
 
                       const response = await apiRequest("POST", "/api/invoices", invoicePayload);
-                      
+
                       if (!response.ok) {
                         const errorData = await response.json();
                         throw new Error(errorData.error || "Failed to create invoice");
@@ -5509,7 +5499,7 @@ Report generated from Cura EMR System`;
                       console.log("Creating invoice with payload:", invoicePayload);
                       const response = await apiRequest("POST", "/api/invoices", invoicePayload);
                       console.log("Invoice creation response status:", response.status);
-                      
+
                       if (!response.ok) {
                         const errorData = await response.json();
                         console.error("Invoice creation error:", errorData);
@@ -5531,20 +5521,20 @@ Report generated from Cura EMR System`;
                             claimNumber: claimNumber
                           };
                           console.log("Submitting insurance claim with payload:", claimPayload);
-                          
+
                           const claimResponse = await apiRequest('POST', '/api/insurance/submit-claim', claimPayload);
                           console.log("Claim submission response status:", claimResponse.status);
-                          
+
                           if (!claimResponse.ok) {
                             const claimErrorData = await claimResponse.json();
                             console.error("Claim submission error:", claimErrorData);
                             throw new Error(claimErrorData.error || "Failed to submit insurance claim");
                           }
                           claimSubmitted = true;
-                          console.log("✅ Insurance claim submitted automatically:", { 
-                            invoiceId: createdInvoice.id, 
-                            provider: invoiceData.insuranceProvider, 
-                            claimNumber 
+                          console.log("✅ Insurance claim submitted automatically:", {
+                            invoiceId: createdInvoice.id,
+                            provider: invoiceData.insuranceProvider,
+                            claimNumber
                           });
                         } catch (err) {
                           claimError = err;
@@ -5613,7 +5603,7 @@ Report generated from Cura EMR System`;
               <DialogTitle>Complete Payment</DialogTitle>
             </DialogHeader>
             <Elements stripe={stripePromise} options={{ clientSecret: stripeClientSecret }}>
-              <StripePaymentForm 
+              <StripePaymentForm
                 onSuccess={async (paymentIntentId: string) => {
                   // Call confirmation endpoint
                   apiRequest("POST", "/api/payments/stripe/confirm", { paymentIntentId })
@@ -5629,7 +5619,7 @@ Report generated from Cura EMR System`;
                           console.error("Failed to update Lab_Request_Generated:", error);
                         }
                       }
-                      
+
                       setPaymentResult({
                         invoiceId: data.invoice.invoiceNumber,
                         patientName: pendingOrderData?.patientName,
@@ -5664,7 +5654,7 @@ Report generated from Cura EMR System`;
             <div className="rounded-full bg-green-100 dark:bg-green-900 p-4">
               <CheckCircle className="h-16 w-16 text-green-600 dark:text-green-400" />
             </div>
-            
+
             <div className="space-y-2">
               <h3 className="text-2xl font-bold text-green-600 dark:text-green-400">Lab Result Successfully created!</h3>
               <p className="text-gray-600 dark:text-gray-400">Your lab result has been processed successfully</p>
@@ -5733,60 +5723,60 @@ Report generated from Cura EMR System`;
 
               {/* Single column layout - each field in its own row */}
               <div className="space-y-4">
-                    <div>
+                <div>
                   <label className="block mb-1">Test:</label>
-                        <Popover open={testTypePopoverOpen} onOpenChange={setTestTypePopoverOpen}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              role="combobox"
+                  <Popover open={testTypePopoverOpen} onOpenChange={setTestTypePopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
                         className="w-full justify-between"
+                      >
+                        {selectedTestTypes.length > 0
+                          ? `${selectedTestTypes.length} selected`
+                          : "Select test types"}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-full p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search test types..." />
+                        <CommandEmpty>No test type found.</CommandEmpty>
+                        <CommandGroup className="max-h-64 overflow-auto">
+                          {availableTestTypes.map((testType) => (
+                            <CommandItem
+                              key={testType}
+                              onSelect={() => {
+                                const newSelection = selectedTestTypes.includes(testType)
+                                  ? selectedTestTypes.filter((t) => t !== testType)
+                                  : [...selectedTestTypes, testType];
+                                setSelectedTestTypes(newSelection);
+                                setEditFormData((prev: any) => ({
+                                  ...prev,
+                                  testType: newSelection.join(" | "),
+                                }));
+                              }}
                             >
-                              {selectedTestTypes.length > 0
-                                ? `${selectedTestTypes.length} selected`
-                                : "Select test types"}
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-full p-0" align="start">
-                            <Command>
-                              <CommandInput placeholder="Search test types..." />
-                              <CommandEmpty>No test type found.</CommandEmpty>
-                              <CommandGroup className="max-h-64 overflow-auto">
-                                {availableTestTypes.map((testType) => (
-                                  <CommandItem
-                                    key={testType}
-                                    onSelect={() => {
-                                      const newSelection = selectedTestTypes.includes(testType)
-                                        ? selectedTestTypes.filter((t) => t !== testType)
-                                        : [...selectedTestTypes, testType];
-                                      setSelectedTestTypes(newSelection);
-                                      setEditFormData((prev: any) => ({
-                                        ...prev,
-                                        testType: newSelection.join(" | "),
-                                      }));
-                                    }}
-                                  >
-                                    <Checkbox
-                                      checked={selectedTestTypes.includes(testType)}
-                                      className="mr-2"
-                                    />
-                                    {testType}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                                </div>
+                              <Checkbox
+                                checked={selectedTestTypes.includes(testType)}
+                                className="mr-2"
+                              />
+                              {testType}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
-                    <div>
+                <div>
                   <label className="block mb-1">Ordered:</label>
                   <Input
                     value={format(
-                          new Date(selectedResult.orderedAt),
-                          "MMM dd, yyyy HH:mm",
-                        )}
+                      new Date(selectedResult.orderedAt),
+                      "MMM dd, yyyy HH:mm",
+                    )}
                     readOnly
                   />
                 </div>
@@ -5796,11 +5786,11 @@ Report generated from Cura EMR System`;
                   <Select
                     value={editFormData.status || selectedResult.status}
                     onValueChange={(value) =>
-                        setEditFormData((prev: any) => ({
-                          ...prev,
+                      setEditFormData((prev: any) => ({
+                        ...prev,
                         status: value,
-                        }))
-                      }
+                      }))
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -5813,8 +5803,8 @@ Report generated from Cura EMR System`;
                       <SelectItem value="cancelled">cancelled</SelectItem>
                     </SelectContent>
                   </Select>
-                      </div>
-                      
+                </div>
+
                 <div>
                   <label className="block mb-1">Priority:</label>
                   <Select
@@ -5835,49 +5825,49 @@ Report generated from Cura EMR System`;
                       <SelectItem value="stat">STAT</SelectItem>
                     </SelectContent>
                   </Select>
-              </div>
+                </div>
 
-                  <div>
+                <div>
                   <label className="block mb-1">Doctor Name:</label>
                   <div className="space-y-2">
-                        <Select
-                          value={selectedEditRole}
-                          onValueChange={(value) => {
-                            setSelectedEditRole(value);
-                            setEditFormData((prev: any) => ({
-                              ...prev,
-                              doctorName: "",
+                    <Select
+                      value={selectedEditRole}
+                      onValueChange={(value) => {
+                        setSelectedEditRole(value);
+                        setEditFormData((prev: any) => ({
+                          ...prev,
+                          doctorName: "",
                           mainSpecialty: "",
                           subSpecialty: "",
-                            }));
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select Role" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {rolesData.map((role: any) => (
-                              <SelectItem key={role.id} value={role.name}>
-                                {formatRoleLabel(role.name)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        }));
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {rolesData.map((role: any) => (
+                          <SelectItem key={role.id} value={role.name}>
+                            {formatRoleLabel(role.name)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
-                        {selectedEditRole && (
-                          <Select
+                    {selectedEditRole && (
+                      <Select
                         value={editFormData.doctorName || selectedResult.doctorName || ""}
                         onValueChange={(value) => {
                           // Find the selected user to get their role
-                          const selectedUser = users.find((u: User) => 
-                            u.role === selectedEditRole && 
+                          const selectedUser = users.find((u: User) =>
+                            u.role === selectedEditRole &&
                             `${u.firstName} ${u.lastName}` === value
                           );
-                          
+
                           // Auto-populate specializations based on role
                           let mainSpecialty = "";
                           let subSpecialty = "";
-                          
+
                           if (selectedUser) {
                             // Search medicalSpecialties for matching role
                             for (const [mainSpec, subSpecs] of Object.entries(medicalSpecialties)) {
@@ -5886,7 +5876,7 @@ Report generated from Cura EMR System`;
                                   // Check if role name matches sub-specialization
                                   const roleName = selectedEditRole.toLowerCase();
                                   const subSpecLower = subSpec.toLowerCase();
-                                  
+
                                   if (subSpecLower.includes(roleName) || roleName.includes(subSpecLower.split(' ')[0])) {
                                     mainSpecialty = mainSpec;
                                     subSpecialty = subSpec;
@@ -5896,7 +5886,7 @@ Report generated from Cura EMR System`;
                                 if (mainSpecialty) break;
                               }
                             }
-                            
+
                             // Fallback: try to match by role name directly
                             if (!mainSpecialty) {
                               const roleName = selectedEditRole.toLowerCase();
@@ -5918,36 +5908,36 @@ Report generated from Cura EMR System`;
                               }
                             }
                           }
-                          
-                              setEditFormData((prev: any) => ({
-                                ...prev,
-                                doctorName: value,
+
+                          setEditFormData((prev: any) => ({
+                            ...prev,
+                            doctorName: value,
                             mainSpecialty: mainSpecialty || prev.mainSpecialty || selectedResult.mainSpecialty || "",
                             subSpecialty: subSpecialty || prev.subSpecialty || selectedResult.subSpecialty || "",
                           }));
                         }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select Name" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {users
-                                .filter((u: User) => u.role === selectedEditRole)
-                                .map((u: User) => (
-                                  <SelectItem 
-                                    key={u.id} 
-                                    value={`${u.firstName} ${u.lastName}`}
-                                  >
-                                    {u.firstName} {u.lastName}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </div>
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Name" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {users
+                            .filter((u: User) => u.role === selectedEditRole)
+                            .map((u: User) => (
+                              <SelectItem
+                                key={u.id}
+                                value={`${u.firstName} ${u.lastName}`}
+                              >
+                                {u.firstName} {u.lastName}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
+                </div>
 
-                      <div>
+                <div>
                   <label className="block mb-1">Main Specialization:</label>
                   <Input
                     value={editFormData.mainSpecialty !== undefined ? editFormData.mainSpecialty : (selectedResult.mainSpecialty || "")}
@@ -5959,9 +5949,9 @@ Report generated from Cura EMR System`;
                     }
                     placeholder="Enter main specialization"
                   />
-                      </div>
+                </div>
 
-                      <div>
+                <div>
                   <label className="block mb-1">Sub-Specialization:</label>
                   <Input
                     value={editFormData.subSpecialty !== undefined ? editFormData.subSpecialty : (selectedResult.subSpecialty || "")}
@@ -5973,9 +5963,9 @@ Report generated from Cura EMR System`;
                     }
                     placeholder="Enter sub-specialization"
                   />
-                      </div>
+                </div>
 
-                  <div>
+                <div>
                   <label className="block mb-1">Notes:</label>
                   <Textarea
                     value={
@@ -5984,19 +5974,19 @@ Report generated from Cura EMR System`;
                         : selectedResult.notes || ""
                     }
                     onChange={(e) =>
-                          setEditFormData((prev: any) => ({
-                            ...prev,
+                      setEditFormData((prev: any) => ({
+                        ...prev,
                         notes: e.target.value,
-                          }))
-                        }
+                      }))
+                    }
                     placeholder="Enter clinical notes or special instructions"
                     rows={4}
                     className="w-full"
                   />
-                  </div>
-                    </div>
+                </div>
+              </div>
 
-          {/* Action Buttons */}
+              {/* Action Buttons */}
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <Button variant="outline" onClick={() => setShowViewDialog(false)}>
                   Close
@@ -6009,7 +5999,7 @@ Report generated from Cura EMR System`;
                     ? "Saving..."
                     : "Save Changes"}
                 </Button>
-          </div>
+              </div>
             </div>
           )}
         </DialogContent>
@@ -6392,7 +6382,7 @@ Report generated from Cura EMR System`;
             >
               {/* Header */}
               <div className="border-b border-gray-200 dark:border-gray-700 pb-4 pt-6">
-                <div 
+                <div
                   className="flex items-start gap-4"
                   style={{
                     justifyContent: clinicHeader?.logoPosition === 'center' ? 'center' : 'flex-start'
@@ -6412,13 +6402,13 @@ Report generated from Cura EMR System`;
                   )}
 
                   {/* Header Content */}
-                  <div 
+                  <div
                     className="flex-1"
                     style={{
                       textAlign: clinicHeader?.logoPosition === 'center' ? 'center' : clinicHeader?.logoPosition === 'right' ? 'right' : 'left'
                     }}
                   >
-                    <h1 
+                    <h1
                       className="font-bold text-medical-blue dark:text-white mb-2"
                       style={{
                         fontSize: clinicHeader?.clinicNameFontSize || '24pt',
@@ -6430,7 +6420,7 @@ Report generated from Cura EMR System`;
                     >
                       {clinicHeader?.clinicName || 'CURA EMR SYSTEM'}
                     </h1>
-                    <p 
+                    <p
                       className="text-gray-600 dark:text-gray-300 font-medium"
                       style={{
                         fontSize: clinicHeader?.fontSize || '12pt',
@@ -6440,7 +6430,7 @@ Report generated from Cura EMR System`;
                       Laboratory Test Prescription
                     </p>
 
-                    <div 
+                    <div
                       className="text-gray-700 dark:text-gray-300 mt-2 leading-5"
                       style={{
                         fontSize: clinicHeader?.fontSize || '12pt',
@@ -6515,8 +6505,8 @@ Report generated from Cura EMR System`;
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Test Type:</p>
-                      <p 
-                        className="font-semibold text-blue-800 dark:text-gray-100 cursor-default" 
+                      <p
+                        className="font-semibold text-blue-800 dark:text-gray-100 cursor-default"
                         title={selectedResult.testType}
                       >
                         {(() => {
@@ -6617,21 +6607,24 @@ Report generated from Cura EMR System`;
                   <p>Date: {format(new Date(), "MMM dd, yyyy HH:mm")}</p>
                 </div>
                 <div className="mt-4 text-center">
-                  {selectedResult.signature?.doctorSignature && 
-                   String(selectedResult.signature.doctorSignature).trim() !== "" && (
-                    <div className="mb-4 flex justify-center">
-                      <img
-                        src={selectedResult.signature.doctorSignature}
-                        alt="E-Signature"
-                        className="h-20 mx-auto dark:invert"
-                        style={{ maxWidth: "250px" }}
-                        onError={(e) => {
-                          console.error("Error loading signature image");
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  )}
+                  {selectedResult.signature?.doctorSignature &&
+                    String(selectedResult.signature.doctorSignature).trim() !== "" && (
+                      <div className="mb-4 flex justify-center bg-white dark:bg-transparent p-2 rounded">
+                        <img
+                          src={selectedResult.signature.doctorSignature}
+                          alt="E-Signature"
+                          className="h-20 mx-auto dark:invert"
+                          style={{
+                            maxWidth: "250px",
+                            filter: typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "invert(1)" : "none"
+                          }}
+                          onError={(e) => {
+                            console.error("Error loading signature image");
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
                   <div className="border-t border-gray-300 dark:border-gray-600 w-64 mx-auto mb-2"></div>
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     {selectedResult.doctorName || "Doctor"}
@@ -6682,7 +6675,7 @@ Report generated from Cura EMR System`;
               Generate Lab Test Result
             </DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-6 py-4 text-gray-900 dark:text-gray-100">
             {/* Patient Selection */}
             <div className="space-y-2">
@@ -6697,8 +6690,8 @@ Report generated from Cura EMR System`;
                   >
                     {generateFormData.patientId
                       ? patients.find((p: any) => p.id.toString() === generateFormData.patientId.toString())
-                          ? `${patients.find((p: any) => p.id.toString() === generateFormData.patientId.toString()).firstName} ${patients.find((p: any) => p.id.toString() === generateFormData.patientId.toString()).lastName}`
-                          : "Select patient..."
+                        ? `${patients.find((p: any) => p.id.toString() === generateFormData.patientId.toString()).firstName} ${patients.find((p: any) => p.id.toString() === generateFormData.patientId.toString()).lastName}`
+                        : "Select patient..."
                       : "Select patient..."}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -6722,11 +6715,10 @@ Report generated from Cura EMR System`;
                           }}
                         >
                           <Check
-                            className={`mr-2 h-4 w-4 ${
-                              generateFormData.patientId === patient.id
-                                ? "opacity-100"
-                                : "opacity-0"
-                            }`}
+                            className={`mr-2 h-4 w-4 ${generateFormData.patientId === patient.id
+                              ? "opacity-100"
+                              : "opacity-0"
+                              }`}
                           />
                           {patient.firstName} {patient.lastName} ({patient.patientId})
                         </CommandItem>
@@ -6813,7 +6805,7 @@ Report generated from Cura EMR System`;
                   </Command>
                 </PopoverContent>
               </Popover>
-              
+
               {/* Display selected tests */}
               {generateFormData.selectedTests && generateFormData.selectedTests.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
@@ -6842,7 +6834,7 @@ Report generated from Cura EMR System`;
               <div className="space-y-6">
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                   <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Test Result Values</h3>
-                  
+
                   {generateFormData.selectedTests.map((testType: string) => {
                     const testFields = TEST_FIELD_DEFINITIONS[testType];
                     if (!testFields) return null;
@@ -6853,7 +6845,7 @@ Report generated from Cura EMR System`;
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {testFields.map((field) => {
                             const currentValue = generateFormData.testValues?.[testType]?.[field.name] || "";
-                            
+
                             // Parse reference range and check if critical
                             let isCritical = false;
                             let isNormal = false;
@@ -7079,7 +7071,7 @@ Report generated from Cura EMR System`;
                   generateFormData.selectedTests.forEach((testType: string) => {
                     const testFields = TEST_FIELD_DEFINITIONS[testType];
                     const testValues = generateFormData.testValues?.[testType];
-                    
+
                     if (testFields && testValues) {
                       testFields.forEach((field) => {
                         const value = testValues[field.name];
@@ -7087,7 +7079,7 @@ Report generated from Cura EMR System`;
                           // Determine status based on reference range (simplified)
                           const numValue = parseFloat(value);
                           let status = "normal";
-                          
+
                           results.push({
                             name: field.name,
                             value: value,
@@ -7110,7 +7102,7 @@ Report generated from Cura EMR System`;
                   }
 
                   // Generate or use provided test ID
-                  const baseTestId = generateFormData.testId || 
+                  const baseTestId = generateFormData.testId ||
                     `LAB${Date.now()}${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
                   // Create lab result for each selected test
@@ -7123,7 +7115,7 @@ Report generated from Cura EMR System`;
 
                     if (testResults.length > 0) {
                       // For multiple tests, append index to test ID
-                      const testId = generateFormData.selectedTests.length > 1 
+                      const testId = generateFormData.selectedTests.length > 1
                         ? `${baseTestId}-${index + 1}`
                         : baseTestId;
 
@@ -7157,7 +7149,7 @@ Report generated from Cura EMR System`;
                     title: "Success",
                     description: `Lab result${generateFormData.selectedTests.length > 1 ? 's' : ''} generated successfully and PDF saved`,
                   });
-                  
+
                   setShowGenerateDialog(false);
                   setGenerateFormData({});
                 }}
@@ -7185,7 +7177,7 @@ Report generated from Cura EMR System`;
               Generate Lab Test Result
             </DialogTitle>
           </DialogHeader>
-          
+
           {selectedLabOrder && (
             <div className="space-y-6 py-4 text-gray-900 dark:text-gray-100">
               {/* Lab Order Details - Read Only */}
@@ -7200,8 +7192,8 @@ Report generated from Cura EMR System`;
                   </div>
                   <div>
                     <span className="text-sm text-gray-600 dark:text-gray-400">Test Name:</span>
-                    <p 
-                      className="font-medium text-gray-900 dark:text-white cursor-default" 
+                    <p
+                      className="font-medium text-gray-900 dark:text-white cursor-default"
                       title={selectedLabOrder.testType}
                     >
                       {(() => {
@@ -7250,7 +7242,7 @@ Report generated from Cura EMR System`;
                 const allTestTypes = selectedLabOrder.testType
                   .split(' | ')
                   .map((t: string) => t.trim());
-                
+
                 const testTypes = allTestTypes.filter((t: string) => TEST_FIELD_DEFINITIONS[t]);
 
                 // Debug: Log test types for troubleshooting
@@ -7277,13 +7269,13 @@ Report generated from Cura EMR System`;
                   // Get the field name before removing it
                   const fieldToRemove = customFields[testType]?.[index];
                   const fieldName = fieldToRemove?.name;
-                  
+
                   // Remove from custom fields
                   setCustomFields(prev => ({
                     ...prev,
                     [testType]: (prev[testType] || []).filter((_: any, i: number) => i !== index)
                   }));
-                  
+
                   // Also remove the field value from form data
                   if (fieldName) {
                     const fieldKey = `${testType}::${fieldName}`;
@@ -7298,7 +7290,7 @@ Report generated from Cura EMR System`;
                 // Function to update a custom field
                 const updateCustomField = (testType: string, index: number, field: 'name' | 'unit' | 'referenceRange', value: string) => {
                   setCustomFields(prev => {
-                    const updated = (prev[testType] || []).map((f: any, i: number) => 
+                    const updated = (prev[testType] || []).map((f: any, i: number) =>
                       i === index ? { ...f, [field]: value } : f
                     );
                     // If name changed, update form data key
@@ -7331,13 +7323,13 @@ Report generated from Cura EMR System`;
                 // Validation function for field values
                 const validateField = (fieldKey: string, value: string): string => {
                   if (!value || value.trim() === "") return "";
-                  
+
                   // Check if value is numeric (allows decimals and negative values)
                   const numericPattern = /^-?\d*\.?\d+$/;
                   if (!numericPattern.test(value.trim())) {
                     return "Must be a numeric value";
                   }
-                  
+
                   return "";
                 };
 
@@ -7367,7 +7359,7 @@ Report generated from Cura EMR System`;
                     {testTypes.map((testType: string, testIndex: number) => {
                       const allFields = getAllFieldsForTestType(testType);
                       const customFieldsForType = customFields[testType] || [];
-                      
+
                       return (
                         <div key={testType} className="space-y-4">
                           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-slate-800 border-l-4 border-blue-600 dark:border-blue-500 p-3 rounded flex justify-between items-center">
@@ -7395,7 +7387,7 @@ Report generated from Cura EMR System`;
                               const isCustom = fieldIndex >= (TEST_FIELD_DEFINITIONS[testType]?.length || 0);
                               const fieldKey = `${testType}::${field.name}`;
                               const hasError = validationErrors[fieldKey];
-                              
+
                               return (
                                 <div key={`${testType}-${field.name}-${fieldIndex}`} className="space-y-1">
                                   {isCustom ? (
@@ -7479,13 +7471,13 @@ Report generated from Cura EMR System`;
                         </div>
                       );
                     })}
-                    
+
                     {/* Test types without predefined fields - allow manual addition */}
                     {testTypesWithoutDefs.length > 0 && (
                       <div className="space-y-4">
                         {testTypesWithoutDefs.map((testType: string, testIndex: number) => {
                           const customFieldsForType = customFields[testType] || [];
-                          
+
                           return (
                             <div key={testType} className="space-y-4">
                               <div className="bg-yellow-50 dark:bg-amber-900/30 border-l-4 border-yellow-400 dark:border-amber-600 p-3 rounded flex justify-between items-center">
@@ -7519,7 +7511,7 @@ Report generated from Cura EMR System`;
                                   {customFieldsForType.map((field, fieldIndex) => {
                                     const fieldKey = `${testType}::${field.name}`;
                                     const hasError = validationErrors[fieldKey];
-                                    
+
                                     return (
                                       <div key={`${testType}-custom-${fieldIndex}`} className="space-y-1 border-2 border-dashed border-blue-300 dark:border-gray-600 rounded-lg p-3 bg-blue-50/50 dark:bg-gray-800/50">
                                         <div className="flex items-center justify-between mb-2">
@@ -7736,12 +7728,12 @@ Report generated from Cura EMR System`;
                     const allTestTypes = selectedLabOrder.testType
                       .split(' | ')
                       .map((t: string) => t.trim());
-                    
+
                     // Group results by test type (including custom fields)
                     const resultsByTestType: Record<string, any[]> = {};
                     allTestTypes.forEach((testType: string) => {
                       const testResults: any[] = [];
-                      
+
                       // Process predefined fields
                       const predefinedFields = TEST_FIELD_DEFINITIONS[testType] || [];
                       predefinedFields.forEach((field) => {
@@ -7757,7 +7749,7 @@ Report generated from Cura EMR System`;
                           });
                         }
                       });
-                      
+
                       // Process custom fields
                       const customFieldsForType = customFields[testType] || [];
                       customFieldsForType.forEach((field) => {
@@ -7775,7 +7767,7 @@ Report generated from Cura EMR System`;
                           }
                         }
                       });
-                      
+
                       if (testResults.length > 0) {
                         resultsByTestType[testType] = testResults;
                       }
@@ -7819,7 +7811,7 @@ Report generated from Cura EMR System`;
                     const headerStartY = yPos;
                     let textStartX = 105; // Default center position
                     let textAlign: 'left' | 'center' | 'right' = 'center';
-                    
+
                     if (clinicHeader?.logoBase64) {
                       try {
                         // Logo always beside header for all positions
@@ -7878,7 +7870,7 @@ Report generated from Cura EMR System`;
                         yPos += 6;
                       }
                     }
-                    
+
                     // Ensure proper spacing after header section if logo was beside it
                     if (clinicHeader?.logoBase64 && clinicHeader.logoPosition === 'center') {
                       const headerEndY = yPos;
@@ -7899,7 +7891,7 @@ Report generated from Cura EMR System`;
                     // Two-column layout
                     pdf.setFont('helvetica', 'normal');
                     pdf.setFontSize(10);
-                    
+
                     const leftX = 20;
                     const rightX = 120;
                     let leftY = yPos;
@@ -7948,7 +7940,7 @@ Report generated from Cura EMR System`;
                       if (groupIndex > 0) {
                         yPos += 8;
                       }
-                      
+
                       if (yPos > 240) {
                         pdf.addPage();
                         yPos = 20;
@@ -7957,7 +7949,7 @@ Report generated from Cura EMR System`;
                       // Test Type Header with background box
                       pdf.setFillColor(66, 133, 244);
                       pdf.rect(20, yPos - 2, 170, 10, 'F');
-                      
+
                       pdf.setFont('helvetica', 'bold');
                       pdf.setFontSize(12);
                       pdf.setTextColor(255, 255, 255);
@@ -7970,15 +7962,15 @@ Report generated from Cura EMR System`;
                       const rowHeight = 8;
                       const colWidths = [60, 30, 30, 50];
                       const tableX = 20;
-                      
+
                       // Header background
                       pdf.setFillColor(240, 240, 240);
                       pdf.rect(tableX, tableStartY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight, 'F');
-                      
+
                       // Header borders
                       pdf.setDrawColor(200, 200, 200);
                       pdf.rect(tableX, tableStartY, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight);
-                      
+
                       // Header text
                       pdf.setFont('helvetica', 'bold');
                       pdf.setFontSize(10);
@@ -7986,7 +7978,7 @@ Report generated from Cura EMR System`;
                       pdf.text('Value', tableX + colWidths[0] + 2, tableStartY + 5);
                       pdf.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 5);
                       pdf.text('Reference Range', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, tableStartY + 5);
-                      
+
                       yPos = tableStartY + rowHeight;
 
                       // Table rows
@@ -8002,16 +7994,16 @@ Report generated from Cura EMR System`;
                           pdf.setFillColor(250, 250, 250);
                           pdf.rect(tableX, yPos, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight, 'F');
                         }
-                        
+
                         // Row borders
                         pdf.setDrawColor(200, 200, 200);
                         pdf.rect(tableX, yPos, colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowHeight);
-                        
+
                         // Vertical lines
                         pdf.line(tableX + colWidths[0], yPos, tableX + colWidths[0], yPos + rowHeight);
                         pdf.line(tableX + colWidths[0] + colWidths[1], yPos, tableX + colWidths[0] + colWidths[1], yPos + rowHeight);
                         pdf.line(tableX + colWidths[0] + colWidths[1] + colWidths[2], yPos, tableX + colWidths[0] + colWidths[1] + colWidths[2], yPos + rowHeight);
-                        
+
                         // Row data
                         // Strip test type prefix - extract short parameter name after " - "
                         let paramName = result.name || '';
@@ -8019,12 +8011,12 @@ Report generated from Cura EMR System`;
                         if (dashIndex !== -1) {
                           paramName = paramName.substring(dashIndex + 3).trim();
                         }
-                        
+
                         pdf.text(paramName, tableX + 2, yPos + 5);
                         pdf.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 5);
                         pdf.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 5);
                         pdf.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 5);
-                        
+
                         yPos += rowHeight;
                       });
 
@@ -8094,7 +8086,7 @@ Report generated from Cura EMR System`;
                       .split(' | ')
                       .map((t: string) => t.trim())
                       .filter((t: string) => TEST_FIELD_DEFINITIONS[t]);
-                    
+
                     // Process all test types
                     testTypes.forEach((testType: string) => {
                       const testFields = TEST_FIELD_DEFINITIONS[testType];
@@ -8149,8 +8141,8 @@ Report generated from Cura EMR System`;
                     // Add clinic header with logo on left
                     if (clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left') {
                       try {
-                        const logoData = clinicHeader.logoBase64.includes(',') 
-                          ? clinicHeader.logoBase64.split(',')[1] 
+                        const logoData = clinicHeader.logoBase64.includes(',')
+                          ? clinicHeader.logoBase64.split(',')[1]
                           : clinicHeader.logoBase64;
                         pdf.addImage(logoData, 'PNG', 20, yPos, 30, 30);
                       } catch (error) {
@@ -8161,11 +8153,11 @@ Report generated from Cura EMR System`;
                     // Clinic header text (to the right of logo or centered)
                     const headerTextX = clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left' ? 60 : pageWidth / 2;
                     const textAlign = clinicHeader?.logoBase64 && clinicHeader?.logoPosition === 'left' ? 'left' : 'center';
-                    
+
                     pdf.setFontSize(parseInt(clinicHeader?.clinicNameFontSize?.replace('pt', '') || '16'));
                     pdf.setFont(clinicHeader?.fontFamily || 'helvetica', clinicHeader?.fontWeight || 'bold');
                     pdf.text(clinicHeader?.clinicName || 'CURA EMR SYSTEM', headerTextX, yPos + 10, { align: textAlign });
-                    
+
                     pdf.setFontSize(9);
                     pdf.setFont(clinicHeader?.fontFamily || 'helvetica', 'normal');
                     if (clinicHeader?.address) {
@@ -8177,7 +8169,7 @@ Report generated from Cura EMR System`;
                     if (clinicHeader?.email) {
                       pdf.text(clinicHeader.email, headerTextX, yPos + 30, { align: textAlign });
                     }
-                    
+
                     yPos += 45;
 
                     // Title - "Lab Test Result Report"
@@ -8193,34 +8185,34 @@ Report generated from Cura EMR System`;
                     yPos += 8;
 
                     pdf.setFont('helvetica', 'normal');
-                    
+
                     // Patient Name
                     const patientName = getPatientName(selectedLabOrder.patientId);
                     if (patientName && patientName !== `Patient #${selectedLabOrder.patientId}`) {
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Patient Name:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Patient Name:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
                       pdf.text(patientName, 70, yPos);
                       yPos += 6;
                     }
 
                     // Test ID
                     if (selectedLabOrder.testId && selectedLabOrder.testId !== 'N/A') {
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Test ID:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Test ID:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
                       pdf.text(selectedLabOrder.testId, 70, yPos);
                       yPos += 6;
                     }
 
                     // Ordered Date - only show if not N/A
-                    const orderedDate = selectedLabOrder.orderedDate 
+                    const orderedDate = selectedLabOrder.orderedDate
                       ? format(new Date(selectedLabOrder.orderedDate), "dd/MM/yyyy")
                       : null;
                     if (orderedDate && orderedDate !== 'N/A') {
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Ordered Date:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Ordered Date:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
                       pdf.text(orderedDate, 70, yPos);
                       yPos += 6;
                     }
@@ -8228,18 +8220,18 @@ Report generated from Cura EMR System`;
                     // Ordered By - only show if not N/A
                     const orderedByName = getUserName(selectedLabOrder.orderedBy);
                     if (orderedByName && orderedByName !== `User #${selectedLabOrder.orderedBy}`) {
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Ordered By:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Ordered By:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
                       pdf.text(orderedByName, 70, yPos);
                       yPos += 6;
                     }
 
                     // Priority - only show if not N/A
                     if (selectedLabOrder.priority && selectedLabOrder.priority !== 'N/A') {
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('Priority:', 20, yPos);
-                    pdf.setFont('helvetica', 'normal');
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.text('Priority:', 20, yPos);
+                      pdf.setFont('helvetica', 'normal');
                       pdf.text(selectedLabOrder.priority, 70, yPos);
                       yPos += 6;
                     }
@@ -8253,11 +8245,11 @@ Report generated from Cura EMR System`;
                     yPos += 8;
 
                     pdf.setFont('helvetica', 'normal');
-                    
+
                     // Get doctor information
                     const orderedByUser = users.find((u: any) => u && u.id === selectedLabOrder.orderedBy);
-                    const doctorName = selectedLabOrder.doctorName || 
-                                      (orderedByUser ? `${orderedByUser.firstName || ''} ${orderedByUser.lastName || ''}`.trim() : null);
+                    const doctorName = selectedLabOrder.doctorName ||
+                      (orderedByUser ? `${orderedByUser.firstName || ''} ${orderedByUser.lastName || ''}`.trim() : null);
                     const doctorSpecialization = selectedLabOrder.mainSpecialty || (orderedByUser as any)?.medicalSpecialtyCategory || (orderedByUser as any)?.department || null;
                     const doctorEmail = orderedByUser?.email || null;
                     const doctorDepartment = selectedLabOrder.doctorDepartment || (orderedByUser as any)?.department || null;
@@ -8302,7 +8294,7 @@ Report generated from Cura EMR System`;
                       pdf.setFont('helvetica', 'bold');
                       pdf.text('REPORT CREATED BY', 20, yPos);
                       yPos += 8;
-                      
+
                       pdf.setFont('helvetica', 'normal');
                       const creatorName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'System';
                       pdf.setFont('helvetica', 'bold');
@@ -8310,7 +8302,7 @@ Report generated from Cura EMR System`;
                       pdf.setFont('helvetica', 'normal');
                       pdf.text(creatorName, 70, yPos);
                       yPos += 6;
-                      
+
                       if (user.email) {
                         pdf.setFont('helvetica', 'bold');
                         pdf.text('Email:', 20, yPos);
@@ -8318,7 +8310,7 @@ Report generated from Cura EMR System`;
                         pdf.text(user.email, 70, yPos);
                         yPos += 6;
                       }
-                      
+
                       if (user.role) {
                         pdf.setFont('helvetica', 'bold');
                         pdf.text('Role:', 20, yPos);
@@ -8326,7 +8318,7 @@ Report generated from Cura EMR System`;
                         pdf.text(user.role, 70, yPos);
                         yPos += 6;
                       }
-                      
+
                       yPos += 10;
                     }
 
@@ -8375,15 +8367,15 @@ Report generated from Cura EMR System`;
                       const colWidths = [60, 30, 30, 50]; // Parameter, Value, Unit, Reference Range
                       const tableX = 20;
                       const tableWidth = colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
-                      
+
                       // Header background (light gray)
                       pdf.setFillColor(240, 240, 240);
                       pdf.rect(tableX, tableStartY, tableWidth, rowHeight, 'F');
-                      
+
                       // Header border
                       pdf.setDrawColor(200, 200, 200);
                       pdf.rect(tableX, tableStartY, tableWidth, rowHeight);
-                      
+
                       // Header text
                       pdf.setFont('helvetica', 'bold');
                       pdf.setFontSize(9);
@@ -8391,7 +8383,7 @@ Report generated from Cura EMR System`;
                       pdf.text('Value', tableX + colWidths[0] + 2, tableStartY + 4);
                       pdf.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 4);
                       pdf.text('Reference Range', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, tableStartY + 4);
-                      
+
                       yPos = tableStartY + rowHeight;
 
                       // Sort parameters by name
@@ -8415,16 +8407,16 @@ Report generated from Cura EMR System`;
                           pdf.setFillColor(250, 250, 250);
                           pdf.rect(tableX, yPos, tableWidth, rowHeight, 'F');
                         }
-                        
+
                         // Row border
                         pdf.setDrawColor(200, 200, 200);
                         pdf.rect(tableX, yPos, tableWidth, rowHeight);
-                        
+
                         // Vertical lines
                         pdf.line(tableX + colWidths[0], yPos, tableX + colWidths[0], yPos + rowHeight);
                         pdf.line(tableX + colWidths[0] + colWidths[1], yPos, tableX + colWidths[0] + colWidths[1], yPos + rowHeight);
                         pdf.line(tableX + colWidths[0] + colWidths[1] + colWidths[2], yPos, tableX + colWidths[0] + colWidths[1] + colWidths[2], yPos + rowHeight);
-                        
+
                         // Row data
                         // Strip test type prefix - extract short parameter name after " - "
                         let paramName = result.name || '';
@@ -8432,13 +8424,13 @@ Report generated from Cura EMR System`;
                         if (dashIndex !== -1) {
                           paramName = paramName.substring(dashIndex + 3).trim();
                         }
-                        
+
                         pdf.setFontSize(9);
                         pdf.text(paramName, tableX + 2, yPos + 4);
                         pdf.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 4);
                         pdf.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 4);
                         pdf.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 4);
-                        
+
                         yPos += rowHeight;
                       });
 
@@ -8450,7 +8442,7 @@ Report generated from Cura EMR System`;
                       pdf.addPage();
                       yPos = 20;
                     }
-                    
+
                     pdf.setFontSize(9);
                     pdf.setFont('helvetica', 'bold');
                     pdf.text('Clinical Notes', 20, yPos);
@@ -8857,12 +8849,12 @@ Report generated from Cura EMR System`;
 
                 {/* Signature Analytics */}
                 <div className="space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-lg border">
-                    <h5 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                  <div className="bg-gray-50 dark:bg-slate-800/50 p-4 rounded-lg border dark:border-slate-700">
+                    <h5 className="font-medium text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-600" />
                       Signature Quality Analysis
                     </h5>
-                    <div className="space-y-2 text-sm">
+                    <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
                       <div className="flex justify-between">
                         <span>Stroke Consistency:</span>
                         <span className="text-green-600 font-medium">
@@ -8915,325 +8907,325 @@ Report generated from Cura EMR System`;
 
             {/* Authentication Tab */}
             {!hideTabs && (
-            <TabsContent value="authentication" className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <User className="h-5 w-5" />
-                      Multi-Factor Authentication
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between p-3 bg-green-50 rounded border border-green-200">
-                        <div className="flex items-center gap-3">
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                          <span className="text-sm font-medium">
-                            Primary Authentication
+              <TabsContent value="authentication" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <User className="h-5 w-5" />
+                        Multi-Factor Authentication
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-green-50 rounded border border-green-200">
+                          <div className="flex items-center gap-3">
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                            <span className="text-sm font-medium">
+                              Primary Authentication
+                            </span>
+                          </div>
+                          <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                            Verified
                           </span>
                         </div>
-                        <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
-                          Verified
-                        </span>
-                      </div>
 
-                      <div className="flex items-center justify-between p-3 bg-green-50 rounded border border-green-200">
-                        <div className="flex items-center gap-3">
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                          <span className="text-sm font-medium">
-                            Device Recognition
+                        <div className="flex items-center justify-between p-3 bg-green-50 rounded border border-green-200">
+                          <div className="flex items-center gap-3">
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                            <span className="text-sm font-medium">
+                              Device Recognition
+                            </span>
+                          </div>
+                          <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                            Trusted
                           </span>
                         </div>
-                        <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
-                          Trusted
-                        </span>
-                      </div>
 
-                      <div className="flex items-center justify-between p-3 bg-yellow-50 rounded border border-yellow-200">
-                        <div className="flex items-center gap-3">
-                          <Clock className="h-5 w-5 text-yellow-600" />
-                          <span className="text-sm font-medium">
-                            Time-based Verification
+                        <div className="flex items-center justify-between p-3 bg-yellow-50 rounded border border-yellow-200">
+                          <div className="flex items-center gap-3">
+                            <Clock className="h-5 w-5 text-yellow-600" />
+                            <span className="text-sm font-medium">
+                              Time-based Verification
+                            </span>
+                          </div>
+                          <span className="text-xs text-yellow-600 bg-yellow-100 px-2 py-1 rounded">
+                            Active
                           </span>
                         </div>
-                        <span className="text-xs text-yellow-600 bg-yellow-100 px-2 py-1 rounded">
-                          Active
-                        </span>
                       </div>
-                    </div>
 
-                    <Button className="w-full bg-medical-blue hover:bg-blue-700">
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Verify Additional Factor
-                    </Button>
-                  </CardContent>
-                </Card>
+                      <Button className="w-full bg-medical-blue hover:bg-blue-700">
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Verify Additional Factor
+                      </Button>
+                    </CardContent>
+                  </Card>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <AlertTriangle className="h-5 w-5" />
-                      Security Validation
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="text-sm space-y-2">
-                      <p>
-                        <strong>Session ID:</strong>{" "}
-                        <span className="font-mono text-xs">
-                          ESS-
-                          {Math.random()
-                            .toString(36)
-                            .substr(2, 9)
-                            .toUpperCase()}
-                        </span>
-                      </p>
-                      <p>
-                        <strong>IP Address:</strong>{" "}
-                        <span className="font-mono text-xs">192.168.1.45</span>
-                      </p>
-                      <p>
-                        <strong>Location:</strong> Authorized Facility
-                      </p>
-                      <p>
-                        <strong>Timestamp:</strong>{" "}
-                        {format(new Date(), "yyyy-MM-dd HH:mm:ss")} UTC
-                      </p>
-                    </div>
-
-                    <div className="bg-gray-50 p-3 rounded border">
-                      <p className="text-xs text-gray-600 mb-2">
-                        <strong>Digital Certificate Status:</strong>
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                        <span className="text-sm text-green-600">
-                          Valid & Current
-                        </span>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5" />
+                        Security Validation
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="text-sm space-y-2">
+                        <p>
+                          <strong>Session ID:</strong>{" "}
+                          <span className="font-mono text-xs">
+                            ESS-
+                            {Math.random()
+                              .toString(36)
+                              .substr(2, 9)
+                              .toUpperCase()}
+                          </span>
+                        </p>
+                        <p>
+                          <strong>IP Address:</strong>{" "}
+                          <span className="font-mono text-xs">192.168.1.45</span>
+                        </p>
+                        <p>
+                          <strong>Location:</strong> Authorized Facility
+                        </p>
+                        <p>
+                          <strong>Timestamp:</strong>{" "}
+                          {format(new Date(), "yyyy-MM-dd HH:mm:ss")} UTC
+                        </p>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
+
+                      <div className="bg-gray-50 p-3 rounded border">
+                        <p className="text-xs text-gray-600 mb-2">
+                          <strong>Digital Certificate Status:</strong>
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <span className="text-sm text-green-600">
+                            Valid & Current
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
             )}
 
             {/* Verification Tab */}
             {!hideTabs && (
-            <TabsContent value="verification" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <CheckCircle className="h-5 w-5" />
-                    Advanced Signature Verification
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-green-50 p-4 rounded border border-green-200">
-                      <h5 className="font-medium text-green-800 mb-2">
-                        Handwriting Analysis
-                      </h5>
-                      <div className="text-sm text-green-700 space-y-1">
-                        <p>• Stroke patterns: ✓ Verified</p>
-                        <p>• Pressure dynamics: ✓ Natural</p>
-                        <p>• Speed consistency: ✓ Human-like</p>
+              <TabsContent value="verification" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5" />
+                      Advanced Signature Verification
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-green-50 p-4 rounded border border-green-200">
+                        <h5 className="font-medium text-green-800 mb-2">
+                          Handwriting Analysis
+                        </h5>
+                        <div className="text-sm text-green-700 space-y-1">
+                          <p>• Stroke patterns: ✓ Verified</p>
+                          <p>• Pressure dynamics: ✓ Natural</p>
+                          <p>• Speed consistency: ✓ Human-like</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-50 p-4 rounded border border-blue-200">
+                        <h5 className="font-medium text-blue-800 mb-2">
+                          Biometric Matching
+                        </h5>
+                        <div className="text-sm text-blue-700 space-y-1">
+                          <p>• Touch patterns: ✓ Match 97.8%</p>
+                          <p>• Behavioral traits: ✓ Consistent</p>
+                          <p>• Device interaction: ✓ Verified</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-purple-50 p-4 rounded border border-purple-200">
+                        <h5 className="font-medium text-purple-800 mb-2">
+                          AI Fraud Detection
+                        </h5>
+                        <div className="text-sm text-purple-700 space-y-1">
+                          <p>• Anomaly detection: ✓ Clean</p>
+                          <p>• Pattern recognition: ✓ Genuine</p>
+                          <p>• Risk assessment: ✓ Low risk</p>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="bg-blue-50 p-4 rounded border border-blue-200">
-                      <h5 className="font-medium text-blue-800 mb-2">
-                        Biometric Matching
+                    <div className="bg-gray-50 p-4 rounded border">
+                      <h5 className="font-medium text-gray-800 mb-2">
+                        Verification Summary
                       </h5>
-                      <div className="text-sm text-blue-700 space-y-1">
-                        <p>• Touch patterns: ✓ Match 97.8%</p>
-                        <p>• Behavioral traits: ✓ Consistent</p>
-                        <p>• Device interaction: ✓ Verified</p>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p>
+                            <strong>Overall Confidence:</strong>{" "}
+                            <span className="text-green-600 font-medium">
+                              99.2%
+                            </span>
+                          </p>
+                          <p>
+                            <strong>Authentication Level:</strong>{" "}
+                            <span className="text-blue-600 dark:text-gray-100 font-medium">
+                              High Security
+                            </span>
+                          </p>
+                        </div>
+                        <div>
+                          <p>
+                            <strong>Verification Method:</strong> Multi-modal
+                          </p>
+                          <p>
+                            <strong>Compliance Level:</strong>{" "}
+                            <span className="text-green-600 font-medium">
+                              FDA 21 CFR Part 11
+                            </span>
+                          </p>
+                        </div>
                       </div>
                     </div>
-
-                    <div className="bg-purple-50 p-4 rounded border border-purple-200">
-                      <h5 className="font-medium text-purple-800 mb-2">
-                        AI Fraud Detection
-                      </h5>
-                      <div className="text-sm text-purple-700 space-y-1">
-                        <p>• Anomaly detection: ✓ Clean</p>
-                        <p>• Pattern recognition: ✓ Genuine</p>
-                        <p>• Risk assessment: ✓ Low risk</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 p-4 rounded border">
-                    <h5 className="font-medium text-gray-800 mb-2">
-                      Verification Summary
-                    </h5>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p>
-                          <strong>Overall Confidence:</strong>{" "}
-                          <span className="text-green-600 font-medium">
-                            99.2%
-                          </span>
-                        </p>
-                        <p>
-                          <strong>Authentication Level:</strong>{" "}
-                          <span className="text-blue-600 dark:text-gray-100 font-medium">
-                            High Security
-                          </span>
-                        </p>
-                      </div>
-                      <div>
-                        <p>
-                          <strong>Verification Method:</strong> Multi-modal
-                        </p>
-                        <p>
-                          <strong>Compliance Level:</strong>{" "}
-                          <span className="text-green-600 font-medium">
-                            FDA 21 CFR Part 11
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
+                  </CardContent>
+                </Card>
+              </TabsContent>
             )}
 
             {/* Compliance Tab */}
             {!hideTabs && (
-            <TabsContent value="compliance" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <FileText className="h-5 w-5" />
-                    Legal & Regulatory Compliance
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="bg-blue-50 dark:bg-slate-800 p-4 rounded-lg border border-blue-200 dark:border-slate-600">
-                    <h5 className="font-semibold text-blue-900 dark:text-gray-100 mb-3">
-                      Electronic Signature Compliance Standards
-                    </h5>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span>FDA 21 CFR Part 11 Compliant</span>
+              <TabsContent value="compliance" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      Legal & Regulatory Compliance
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="bg-blue-50 dark:bg-slate-800 p-4 rounded-lg border border-blue-200 dark:border-slate-600">
+                      <h5 className="font-semibold text-blue-900 dark:text-gray-100 mb-3">
+                        Electronic Signature Compliance Standards
+                      </h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span>FDA 21 CFR Part 11 Compliant</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span>HIPAA Security Rule Compliant</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span>ESIGN Act Compliant</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span>HIPAA Security Rule Compliant</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span>ESIGN Act Compliant</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span>EU eIDAS Regulation</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span>DEA EPCS Requirements</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span>ISO 27001 Security Standards</span>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span>EU eIDAS Regulation</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span>DEA EPCS Requirements</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span>ISO 27001 Security Standards</span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                    <h5 className="font-semibold text-yellow-900 mb-2">
-                      Legal Declaration
-                    </h5>
-                    <div className="text-xs text-yellow-800 space-y-2">
-                      <p>
-                        <strong>
-                          By applying your electronic signature, you hereby
-                          declare and confirm that:
-                        </strong>
-                      </p>
-                      <ul className="list-disc list-inside space-y-1 ml-2">
-                        <li>
-                          You are the licensed healthcare provider authorized to
-                          sign lab test results
-                        </li>
-                        <li>
-                          You have verified patient identity and reviewed their
-                          complete medical history
-                        </li>
-                        <li>
-                          The lab result information is accurate, complete,
-                          and clinically appropriate
-                        </li>
-                        <li>
-                          You understand this electronic signature carries the
-                          same legal weight as a handwritten signature
-                        </li>
-                        <li>
-                          You consent to the electronic processing and
-                          transmission of this lab result
-                        </li>
-                        <li>
-                          You acknowledge that this signature will be
-                          permanently recorded with audit trail
-                        </li>
-                      </ul>
-                      <p className="mt-3">
-                        <strong>Audit Trail Information:</strong> This signature
-                        will be logged with timestamp, IP address, device
-                        fingerprint, and biometric verification data for
-                        compliance and security purposes.
-                      </p>
+                    <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                      <h5 className="font-semibold text-yellow-900 mb-2">
+                        Legal Declaration
+                      </h5>
+                      <div className="text-xs text-yellow-800 space-y-2">
+                        <p>
+                          <strong>
+                            By applying your electronic signature, you hereby
+                            declare and confirm that:
+                          </strong>
+                        </p>
+                        <ul className="list-disc list-inside space-y-1 ml-2">
+                          <li>
+                            You are the licensed healthcare provider authorized to
+                            sign lab test results
+                          </li>
+                          <li>
+                            You have verified patient identity and reviewed their
+                            complete medical history
+                          </li>
+                          <li>
+                            The lab result information is accurate, complete,
+                            and clinically appropriate
+                          </li>
+                          <li>
+                            You understand this electronic signature carries the
+                            same legal weight as a handwritten signature
+                          </li>
+                          <li>
+                            You consent to the electronic processing and
+                            transmission of this lab result
+                          </li>
+                          <li>
+                            You acknowledge that this signature will be
+                            permanently recorded with audit trail
+                          </li>
+                        </ul>
+                        <p className="mt-3">
+                          <strong>Audit Trail Information:</strong> This signature
+                          will be logged with timestamp, IP address, device
+                          fingerprint, and biometric verification data for
+                          compliance and security purposes.
+                        </p>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="bg-gray-50 p-4 rounded border">
-                    <h5 className="font-medium text-gray-800 mb-2">
-                      Digital Certificate Details
-                    </h5>
-                    <div className="grid grid-cols-2 gap-4 text-xs">
-                      <div>
-                        <p>
-                          <strong>Certificate Authority:</strong> Cura Health CA
-                        </p>
-                        <p>
-                          <strong>Certificate Type:</strong> Medical
-                          Professional
-                        </p>
-                        <p>
-                          <strong>Valid Until:</strong>{" "}
-                          {format(
-                            new Date(
-                              Date.now() + 365 * 24 * 60 * 60 * 1000,
-                            ),
-                            "MMM dd, yyyy",
-                          )}
-                        </p>
-                      </div>
-                      <div>
-                        <p>
-                          <strong>Encryption:</strong> AES-256
-                        </p>
-                        <p>
-                          <strong>Hash Algorithm:</strong> SHA-256
-                        </p>
-                        <p>
-                          <strong>Key Length:</strong> 2048-bit
-                        </p>
+                    <div className="bg-gray-50 p-4 rounded border">
+                      <h5 className="font-medium text-gray-800 mb-2">
+                        Digital Certificate Details
+                      </h5>
+                      <div className="grid grid-cols-2 gap-4 text-xs">
+                        <div>
+                          <p>
+                            <strong>Certificate Authority:</strong> Cura Health CA
+                          </p>
+                          <p>
+                            <strong>Certificate Type:</strong> Medical
+                            Professional
+                          </p>
+                          <p>
+                            <strong>Valid Until:</strong>{" "}
+                            {format(
+                              new Date(
+                                Date.now() + 365 * 24 * 60 * 60 * 1000,
+                              ),
+                              "MMM dd, yyyy",
+                            )}
+                          </p>
+                        </div>
+                        <div>
+                          <p>
+                            <strong>Encryption:</strong> AES-256
+                          </p>
+                          <p>
+                            <strong>Hash Algorithm:</strong> SHA-256
+                          </p>
+                          <p>
+                            <strong>Key Length:</strong> 2048-bit
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
+                  </CardContent>
+                </Card>
+              </TabsContent>
             )}
 
             {/* Footer Buttons */}
@@ -9276,23 +9268,23 @@ Report generated from Cura EMR System`;
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </button>
-          
+
           <div className="flex flex-col items-center justify-center py-6">
             {/* Large Green Checkmark Circle */}
             <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
               <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" strokeWidth={2} />
             </div>
-            
+
             {/* Title */}
             <h2 className="mb-2 text-2xl font-bold text-green-600 dark:text-green-400">
               Invoice Created Successfully!
             </h2>
-            
+
             {/* Subtitle Message */}
             <p className="mb-6 text-center text-gray-600 dark:text-gray-400">
               Invoice created successfully and insurance claim submitted automatically.
             </p>
-            
+
             {/* Done Button */}
             <Button
               onClick={() => setShowSuccessModal(false)}
@@ -9317,7 +9309,7 @@ Report generated from Cura EMR System`;
                 <div>
                   <Label className="text-sm font-semibold">Signed At</Label>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {selectedSignatureData.signedAt 
+                    {selectedSignatureData.signedAt
                       ? format(new Date(selectedSignatureData.signedAt), "MMM dd, yyyy HH:mm:ss")
                       : "N/A"}
                   </p>
@@ -9340,11 +9332,14 @@ Report generated from Cura EMR System`;
               {selectedSignatureData.doctorSignature ? (
                 <div>
                   <Label className="text-sm font-semibold">Doctor Signature</Label>
-                  <div className="mt-2 p-4 border rounded-lg bg-gray-50 dark:bg-gray-800">
-                    <img 
-                      src={selectedSignatureData.doctorSignature} 
-                      alt="Doctor Signature" 
-                      className="max-w-full h-auto border border-gray-300 dark:border-gray-600 rounded"
+                  <div className="mt-2 p-4 border rounded-lg bg-white dark:bg-transparent flex justify-center">
+                    <img
+                      src={selectedSignatureData.doctorSignature}
+                      alt="Doctor Signature"
+                      className="max-w-full h-auto border border-gray-300 dark:border-gray-600 rounded dark:invert"
+                      style={{
+                        filter: isSignatureDarkTheme() ? "invert(1)" : "none"
+                      }}
                       onError={(e) => {
                         console.error("Error loading signature image:", selectedSignatureData.doctorSignature);
                         e.currentTarget.style.display = 'none';

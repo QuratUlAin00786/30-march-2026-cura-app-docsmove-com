@@ -14,9 +14,20 @@ interface HeaderProps {
   subtitle?: string;
   createdBy?: number;
   updatedBy?: number;
+  hideNotificationBell?: boolean;
+  hideAiStatus?: boolean;
+  hideRegionalSettings?: boolean;
 }
 
-export function Header({ title, subtitle, createdBy, updatedBy }: HeaderProps) {
+export function Header({
+  title,
+  subtitle,
+  createdBy,
+  updatedBy,
+  hideNotificationBell = false,
+  hideAiStatus = false,
+  hideRegionalSettings = false
+}: HeaderProps) {
   const { tenant } = useTenant();
   const { user } = useAuth();
   const [location, setLocation] = useLocation();
@@ -82,26 +93,27 @@ export function Header({ title, subtitle, createdBy, updatedBy }: HeaderProps) {
             )}
           </div>
         </div>
-        
+
         <div className="flex items-center space-x-2 lg:space-x-4 shrink-0">
           {/* AI Status Indicator */}
-          {tenant?.settings?.features?.aiEnabled && (
+          {tenant?.settings?.features?.aiEnabled && !hideAiStatus && (
             <div className="hidden md:flex items-center space-x-2 bg-green-50 dark:bg-green-900 px-2 lg:px-3 py-1 lg:py-2 rounded-lg">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span className="text-xs lg:text-sm text-green-700 dark:text-green-200">AI Active</span>
             </div>
           )}
-          
-          {/* Regional Settings */}
-          <div className="hidden sm:flex items-center space-x-1 lg:space-x-2 bg-neutral-50 dark:bg-neutral-800 px-2 lg:px-3 py-1 lg:py-2 rounded-lg">
-            <Globe className="h-3 lg:h-4 w-3 lg:w-4 text-neutral-600 dark:text-neutral-400" />
-            <span className="text-xs lg:text-sm text-neutral-700 dark:text-neutral-300">
-              {tenant?.region?.substring(0, 2)}/{tenant?.settings?.compliance?.gdprEnabled ? "GDPR" : "Std"}
-            </span>
-          </div>
-          
+
+          {!hideRegionalSettings && (
+            <div className="hidden sm:flex items-center space-x-1 lg:space-x-2 bg-neutral-50 dark:bg-neutral-800 px-2 lg:px-3 py-1 lg:py-2 rounded-lg">
+              <Globe className="h-3 lg:h-4 w-3 lg:w-4 text-neutral-600 dark:text-neutral-400" />
+              <span className="text-xs lg:text-sm text-neutral-700 dark:text-neutral-300">
+                {tenant?.region?.substring(0, 2)}/{tenant?.settings?.compliance?.gdprEnabled ? "GDPR" : "Std"}
+              </span>
+            </div>
+          )}
+
           {/* Notifications */}
-          <NotificationBell />
+          {!hideNotificationBell && <NotificationBell />}
         </div>
       </div>
     </header>

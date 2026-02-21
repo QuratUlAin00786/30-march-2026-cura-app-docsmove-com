@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow, differenceInSeconds } from "date-fns";
-import { 
-  Bell, 
-  CheckCircle, 
-  AlertTriangle, 
-  Info, 
-  Clock, 
-  User, 
+import {
+  Bell,
+  CheckCircle,
+  AlertTriangle,
+  Info,
+  Clock,
+  User,
   Calendar,
   Pill,
   Activity,
@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -76,14 +76,14 @@ function TimeAgo({ date }: { date: string }) {
         // Get CURRENT TIME in user's local timezone
         const now = new Date();
         let notificationDate: Date;
-        
+
         // Parse the date string from backend
         if (typeof date === 'string') {
           let dateString = date.trim();
-          
+
           // Check if date has timezone indicator ('Z' for UTC or +/-HH:MM)
           const hasTimezone = dateString.includes('Z') || dateString.match(/[+-]\d{2}:\d{2}$/);
-          
+
           if (hasTimezone) {
             // Has timezone info - parse directly (JavaScript handles timezone conversion)
             notificationDate = new Date(dateString);
@@ -91,24 +91,24 @@ function TimeAgo({ date }: { date: string }) {
             // No timezone info - backend returns ISO format without 'Z'
             // We need to append 'Z' to tell JavaScript this is UTC
             let normalizedDate = dateString;
-            
+
             // Remove milliseconds if present (e.g., "2024-01-15T10:00:00.123" -> "2024-01-15T10:00:00")
             if (normalizedDate.includes('.')) {
               normalizedDate = normalizedDate.split('.')[0];
             }
-            
+
             // Convert space-separated to ISO format (e.g., "2024-01-15 10:00:00" -> "2024-01-15T10:00:00")
             if (normalizedDate.includes(' ') && !normalizedDate.includes('T')) {
               normalizedDate = normalizedDate.replace(' ', 'T');
             }
-            
+
             // Append 'Z' to indicate UTC - this is CRITICAL for correct parsing
             if (!normalizedDate.endsWith('Z')) {
               normalizedDate = normalizedDate + 'Z';
             }
-            
+
             notificationDate = new Date(normalizedDate);
-            
+
             // Fallback parsing if above fails
             if (isNaN(notificationDate.getTime())) {
               notificationDate = new Date(dateString + ' UTC');
@@ -122,7 +122,7 @@ function TimeAgo({ date }: { date: string }) {
         } else {
           notificationDate = new Date(date);
         }
-        
+
         // Validate the parsed date
         if (isNaN(notificationDate.getTime())) {
           setTimeAgo("just now");
@@ -347,8 +347,8 @@ export function NotificationBell() {
     // Navigate to action URL if provided
     if (notification.actionUrl) {
       const subdomain = getActiveSubdomain();
-      const fullUrl = notification.actionUrl.startsWith('/') 
-        ? `/${subdomain}${notification.actionUrl}` 
+      const fullUrl = notification.actionUrl.startsWith('/')
+        ? `/${subdomain}${notification.actionUrl}`
         : notification.actionUrl;
       navigate(fullUrl);
     }
@@ -367,8 +367,8 @@ export function NotificationBell() {
         <Button variant="ghost" size="sm" className="relative">
           <Bell className="h-5 w-5 text-neutral-600" />
           {badgeCount > 0 && (
-            <Badge 
-              variant="destructive" 
+            <Badge
+              variant="destructive"
               className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
             >
               {badgeCount}
@@ -376,122 +376,126 @@ export function NotificationBell() {
           )}
         </Button>
       </DropdownMenuTrigger>
-      
-      <DropdownMenuContent 
-        align="end" 
+
+      <DropdownMenuContent
+        align="end"
         className="w-96 p-0 flex flex-col max-h-[400px] h-[400px]"
         sideOffset={5}
       >
-        <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
-          <h3 className="font-semibold text-lg">Notifications</h3>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between p-3 border-b border-neutral-100 dark:border-neutral-800 flex-shrink-0 bg-white dark:bg-card">
+          <h3 className="font-bold text-base text-gray-900 dark:text-white">Notifications</h3>
+          <div className="flex items-center gap-1.5">
             {badgeCount > 0 && (
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-7 px-2 text-xs font-semibold hover:bg-neutral-100 dark:hover:bg-neutral-800 text-gray-700 dark:text-gray-300"
                 onClick={() => markAllAsReadMutation.mutate()}
                 disabled={markAllAsReadMutation.isPending}
               >
-                <Check className="h-4 w-4 mr-1" />
+                <Check className="h-3.5 w-3.5 mr-1" />
                 Mark all read
               </Button>
             )}
-            <Badge variant="secondary" className="ml-2">
-              {visibleNotifications.length} {visibleNotifications.length === 1 ? 'notification' : 'notifications'}
+            <Badge
+              variant="secondary"
+              className="px-2 py-0.5 h-6 text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border-none rounded-full flex flex-col items-center justify-center leading-tight"
+            >
+              <span>{visibleNotifications.length}</span>
+              <span>{visibleNotifications.length === 1 ? 'notification' : 'notifications'}</span>
             </Badge>
           </div>
         </div>
 
         <div className="flex-1 overflow-hidden min-h-0">
           <ScrollArea className="h-full">
-          {isLoading ? (
-            <div className="p-4 text-center text-gray-500">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
-              Loading notifications...
-            </div>
-          ) : visibleNotifications.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              <Bell className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p className="font-medium">No notifications</p>
-              <p className="text-sm">You're all caught up!</p>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {visibleNotifications.map((notification: Notification) => (
-                <div
-                  key={notification.id}
-                  className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors relative ${
-                    notification.status === "unread" ? "bg-blue-50" : ""
-                  }`}
-                  onClick={() => handleNotificationClick(notification)}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3 flex-1">
-                      <div className={`p-2 rounded-full ${getPriorityColor(notification.priority)}`}>
-                        {getNotificationIcon(notification.type)}
-                      </div>
-                      
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-medium text-sm text-gray-900 truncate">
-                            {notification.title}
-                          </h4>
-                          {notification.status === "unread" && (
-                            <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0"></div>
-                          )}
+            {isLoading ? (
+              <div className="p-4 text-center text-gray-500">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                Loading notifications...
+              </div>
+            ) : visibleNotifications.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <Bell className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <p className="font-medium">No notifications</p>
+                <p className="text-sm">You're all caught up!</p>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {visibleNotifications.map((notification: Notification) => (
+                  <div
+                    key={notification.id}
+                    className={`p-4 hover:bg-gray-50 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors relative border-b border-neutral-50 dark:border-neutral-800/50 ${notification.status === "unread" ? "bg-blue-50/50 dark:bg-blue-900/10" : "bg-white dark:bg-card"
+                      }`}
+                    onClick={() => handleNotificationClick(notification)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3 flex-1">
+                        <div className={`p-2 rounded-full ${getPriorityColor(notification.priority)}`}>
+                          {getNotificationIcon(notification.type)}
                         </div>
-                        
-                        <p className="text-sm text-gray-600 line-clamp-2 mb-2">
-                          {notification.message}
-                        </p>
-                        
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <TimeAgo date={notification.createdAt} />
-                          {notification.metadata?.patientName && (
-                            <>
-                              <span>•</span>
-                              <span>{notification.metadata.patientName}</span>
-                            </>
-                          )}
-                          {notification.metadata?.department && (
-                            <>
-                              <span>•</span>
-                              <span>{notification.metadata.department}</span>
-                            </>
-                          )}
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">
+                              {notification.title}
+                            </h4>
+                            {notification.status === "unread" && (
+                              <div className="w-1.5 h-1.5 bg-blue-600 rounded-full flex-shrink-0"></div>
+                            )}
+                          </div>
+
+                          <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mb-2 leading-relaxed">
+                            {notification.message}
+                          </p>
+
+                          <div className="flex items-center gap-2 text-[11px] font-medium text-gray-500 dark:text-gray-500 uppercase tracking-tight">
+                            <TimeAgo date={notification.createdAt} />
+                            {notification.metadata?.patientName && (
+                              <>
+                                <span className="text-gray-300 dark:text-gray-700 mx-1">•</span>
+                                <span className="text-blue-600 dark:text-blue-400">{notification.metadata.patientName}</span>
+                              </>
+                            )}
+                            {notification.metadata?.department && (
+                              <>
+                                <span className="text-gray-300 dark:text-gray-700 mx-1">•</span>
+                                <span>{notification.metadata.department}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-1 ml-2">
-                      {notification.priority === "critical" && (
-                        <Badge variant="destructive" className="text-xs">
-                          Urgent
-                        </Badge>
-                      )}
-                      
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 hover:bg-gray-200"
-                        onClick={(e) => handleDismiss(e, notification.id)}
-                        disabled={dismissMutation.isPending}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
+
+                      <div className="flex items-center gap-1 ml-2">
+                        {notification.priority === "critical" && (
+                          <Badge variant="destructive" className="text-xs">
+                            Urgent
+                          </Badge>
+                        )}
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 hover:bg-gray-200"
+                          onClick={(e) => handleDismiss(e, notification.id)}
+                          disabled={dismissMutation.isPending}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
           </ScrollArea>
         </div>
 
-        <div className="p-3 border-t bg-gray-50 flex-shrink-0">
-          <Button 
-            variant="ghost" 
-            className="w-full text-sm"
+        <div className="p-2 border-t border-neutral-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900/50 flex-shrink-0">
+          <Button
+            variant="ghost"
+            className="w-full text-xs font-bold text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
             onClick={() => {
               const subdomain = getActiveSubdomain();
               navigate(`/${subdomain}/notifications`);

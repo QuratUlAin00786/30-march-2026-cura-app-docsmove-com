@@ -43,7 +43,7 @@ class EmailService {
         pass: 'test'
       }
     });
-    
+
     // Initialize production email service
     this.initializeProductionEmailService();
   }
@@ -51,11 +51,11 @@ class EmailService {
   private async getSendGridCredentials() {
     try {
       const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-      const xReplitToken = process.env.REPL_IDENTITY 
-        ? 'repl ' + process.env.REPL_IDENTITY 
-        : process.env.WEB_REPL_RENEWAL 
-        ? 'depl ' + process.env.WEB_REPL_RENEWAL 
-        : null;
+      const xReplitToken = process.env.REPL_IDENTITY
+        ? 'repl ' + process.env.REPL_IDENTITY
+        : process.env.WEB_REPL_RENEWAL
+          ? 'depl ' + process.env.WEB_REPL_RENEWAL
+          : null;
 
       if (!xReplitToken || !hostname) {
         console.log('[EMAIL] SendGrid connector not available in this environment');
@@ -308,7 +308,7 @@ class EmailService {
 
       // Update from address to use the authenticated email
       mailOptions.from = `Cura EMR <${process.env.FALLBACK_EMAIL_USER}>`;
-      
+
       const result = await fallbackTransporter.sendMail(mailOptions);
       console.log('[EMAIL] Fallback email sent successfully:', result.messageId);
       return { success: true };
@@ -374,7 +374,7 @@ class EmailService {
       </body>
       </html>
     `;
-    
+
     const text = `
 Dear ${patientName},
 
@@ -439,7 +439,7 @@ Cura EMR Team
       </body>
       </html>
     `;
-    
+
     const text = `
 Dear ${patientName},
 
@@ -503,7 +503,7 @@ Cura EMR Team
       </body>
       </html>
     `;
-    
+
     const text = `
 Dear ${patientName},
 
@@ -559,14 +559,14 @@ Cura EMR Team
   generateGeneralReminderEmail(patientName: string, reminderType: string, message: string): EmailTemplate {
     const typeLabels: Record<string, string> = {
       'appointment_reminder': 'Appointment Reminder',
-      'medication_reminder': 'Medication Reminder', 
+      'medication_reminder': 'Medication Reminder',
       'follow_up_reminder': 'Follow-up Reminder',
       'emergency_alert': 'Emergency Alert',
       'preventive_care': 'Preventive Care Reminder',
       'billing_notice': 'Billing Notice',
       'health_check': 'Health Check Reminder'
     };
-    
+
     const subject = `${typeLabels[reminderType] || 'Healthcare Reminder'} - Cura EMR`;
     const html = `
       <!DOCTYPE html>
@@ -606,7 +606,7 @@ Cura EMR Team
       </body>
       </html>
     `;
-    
+
     const text = `
 Dear ${patientName},
 
@@ -741,7 +741,7 @@ Cura EMR Team
       </body>
       </html>
     `;
-    
+
     const text = `
 Dear ${userName},
 
@@ -795,7 +795,7 @@ This is an automated security notification.
       second: '2-digit',
       hour12: false
     });
-    
+
     const template = this.generatePasswordChangeEmail(userName, timestamp, viewToken, newPassword);
     return this.sendEmail({
       to: userEmail,
@@ -867,7 +867,7 @@ This is an automated security notification.
       </body>
       </html>
     `;
-    
+
     const text = `
 Dear Colleague,
 
@@ -904,8 +904,8 @@ Cura EMR Team
 
   // Template for prescription PDF emails with clinic logo in header and Cura logo in footer
   generatePrescriptionEmail(
-    patientName: string, 
-    pharmacyName: string, 
+    patientName: string,
+    pharmacyName: string,
     prescriptionData?: any,
     clinicLogoUrl?: string,
     organizationName?: string,
@@ -1112,10 +1112,10 @@ Cura EMR Team
       <body>
         <div class="container">
           <div class="header">
-            ${clinicHeader?.logoBase64 || clinicLogoUrl ? 
-              `<img src="${clinicLogoUrl || (clinicHeader.logoBase64.startsWith('data:') ? clinicHeader.logoBase64 : `data:image/png;base64,${clinicHeader.logoBase64}`)}" alt="${clinicHeader?.clinicName || organizationName || 'Medical Clinic'} Logo" class="clinic-logo">` :
-              ''
-            }
+            ${clinicHeader?.logoBase64 || clinicLogoUrl ?
+        `<img src="${clinicLogoUrl || (clinicHeader.logoBase64.startsWith('data:') ? clinicHeader.logoBase64 : `data:image/png;base64,${clinicHeader.logoBase64}`)}" alt="${clinicHeader?.clinicName || organizationName || 'Medical Clinic'} Logo" class="clinic-logo">` :
+        ''
+      }
             <div class="header-info">
               ${clinicHeader ? `
                 <h1 class="clinic-name" style="font-size: ${clinicHeader.clinicNameFontSize || '28px'}; font-family: ${clinicHeader.fontFamily || 'verdana'}; font-weight: ${clinicHeader.fontWeight || 'bold'}; font-style: ${clinicHeader.fontStyle || 'normal'}; text-decoration: ${clinicHeader.textDecoration || 'none'}; color: white !important; margin: 0 0 12px 0; padding: 0; display: block;">
@@ -1216,7 +1216,7 @@ Cura EMR Team
       </body>
       </html>
     `;
-    
+
     const text = `
 Prescription Document
 
@@ -1255,16 +1255,16 @@ For technical support, please contact your system administrator.
 
   // Send prescription email with PDF attachment
   async sendPrescriptionEmail(
-    pharmacyEmail: string, 
-    patientName: string, 
-    pharmacyName: string, 
+    pharmacyEmail: string,
+    patientName: string,
+    pharmacyName: string,
     pdfBuffer: Buffer,
     prescriptionData?: any,
     clinicLogoUrl?: string,
     organizationName?: string
   ): Promise<boolean> {
     const template = this.generatePrescriptionEmail(patientName, pharmacyName, prescriptionData, clinicLogoUrl, organizationName);
-    
+
     return this.sendEmail({
       to: pharmacyEmail,
       subject: template.subject,
@@ -1282,8 +1282,8 @@ For technical support, please contact your system administrator.
 
   // Template for new user account creation
   generateNewUserAccountEmail(
-    userName: string, 
-    userEmail: string, 
+    userName: string,
+    userEmail: string,
     password: string,
     organizationName: string,
     role: string
@@ -1443,7 +1443,7 @@ For technical support, please contact your system administrator.
       </body>
       </html>
     `;
-    
+
     const text = `
 Welcome to Cura EMR!
 
@@ -1510,7 +1510,7 @@ Company Registration: 16556912
       : `https://${normalizedBaseUrl}`;
     const resetUrl = `${baseUrl}/auth/reset-password?token=${resetToken}`;
     const subject = 'Password Reset Request - Cura EMR';
-    
+
     const html = `
 <!DOCTYPE html>
 <html>
@@ -1597,7 +1597,7 @@ Company Registration: 16556912
 </body>
 </html>
     `;
-    
+
     const text = `Hello ${userFirstName},
 
 You requested to reset your password for your Cura EMR account.
@@ -1611,7 +1611,7 @@ If you did not request a password reset, please ignore this email and your passw
 
 Best regards,
 Cura EMR Team`;
-    
+
     return { subject, html, text };
   }
 
@@ -1629,7 +1629,7 @@ Cura EMR Team`;
     const subject = 'Password Successfully Changed - Cura EMR';
     const baseUrl = process.env.REPLIT_DEV_DOMAIN || 'your-domain.com';
     const loginUrl = `https://${baseUrl}/auth/login`;
-    
+
     const html = `
 <!DOCTYPE html>
 <html>
@@ -1712,7 +1712,7 @@ Cura EMR Team`;
 </body>
 </html>
     `;
-    
+
     const text = `Hello ${userFirstName},
 
 Your password has been successfully changed for your Cura EMR account.
@@ -1723,7 +1723,7 @@ You can now sign in at: ${loginUrl}
 
 Best regards,
 Cura EMR Team`;
-    
+
     return { subject, html, text };
   }
 
@@ -1731,6 +1731,105 @@ Cura EMR Team`;
     const template = this.generatePasswordResetConfirmationEmail(userFirstName);
     return this.sendEmail({
       to: toEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.text
+    });
+  }
+
+  // Template for SaaS invoice notifications
+  generateSaaSInvoiceEmail(customerName: string, invoiceNumber: string, amount: string, currency: string, dueDate: string, lineItems: any[]): EmailTemplate {
+    const subject = `Your SaaS Invoice ${invoiceNumber} - Cura EMR`;
+    const lineItemsHtml = lineItems.map(item => `
+      <tr>
+        <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.description}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${item.quantity}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${currency} ${parseFloat(item.rate || 0).toFixed(2)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${currency} ${parseFloat(item.amount || 0).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #4F46E5; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .invoice-box { background-color: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; color: #666; font-size: 12px; }
+          .total-row { font-weight: bold; background-color: #f3f4f6; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Cura EMR</h1>
+            <h2>Invoice ${invoiceNumber}</h2>
+          </div>
+          <div class="content">
+            <p>Dear ${customerName},</p>
+            <p>A new invoice has been generated for your recent subscription:</p>
+            
+            <div class="invoice-box">
+              <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="background-color: #f3f4f6;">
+                    <th style="padding: 10px; text-align: left;">Description</th>
+                    <th style="padding: 10px; text-align: right;">Qty</th>
+                    <th style="padding: 10px; text-align: right;">Rate</th>
+                    <th style="padding: 10px; text-align: right;">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${lineItemsHtml}
+                  <tr class="total-row">
+                    <td colspan="3" style="padding: 10px; text-align: right;">Total Amount Paid</td>
+                    <td style="padding: 10px; text-align: right;">${currency} ${parseFloat(amount).toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            
+            <p><strong>Due Date:</strong> ${dueDate}</p>
+            <p>Thank you for choosing Cura EMR for your healthcare platform needs.</p>
+            
+            <p>Best regards,<br>Cura EMR Billing Team</p>
+          </div>
+          <div class="footer">
+            <p>© 2026 Cura EMR by Halo Group. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `
+Dear ${customerName},
+
+Invoice Number: ${invoiceNumber}
+Total Amount: ${currency} ${amount}
+Due Date: ${dueDate}
+
+Description | Qty | Rate | Amount
+${lineItems.map(item => `${item.description} | ${item.quantity} | ${currency} ${item.rate} | ${currency} ${item.amount}`).join('\n')}
+
+Thank you for choosing Cura EMR.
+
+Best regards,
+Cura EMR Billing Team
+    `;
+
+    return { subject, html, text };
+  }
+
+  // Send SaaS invoice email
+  async sendSaaSInvoiceEmail(email: string, customerName: string, invoiceNumber: string, amount: string, currency: string, dueDate: string, lineItems: any[]): Promise<boolean> {
+    const template = this.generateSaaSInvoiceEmail(customerName, invoiceNumber, amount, currency, dueDate, lineItems);
+    return this.sendEmail({
+      to: email,
       subject: template.subject,
       html: template.html,
       text: template.text

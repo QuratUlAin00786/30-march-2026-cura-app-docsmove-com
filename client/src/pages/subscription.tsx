@@ -35,9 +35,9 @@ const getPackageIcon = (name: string) => {
 // Helper function to convert database features to array of strings
 const formatPackageFeatures = (features: any): string[] => {
   if (!features) return [];
-  
+
   const featureList: string[] = [];
-  
+
   if (features.maxUsers) featureList.push(`Up to ${features.maxUsers} users`);
   if (features.maxPatients) featureList.push(`Up to ${features.maxPatients} patients`);
   if (features.aiEnabled) featureList.push('AI-powered insights');
@@ -48,7 +48,7 @@ const formatPackageFeatures = (features: any): string[] => {
   if (features.prioritySupport) featureList.push('Priority support');
   if (features.storageGB) featureList.push(`${features.storageGB}GB storage`);
   if (features.apiCallsPerMonth) featureList.push(`${features.apiCallsPerMonth.toLocaleString()} API calls/month`);
-  
+
   return featureList;
 };
 
@@ -100,7 +100,7 @@ const parseDateParts = (value?: string | Date | null) => {
   };
 };
 
-const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const formatDate = (date?: string | Date | null) => {
   const parts = parseDateParts(date);
@@ -164,7 +164,7 @@ export default function Subscription() {
       });
 
       const data = await response.json();
-      
+
       if (data.url) {
         window.location.href = data.url;
       } else {
@@ -206,7 +206,7 @@ export default function Subscription() {
       });
 
       const data = await response.json();
-      
+
       if (data.url) {
         window.location.href = data.url;
       } else {
@@ -222,7 +222,7 @@ export default function Subscription() {
       setIsStripeLoading(false);
     }
   };
-  
+
   const { data: subscription, isLoading, error } = useQuery<Subscription>({
     queryKey: ["/api/subscription"],
   });
@@ -368,8 +368,8 @@ export default function Subscription() {
   if (isLoading || packagesLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 page-full-width page-zoom-90">
-        <Header 
-          title="Subscription" 
+        <Header
+          title="Subscription"
           subtitle="Manage your subscription and billing."
         />
         <div className="w-full px-3 sm:px-4 lg:px-6 py-4 flex-1 flex items-center justify-center">
@@ -381,8 +381,8 @@ export default function Subscription() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 page-full-width page-zoom-90">
-      <Header 
-        title="Subscription" 
+      <Header
+        title="Subscription"
         subtitle="Manage your subscription and billing."
       />
       <div className="w-full flex-1 overflow-auto bg-white dark:bg-gray-900 px-3 sm:px-4 lg:px-5 py-4">
@@ -427,11 +427,11 @@ export default function Subscription() {
           )}
 
           {postCheckoutSession && (
-            <Alert variant="success">
+            <Alert variant="default" className="border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30">
               <AlertTitle className="text-sm">Stripe session verified</AlertTitle>
               <AlertDescription className="text-sm">
-                Subscription {postCheckoutSession.subscription || "in progress"} · Invoice{" "}
-                {postCheckoutSession.invoice || "pending"} · Checkout ID {postCheckoutSession.id}.
+                Subscription {postCheckoutSession.subscription ? (typeof postCheckoutSession.subscription === 'object' ? postCheckoutSession.subscription.id : postCheckoutSession.subscription) : "in progress"} · Invoice{" "}
+                {postCheckoutSession.invoice ? (typeof postCheckoutSession.invoice === 'object' ? postCheckoutSession.invoice.id : postCheckoutSession.invoice) : "pending"} · Checkout ID {postCheckoutSession.id}.
               </AlertDescription>
             </Alert>
           )}
@@ -473,31 +473,31 @@ export default function Subscription() {
                       {subscription.planName}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      <Badge 
+                      <Badge
                         className={
-                          subscription.status === 'active' 
-                            ? "bg-green-500 text-white" 
+                          subscription.status === 'active'
+                            ? "bg-green-500 text-white"
                             : subscription.status === 'trial'
-                            ? "bg-blue-500 text-white"
-                            : subscription.status === 'expired'
-                            ? "bg-red-500 text-white"
-                            : "bg-yellow-500 text-white"
+                              ? "bg-blue-500 text-white"
+                              : subscription.status === 'expired'
+                                ? "bg-red-500 text-white"
+                                : "bg-yellow-500 text-white"
                         }
                       >
                         {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
                       </Badge>
                       {subscription.paymentStatus && (
-                        <Badge 
+                        <Badge
                           className={
-                            subscription.paymentStatus === 'paid' 
-                              ? "bg-green-600 text-white" 
+                            subscription.paymentStatus === 'paid'
+                              ? "bg-green-600 text-white"
                               : subscription.paymentStatus === 'trial'
-                              ? "bg-blue-600 text-white"
-                              : subscription.paymentStatus === 'unpaid'
-                              ? "bg-orange-500 text-white"
-                              : subscription.paymentStatus === 'failed'
-                              ? "bg-red-600 text-white"
-                              : "bg-gray-500 text-white"
+                                ? "bg-blue-600 text-white"
+                                : subscription.paymentStatus === 'unpaid'
+                                  ? "bg-orange-500 text-white"
+                                  : subscription.paymentStatus === 'failed'
+                                    ? "bg-red-600 text-white"
+                                    : "bg-gray-500 text-white"
                           }
                         >
                           Payment: {subscription.paymentStatus.charAt(0).toUpperCase() + subscription.paymentStatus.slice(1)}
@@ -505,7 +505,7 @@ export default function Subscription() {
                       )}
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Users className="h-4 w-4" />
@@ -515,15 +515,15 @@ export default function Subscription() {
                       {subscription.currentUsers} <span className="text-lg text-muted-foreground">/ {subscription.userLimit}</span>
                     </p>
                     <div className="relative w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                      <div 
-                        className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all" 
-                        style={{ 
-                          width: `${Math.min((subscription.currentUsers / subscription.userLimit) * 100, 100)}%` 
+                      <div
+                        className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all"
+                        style={{
+                          width: `${Math.min((subscription.currentUsers / subscription.userLimit) * 100, 100)}%`
                         }}
                       />
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Calendar className="h-4 w-4" />
@@ -532,7 +532,7 @@ export default function Subscription() {
                       </span>
                     </div>
                     <p className="text-xl font-bold">
-                      {subscription.nextBillingAt 
+                      {subscription.nextBillingAt
                         ? formatDateTime(subscription.nextBillingAt)
                         : "—"
                       }
@@ -605,13 +605,12 @@ export default function Subscription() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {plans.map((plan) => (
-                <Card 
-                  key={plan.id} 
-                  className={`relative flex flex-col h-full ${
-                    plan.popular 
-                      ? "border-primary" 
-                      : ""
-                  }`}
+                <Card
+                  key={plan.id}
+                  className={`relative flex flex-col h-full ${plan.popular
+                    ? "border-primary"
+                    : ""
+                    }`}
                 >
                   {plan.popular && (
                     <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10">
@@ -620,7 +619,7 @@ export default function Subscription() {
                       </Badge>
                     </div>
                   )}
-                  
+
                   <CardHeader className="text-center pt-6">
                     <CardTitle className="text-xl mb-4">{plan.name}</CardTitle>
                     <div className="space-y-2">
@@ -636,8 +635,8 @@ export default function Subscription() {
                       </div>
                     </div>
                   </CardHeader>
-                  
-                <CardContent className="space-y-4 flex-1">
+
+                  <CardContent className="space-y-4 flex-1">
                     <div className="space-y-2">
                       {plan.features.map((feature, index) => (
                         <div key={index} className="flex items-start space-x-2">
@@ -645,7 +644,7 @@ export default function Subscription() {
                           <span className="text-sm">{feature}</span>
                         </div>
                       ))}
-                      
+
                       {plan.notIncluded.map((feature, index) => (
                         <div key={index} className="flex items-start space-x-2 opacity-50">
                           <X className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
@@ -655,7 +654,7 @@ export default function Subscription() {
                     </div>
                   </CardContent>
                   <div className="px-6 pb-6">
-                    <Button 
+                    <Button
                       className="w-full text-sm"
                       variant={plan.popular ? "default" : "outline"}
                       disabled={loadingPlanId === plan.id}
@@ -670,8 +669,8 @@ export default function Subscription() {
                       data-testid={`button-plan-${plan.id}`}
                     >
                       {loadingPlanId === plan.id ? "Loading..." : (
-                        subscription?.plan === plan.id 
-                          ? "✓ Current Plan" 
+                        subscription?.plan === plan.id
+                          ? "✓ Current Plan"
                           : `Upgrade (${plan.name}) Package`
                       )}
                     </Button>
@@ -709,7 +708,7 @@ export default function Subscription() {
                           <p className="text-sm text-muted-foreground">{pkg.description}</p>
                         </div>
                       </CardHeader>
-                      
+
                       <CardContent>
                         <div className="space-y-2 mb-4">
                           {pkg.features.map((feature, index) => (
@@ -719,8 +718,8 @@ export default function Subscription() {
                             </div>
                           ))}
                         </div>
-                        
-                        <Button 
+
+                        <Button
                           className="w-full"
                           onClick={() => {
                             console.log('Selected package:', pkg.id);
@@ -788,12 +787,12 @@ export default function Subscription() {
                             {payment.currency} {parseFloat(payment.amount).toFixed(2)}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
-                            <Badge 
+                            <Badge
                               className={
                                 payment.paymentStatus === 'completed' ? 'bg-green-500 text-white' :
-                                payment.paymentStatus === 'pending' ? 'bg-yellow-500 text-white' :
-                                payment.paymentStatus === 'failed' ? 'bg-red-500 text-white' :
-                                ''
+                                  payment.paymentStatus === 'pending' ? 'bg-yellow-500 text-white' :
+                                    payment.paymentStatus === 'failed' ? 'bg-red-500 text-white' :
+                                      ''
                               }
                             >
                               {payment.paymentStatus}
@@ -807,8 +806,8 @@ export default function Subscription() {
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             <div className="flex items-center gap-2">
-                              <Button 
-                                variant="ghost" 
+                              <Button
+                                variant="ghost"
                                 size="sm"
                                 onClick={() => {
                                   const dueDate = new Date(payment.periodEnd);
@@ -845,7 +844,7 @@ export default function Subscription() {
           </Card>
         </div>
       </div>
-      
+
       {/* Current Plan Payment Dialog */}
       <Dialog open={showCurrentPlanDialog} onOpenChange={setShowCurrentPlanDialog}>
         <DialogContent className="sm:max-w-[580px]">
@@ -855,7 +854,7 @@ export default function Subscription() {
               Manage {currentPlanData?.name}
             </DialogTitle>
           </DialogHeader>
-          
+
           {currentPlanData && (
             <div className="space-y-6">
               {/* Plan Details */}
@@ -867,12 +866,12 @@ export default function Subscription() {
                     <div className="text-sm text-gray-500 dark:text-gray-400">/month</div>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                   <Users className="h-4 w-4" />
                   <span>Up to {currentPlanData.userLimit} users</span>
                 </div>
-                
+
                 <div className="flex items-center gap-2 text-green-600 dark:text-green-500">
                   <Check className="h-4 w-4" />
                   <span className="text-sm font-medium">30-day money-back guarantee</span>
@@ -886,13 +885,13 @@ export default function Subscription() {
                   <TabsTrigger value="paypal">PayPal</TabsTrigger>
                   <TabsTrigger value="stripe">Stripe</TabsTrigger>
                 </TabsList>
-                
+
                 <TabsContent value="ryft" className="space-y-4">
                   <div className="flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400 py-2">
                     <Shield className="h-4 w-4" />
                     <span>Secured by Ryft</span>
                   </div>
-                  
+
                   <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-4 space-y-3">
                     <h4 className="font-semibold text-blue-900 dark:text-blue-100">Secure Payment with Ryft</h4>
                     <p className="text-sm text-blue-800 dark:text-blue-200">
@@ -909,21 +908,21 @@ export default function Subscription() {
                       </div>
                     </div>
                   </div>
-                  
-                  <Button 
+
+                  <Button
                     className="w-full"
                     data-testid="button-pay-ryft"
                   >
                     Pay £{currentPlanData.price}/month with Ryft
                   </Button>
                 </TabsContent>
-                
+
                 <TabsContent value="paypal" className="space-y-4">
                   <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-2">
                     <Shield className="h-4 w-4" />
                     <span>Secured by PayPal</span>
                   </div>
-                  
+
                   <div className="bg-muted rounded-lg p-4 space-y-2">
                     <h4 className="font-semibold">Secure Payment with PayPal</h4>
                     <p className="text-sm text-muted-foreground">
@@ -940,21 +939,21 @@ export default function Subscription() {
                       </div>
                     </div>
                   </div>
-                  
-                  <Button 
+
+                  <Button
                     className="w-full"
                     data-testid="button-pay-paypal"
                   >
                     Pay £{currentPlanData.price}/month with PayPal
                   </Button>
                 </TabsContent>
-                
+
                 <TabsContent value="stripe" className="space-y-4">
                   <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-2">
                     <Shield className="h-4 w-4" />
                     <span>Secured by Stripe</span>
                   </div>
-                  
+
                   <div className="bg-muted rounded-lg p-4 space-y-2">
                     <h4 className="font-semibold">Secure Payment with Stripe</h4>
                     <p className="text-sm text-muted-foreground">
@@ -971,8 +970,8 @@ export default function Subscription() {
                       </div>
                     </div>
                   </div>
-                  
-                  <Button 
+
+                  <Button
                     className="w-full"
                     data-testid="button-pay-stripe"
                   >
@@ -989,7 +988,7 @@ export default function Subscription() {
           )}
         </DialogContent>
       </Dialog>
-      
+
       {/* Payment Method Dialog */}
       {selectedPlan && (
         <PaymentMethodDialog
@@ -1005,7 +1004,7 @@ export default function Subscription() {
           <DialogHeader className="flex flex-row items-center justify-between gap-4">
             <DialogTitle>Invoice #{selectedInvoice?.invoiceNumber}</DialogTitle>
             <div className="flex items-center gap-2">
-              <Button 
+              <Button
                 onClick={() => {
                   if (invoiceRef.current) {
                     const printContent = invoiceRef.current.innerHTML;
@@ -1027,9 +1026,9 @@ export default function Subscription() {
                       printWindow.print();
                     }
                   }
-                }} 
-                variant="outline" 
-                size="sm" 
+                }}
+                variant="outline"
+                size="sm"
                 className="gap-2"
                 data-testid="button-print-invoice"
               >
@@ -1046,20 +1045,20 @@ export default function Subscription() {
           )}
         </DialogContent>
       </Dialog>
-    
-    <Dialog open={stripeAlertOpen} onOpenChange={setStripeAlertOpen}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Stripe</DialogTitle>
-        </DialogHeader>
-        <div className="py-4">
-          <p className="text-sm text-gray-700">{stripeAlertMessage}</p>
-        </div>
-        <div className="flex justify-end">
-          <Button onClick={() => setStripeAlertOpen(false)}>OK</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+
+      <Dialog open={stripeAlertOpen} onOpenChange={setStripeAlertOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Stripe</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-700">{stripeAlertMessage}</p>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => setStripeAlertOpen(false)}>OK</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -43,15 +43,15 @@ import { createCanvas, loadImage } from 'canvas';
 import sharp from 'sharp';
 
 // Initialize Stripe with secret key only if provided (conditional to avoid crashes)
-const stripe = process.env.STRIPE_SECRET_KEY 
+const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2025-07-30.basil',
-    })
+    apiVersion: '2025-07-30.basil',
+  })
   : null;
 
 // Initialize OpenAI client (same configuration as aiService)
-const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key" 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key"
 });
 
 /**
@@ -154,7 +154,7 @@ async function ensureAnatomicalAnalysisImagesDirectory(organizationId: number, p
  */
 async function convertImageToSupportedFormat(imageBuffer: Buffer, fileExtension: string): Promise<{ buffer: Buffer; mimeType: string }> {
   const unsupportedFormats = ['.webp', '.gif', '.bmp', '.tiff', '.tif', '.ico', '.jfif', '.pjpeg', '.pjp', '.svg'];
-  
+
   if (!unsupportedFormats.includes(fileExtension.toLowerCase())) {
     // Already a supported format (JPEG or PNG)
     if (fileExtension === '.png') {
@@ -163,15 +163,15 @@ async function convertImageToSupportedFormat(imageBuffer: Buffer, fileExtension:
       return { buffer: imageBuffer, mimeType: 'image/jpeg' };
     }
   }
-  
+
   try {
     console.log(`🔄 Converting ${fileExtension} image to JPEG for PDF compatibility using sharp`);
-    
+
     // Use sharp for robust image conversion (supports WebP, GIF, BMP, etc.)
     const convertedBuffer = await sharp(imageBuffer)
       .jpeg({ quality: 95 }) // Convert to JPEG with high quality
       .toBuffer();
-    
+
     console.log(`✅ Successfully converted ${fileExtension} to JPEG`);
     return { buffer: convertedBuffer, mimeType: 'image/jpeg' };
   } catch (error) {
@@ -217,7 +217,7 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
   medicalRecords.forEach(record => {
     if (record.notes) {
       const notes = record.notes.toLowerCase();
-      
+
       // Parse Blood Pressure (BP)
       const bpMatch = notes.match(/bp[:\s]*(\d+)\/(\d+)|blood pressure[:\s]*(\d+)\/(\d+)|systolic[:\s]*(\d+)/);
       if (bpMatch) {
@@ -273,7 +273,7 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
       const bmiMatch = notes.match(/bmi[:\s]*(\d+\.?\d*)/);
       const weightMatch = notes.match(/weight[:\s]*(\d+\.?\d*)/);
       const heightMatch = notes.match(/height[:\s]*(\d+\.?\d*)/);
-      
+
       if (bmiMatch) {
         const bmi = parseFloat(bmiMatch[1]);
         if (bmi >= 18.5 && bmi <= 24.9) {
@@ -300,10 +300,10 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
       const glucoseMatch = notes.match(/glucose[:\s]*(\d+\.?\d*)|blood sugar[:\s]*(\d+\.?\d*)/);
       const cholesterolMatch = notes.match(/cholesterol[:\s]*(\d+\.?\d*)/);
       const hba1cMatch = notes.match(/hba1c[:\s]*(\d+\.?\d*)/);
-      
+
       let labScore = 10; // Default
       let labCount = 0;
-      
+
       if (glucoseMatch) {
         const glucose = parseFloat(glucoseMatch[1] || glucoseMatch[2]);
         if (glucose >= 70 && glucose <= 140) {
@@ -315,7 +315,7 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
         }
         labCount++;
       }
-      
+
       if (cholesterolMatch) {
         const cholesterol = parseFloat(cholesterolMatch[1]);
         if (cholesterol < 200) {
@@ -327,7 +327,7 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
         }
         labCount++;
       }
-      
+
       if (hba1cMatch) {
         const hba1c = parseFloat(hba1cMatch[1]);
         if (hba1c < 5.7) {
@@ -339,7 +339,7 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
         }
         labCount++;
       }
-      
+
       if (labCount > 0) {
         scores.labs.points = Math.min(20, labScore / labCount);
       }
@@ -456,9 +456,9 @@ class AiInsightSSEBroadcaster {
       this.connections.set(organizationId, new Set());
     }
     this.connections.get(organizationId)!.add(res);
-    
+
     console.log(`[SSE] Added connection for organization ${organizationId}. Total connections: ${this.connections.get(organizationId)!.size}`);
-    
+
     // Remove connection on close
     res.on('close', () => {
       this.removeConnection(organizationId, res);
@@ -488,7 +488,7 @@ class AiInsightSSEBroadcaster {
     const sseData = `id: ${eventId}\nevent: ai_insight.status_updated\ndata: ${eventData}\n\n`;
 
     const deadConnections: express.Response[] = [];
-    
+
     orgConnections.forEach((res) => {
       try {
         if (!res.headersSent && !res.destroyed) {
@@ -520,35 +520,35 @@ function handleRouteError(error: any, operation: string, res: express.Response) 
   // Handle Zod validation errors (return 400)
   if (error?.name === 'ZodError') {
     console.error(`[VALIDATION_ERROR] ${operation}:`, error.errors);
-    return res.status(400).json({ 
-      error: "Validation failed", 
-      details: error.errors 
+    return res.status(400).json({
+      error: "Validation failed",
+      details: error.errors
     });
   }
-  
+
   // Handle database transient errors (return 503)
   if (error?.code === 'SERVICE_UNAVAILABLE' && error?.statusCode === 503) {
     console.error(`[DB_TRANSIENT_ERROR] ${operation}:`, error.message);
-    return res.status(503).json({ 
+    return res.status(503).json({
       error: error.message || "Service temporarily unavailable. Please try again in a moment.",
       retryAfter: 5 // Suggest retry after 5 seconds
     });
   }
-  
+
   // Handle other database connection errors that might not be caught by retry logic
-  if (error?.code === '57P01' || error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' || 
-      error?.message?.includes('terminating connection')) {
+  if (error?.code === '57P01' || error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT' ||
+    error?.message?.includes('terminating connection')) {
     console.error(`[DB_CONNECTION_ERROR] ${operation}:`, error.message);
-    return res.status(503).json({ 
+    return res.status(503).json({
       error: "Database connection issue. Please try again in a moment.",
       retryAfter: 3
     });
   }
-  
+
   // Handle generic errors (return 500)
   console.error(`[ERROR] ${operation}:`, error);
-  return res.status(500).json({ 
-    error: `Failed to ${operation.toLowerCase()}` 
+  return res.status(500).json({
+    error: `Failed to ${operation.toLowerCase()}`
   });
 }
 
@@ -569,7 +569,7 @@ const upload = multer({
       'image/jpg',
       'image/png'
     ];
-    
+
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -591,7 +591,7 @@ const uploadPhoto = multer({
       'image/jpg',
       'image/png'
     ];
-    
+
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -616,7 +616,7 @@ const uploadVoiceNote = multer({
       'audio/ogg',
       'application/octet-stream' // For blob uploads
     ];
-    
+
     if (allowedTypes.includes(file.mimetype) || file.originalname.endsWith('.webm') || file.originalname.endsWith('.wav') || file.originalname.endsWith('.mp3')) {
       cb(null, true);
     } else {
@@ -630,13 +630,13 @@ const uploadMedicalImages = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       const uploadDir = path.join(process.cwd(), 'uploads', 'Imaging_Images');
-      
+
       // Create directory if it doesn't exist
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
         console.log('📁 Created directory:', uploadDir);
       }
-      
+
       cb(null, uploadDir);
     },
     filename: async (req, file, cb) => {
@@ -646,32 +646,32 @@ const uploadMedicalImages = multer({
         if (!numericPatientId) {
           return cb(new Error('Patient ID is required for file naming'), '');
         }
-        
+
         // Get the tenant from middleware
         const tenantReq = req as any; // TenantRequest
         if (!tenantReq.tenant) {
           return cb(new Error('Tenant information required for patient lookup'), '');
         }
-        
+
         // Get patient to find their string patientId (like "P001")
         const patient = await storage.getPatient(parseInt(numericPatientId), tenantReq.tenant.id);
         if (!patient) {
           return cb(new Error('Patient not found for unique filename generation'), '');
         }
-        
+
         // Extract file extension
         const ext = file.originalname.split('.').pop();
-        
+
         // Create unique filename: patientId_Images.extension (using string patientId like "P001")
         const uniqueFilename = `${patient.patientId}_Images.${ext}`;
-        
+
         console.log('📷 SERVER: Creating unique filename for patient:', {
           numericId: numericPatientId,
           stringPatientId: patient.patientId,
           originalName: file.originalname,
           uniqueFilename: uniqueFilename
         });
-        
+
         cb(null, uniqueFilename);
       } catch (error) {
         console.error('📷 SERVER: Error generating unique filename:', error);
@@ -686,7 +686,7 @@ const uploadMedicalImages = multer({
     // Accept medical image files
     const allowedTypes = [
       'image/jpeg',
-      'image/jpg', 
+      'image/jpg',
       'image/png',
       'image/gif',
       'image/bmp',
@@ -698,10 +698,10 @@ const uploadMedicalImages = multer({
       'application/dicom', // DICOM files
       'application/octet-stream' // For .dcm files
     ];
-    
-    if (allowedTypes.includes(file.mimetype) || 
-        file.originalname.toLowerCase().endsWith('.dcm') ||
-        file.originalname.toLowerCase().endsWith('.dicom')) {
+
+    if (allowedTypes.includes(file.mimetype) ||
+      file.originalname.toLowerCase().endsWith('.dcm') ||
+      file.originalname.toLowerCase().endsWith('.dicom')) {
       cb(null, true);
     } else {
       cb(null, false);
@@ -714,13 +714,13 @@ const uploadReplaceImages = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       const uploadDir = path.join(process.cwd(), 'uploads', 'Imaging_Images');
-      
+
       // Create directory if it doesn't exist
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
         console.log('📁 Created directory:', uploadDir);
       }
-      
+
       cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
@@ -728,12 +728,12 @@ const uploadReplaceImages = multer({
       // We'll rename it to the correct filename after upload
       const ext = file.originalname.split('.').pop();
       const tempFilename = `temp_replace_${Date.now()}.${ext}`;
-      
+
       console.log('🔄 SERVER: Creating temporary filename for replace:', {
         originalName: file.originalname,
         tempFilename: tempFilename
       });
-      
+
       cb(null, tempFilename);
     }
   }),
@@ -744,7 +744,7 @@ const uploadReplaceImages = multer({
     // Accept medical image files
     const allowedTypes = [
       'image/jpeg',
-      'image/jpg', 
+      'image/jpg',
       'image/png',
       'image/gif',
       'image/bmp',
@@ -756,10 +756,10 @@ const uploadReplaceImages = multer({
       'application/dicom', // DICOM files
       'application/octet-stream' // For .dcm files
     ];
-    
-    if (allowedTypes.includes(file.mimetype) || 
-        file.originalname.toLowerCase().endsWith('.dcm') ||
-        file.originalname.toLowerCase().endsWith('.dicom')) {
+
+    if (allowedTypes.includes(file.mimetype) ||
+      file.originalname.toLowerCase().endsWith('.dcm') ||
+      file.originalname.toLowerCase().endsWith('.dicom')) {
       cb(null, true);
     } else {
       cb(null, false);
@@ -799,11 +799,11 @@ const uploadAddImages = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("[ROUTE-REGISTRATION] Starting route registration...");
-  
+
   // DEPLOYMENT HEALTH CHECK - Absolute priority for deployment success
   app.get('/api/health', (req, res) => {
-    res.status(200).json({ 
-      status: 'ok', 
+    res.status(200).json({
+      status: 'ok',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       service: 'cura-emr',
@@ -818,7 +818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log("[GET /api/users/current] Route hit - path:", req.path, "method:", req.method, "url:", req.url);
       // Ensure JSON response - set early
       res.setHeader('Content-Type', 'application/json');
-      
+
       if (!req.user || !req.user.id) {
         console.log("[GET /api/users/current] User not authenticated");
         return res.status(401).json({ error: "User not authenticated" });
@@ -827,7 +827,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.id;
       // Get organization ID from user's JWT token (most reliable)
       const organizationId = req.user.organizationId;
-      
+
       if (!organizationId) {
         console.error("[GET /api/users/current] No organization ID found:", {
           userId,
@@ -836,20 +836,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         return res.status(400).json({ error: "Organization ID is required" });
       }
-      
+
       console.log("[GET /api/users/current] Fetching user:", {
         userId,
         organizationId
       });
-      
+
       const user = await storage.getUser(userId, organizationId);
-      
+
       if (!user) {
         console.error("[GET /api/users/current] User not found:", {
           userId,
           organizationId
         });
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: "User not found",
           userId,
           organizationId
@@ -879,14 +879,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         subSpecialty: userDetails.subSpecialty,
         lastLoginAt: userDetails.lastLoginAt,
       };
-      
+
       console.log("[GET /api/users/current] Returning response with", Object.keys(response).length, "fields");
       return res.json(response);
     } catch (error: any) {
       console.error("[GET /api/users/current] Error:", error);
       // Ensure JSON response even on error
       res.setHeader('Content-Type', 'application/json');
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: "Failed to fetch user details",
         message: error?.message || "Unknown error"
       });
@@ -901,7 +901,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { amount } = req.body;
-      
+
       if (!amount || amount <= 0) {
         return res.status(400).json({ message: "Invalid amount" });
       }
@@ -917,24 +917,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ clientSecret: paymentIntent.client_secret });
     } catch (error: any) {
       console.error("Stripe payment intent error:", error);
-      res.status(500).json({ 
-        message: "Error creating payment intent: " + error.message 
+      res.status(500).json({
+        message: "Error creating payment intent: " + error.message
       });
     }
   });
 
   // Alternative health endpoints for different deployment systems
   app.get('/health', (req, res) => {
-    res.status(200).json({ 
-      status: 'healthy', 
+    res.status(200).json({
+      status: 'healthy',
       timestamp: new Date().toISOString(),
       service: 'cura-emr'
     });
   });
 
   app.get('/healthz', (req, res) => {
-    res.status(200).json({ 
-      status: 'healthy', 
+    res.status(200).json({
+      status: 'healthy',
       timestamp: new Date().toISOString()
     });
   });
@@ -952,7 +952,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   });
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
-  
+
   // EMERGENCY PRODUCTION FIX - Absolute priority route BEFORE everything else
   // SECURITY: Only available in development environment
   app.post('/api/emergency-saas-setup', async (req, res) => {
@@ -964,10 +964,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[EMERGENCY] Emergency SaaS setup triggered');
       const bcrypt = await import('bcrypt');
       const hashedPassword = await bcrypt.default.hash('admin123', 10);
-      
+
       // Use existing storage to create SaaS admin - more reliable than direct DB access
       const existingUser = await storage.getUserByUsername('saas_admin', 0);
-      
+
       if (!existingUser) {
         const saasUser = await storage.createUser({
           username: 'saas_admin',
@@ -980,10 +980,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isActive: true,
           isSaaSOwner: true
         });
-        
+
         console.log(`[EMERGENCY] Created SaaS admin user with ID: ${saasUser.id}`);
-        res.json({ 
-          success: true, 
+        res.json({
+          success: true,
           message: 'Emergency SaaS setup complete - user created',
           userId: saasUser.id,
           timestamp: new Date().toISOString()
@@ -995,10 +995,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isActive: true,
           isSaaSOwner: true
         });
-        
+
         console.log(`[EMERGENCY] Updated existing SaaS admin user with ID: ${existingUser.id}`);
-        res.json({ 
-          success: true, 
+        res.json({
+          success: true,
           message: 'Emergency SaaS setup complete - user updated',
           userId: existingUser.id,
           timestamp: new Date().toISOString()
@@ -1019,7 +1019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     try {
       console.log('[PRODUCTION DEMO] Creating production demo users...');
-      
+
       // Production-ready password hashes for demo credentials
       const productionHashes = {
         admin123: '$2b$12$wBdwP8DhNP3XuviUaPHgB.y.G/Px2AAOYi7w.W8vJaiywet.cJ7Ae',
@@ -1100,7 +1100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           // Check if user already exists
           let existingUser = await storage.getUserByEmail(userData.email, organizationId);
-          
+
           if (!existingUser) {
             // User doesn't exist, create new
             const newUser = await storage.createUser({
@@ -1114,7 +1114,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               isActive: true,
               isSaaSOwner: false
             });
-            
+
             createdUsers.push(`${userData.role}: ${userData.email}`);
             console.log(`[PRODUCTION DEMO] Created user: ${userData.email} (${userData.role})`);
           } else {
@@ -1123,7 +1123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               passwordHash: productionHashes[userData.password as keyof typeof productionHashes],
               isActive: true
             });
-            
+
             updatedUsers.push(`${userData.role}: ${userData.email}`);
             console.log(`[PRODUCTION DEMO] Updated user: ${userData.email} (${userData.role})`);
           }
@@ -1147,7 +1147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         credentials: {
           admin: 'admin@cura.com / admin123',
-          doctor: 'doctor@cura.com / doctor123', 
+          doctor: 'doctor@cura.com / doctor123',
           patient: 'patient@cura.com / patient123',
           nurse: 'nurse@cura.com / nurse123'
         },
@@ -1156,10 +1156,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[PRODUCTION DEMO] ✅ Demo users setup completed successfully');
       res.json(response);
-      
+
     } catch (error) {
       console.error('[PRODUCTION DEMO] ❌ Setup failed:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         success: false,
         error: 'Production demo setup failed',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -1228,7 +1228,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/status", async (req, res) => {
     const host = req.get("host");
     const extractedSubdomain = host ? host.split('.')[0] : "none";
-    
+
     // SECURITY: Block emergency SaaS setup in production
     if (req.query.setup === 'saas' && req.query.emergency === 'true') {
       // CRITICAL SECURITY CHECK: Block in production
@@ -1238,7 +1238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const bcrypt = require('bcrypt');
         const hashedPassword = await bcrypt.hash('admin123', 10);
-        
+
         // Create SaaS admin using existing storage that works
         const existingUser = await storage.getUserByUsername('saas_admin', 0);
         if (!existingUser) {
@@ -1254,7 +1254,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             isSaaSOwner: true
           });
         }
-        
+
         return res.json({
           status: "SAAS_SETUP_COMPLETE",
           message: "SaaS admin user ready",
@@ -1262,16 +1262,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (error) {
         return res.json({
-          status: "SAAS_SETUP_FAILED", 
+          status: "SAAS_SETUP_FAILED",
           error: (error as Error).message,
           timestamp: new Date().toISOString()
         });
       }
     }
-    
-    res.json({ 
-      status: "MULTI-TENANT-ENFORCED", 
-      host, 
+
+    res.json({
+      status: "MULTI-TENANT-ENFORCED",
+      host,
       extractedSubdomain,
       env: process.env.NODE_ENV,
       timestamp: new Date().toISOString(),
@@ -1293,11 +1293,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     try {
       console.log('[PRODUCTION SYNC] Starting database seeding...');
-      
+
       // Import and run the seeding function
       const { seedDatabase } = await import('./seed-data');
       await seedDatabase();
-      
+
       res.json({
         success: true,
         message: 'Production database seeded successfully',
@@ -1305,16 +1305,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error('[PRODUCTION SYNC] Seeding failed:', error);
-      res.status(500).json({ 
-        error: 'Production sync failed', 
-        message: (error as Error).message 
+      res.status(500).json({
+        error: 'Production sync failed',
+        message: (error as Error).message
       });
     }
   });
 
   // Register critical SaaS routes DIRECTLY before ANY middleware
   // These MUST work in production - direct implementation without external dependencies
-  
+
   // SaaS Debug endpoint - direct implementation
   app.get('/api/saas/debug', async (req, res) => {
     try {
@@ -1338,7 +1338,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { username, password } = req.body;
       console.log(`[DIRECT SAAS] Login attempt: ${username}`);
-      
+
       const user = await storage.getUserByUsername(username, 0);
       if (!user || !user.isSaaSOwner) {
         return res.status(401).json({ error: "Authentication failed. Please check your credentials." });
@@ -1382,7 +1382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Initialize multi-tenant middleware stack BEFORE any routes
   multiTenantPackage.initializeMiddleware(app);
-  
+
   // Get tenant-aware storage
   const tenantStorage = multiTenantPackage.getTenantStorage();
 
@@ -1398,9 +1398,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ error: 'Demo bootstrap not enabled in production' });
         }
       }
-      
+
       const { seedProductionMedicalRecords } = await import("./production-medical-records");
-      
+
       // SECURITY: Strict setup token verification  
       const setupToken = req.headers['x-setup-token'] as string;
       if (process.env.SETUP_TOKEN) {
@@ -1409,55 +1409,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ error: 'Invalid setup token' });
         }
       }
-      
+
       // SECURITY: Strict demo-only enforcement
       const orgSubdomain = req.tenant?.subdomain;
       if (!orgSubdomain) {
         return res.status(400).json({ error: 'Organization context required' });
       }
-      
+
       // In production, ONLY allow demo organization (no exceptions)
       if (process.env.NODE_ENV === 'production' && orgSubdomain !== 'demo') {
         console.log(`[BOOTSTRAP] Production bootstrap denied for organization: ${orgSubdomain} (only demo allowed in production)`);
         return res.status(403).json({ error: 'Production bootstrap only allowed for demo organization' });
       }
-      
+
       // In development, allow demo or if explicitly enabled
       if (process.env.NODE_ENV !== 'production' && orgSubdomain !== 'demo' && process.env.ALLOW_DEMO_BOOTSTRAP !== 'true') {
         console.log(`[BOOTSTRAP] Bootstrap denied for organization: ${orgSubdomain} (not demo and ALLOW_DEMO_BOOTSTRAP not set)`);
         return res.status(403).json({ error: 'Bootstrap only allowed for demo organization or if explicitly enabled' });
       }
-      
+
       console.log(`[BOOTSTRAP] Starting medical records bootstrap for organization: ${orgSubdomain}`);
       console.log(`[BOOTSTRAP] Initiated by admin user: ${req.user?.email} (ID: ${req.user?.id})`);
-      
+
       // Call the refactored function with proper scoping
       const result = await seedProductionMedicalRecords({
         orgSubdomain: orgSubdomain,
         maxPatients: 1,
         minRecordsPerPatient: 2
       });
-      
+
       if (!result.success) {
         console.log(`[BOOTSTRAP] Failed: ${result.error}`);
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: result.error,
           createdCount: result.createdCount
         });
       }
-      
+
       // SECURITY: PHI-safe audit logging (no medical content)
       console.log(`[BOOTSTRAP] ✅ Successfully bootstrapped ${result.createdCount} medical records`);
       console.log(`[BOOTSTRAP] Organization: ${orgSubdomain} (ID: ${result.organizationId})`);
       console.log(`[BOOTSTRAP] Processed ${result.results?.length || 0} patients`);
-      
+
       // SECURITY: PHI-safe response (no medical record content)
       const patientsProcessed = result.results?.map(r => ({
         patientId: r.patientId,
         createdCount: r.createdCount,
         skipped: r.skipped
       })) || [];
-      
+
       res.json({
         success: true,
         message: 'Demo medical records bootstrap completed successfully',
@@ -1467,10 +1467,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         patientsProcessed: patientsProcessed,
         timestamp: new Date().toISOString()
       });
-      
+
     } catch (error) {
       console.error('[BOOTSTRAP] Medical records bootstrap error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Medical records bootstrap failed',
         details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
       });
@@ -1485,7 +1485,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/activate-subscription", async (req: express.Request, res: express.Response) => {
     try {
       const { email, status = "active" } = req.body;
-      
+
       if (!email) {
         return res.status(400).json({ error: "Email is required" });
       }
@@ -1543,7 +1543,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Lookup user globally (no organization filter)
       let user = await storage.getUserByEmailGlobal(email);
-      
+
       if (!user || !user.isActive) {
         console.log(`[UNIVERSAL LOGIN] User not found or inactive: ${email}`);
         return res.status(401).json({ error: "Invalid credentials" });
@@ -1574,9 +1574,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 5. If expired or inactive, block login and show expiration message
       console.log(`[UNIVERSAL LOGIN] Checking subscription for user ${email}, organization ID: ${user.organizationId}`);
       const subscription = await storage.getOrganizationSubscription(user.organizationId);
-      
+
       console.log(`[UNIVERSAL LOGIN] Subscription lookup result:`, subscription ? `Found subscription (ID: ${subscription.subscriptionId}, Status: ${subscription.status}, Type: ${typeof subscription.status})` : `No subscription found`);
-      
+
       if (!subscription) {
         console.log(`[UNIVERSAL LOGIN] ⚠️ No subscription found for org ${user.organizationId} - allowing login (subscription may be optional)`);
         // Continue with login if no subscription found - some organizations may not have subscriptions yet
@@ -1589,24 +1589,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           statusType: typeof subscription.status,
           paymentStatus: subscription.paymentStatus
         });
-        
+
         // FIRST: Check subscription status - block "expired" or "cancelled" immediately
         // Normalize status to lowercase for case-insensitive comparison
         const rawStatus = subscription.status || '';
         const normalizedStatus = rawStatus.toString().toLowerCase().trim();
         console.log(`[UNIVERSAL LOGIN] Status check - Raw: "${rawStatus}", Type: ${typeof rawStatus}, Normalized: "${normalizedStatus}", Valid: ${["trial", "active"].includes(normalizedStatus)}`);
-        
+
         // Allow "trial" and "active" status (case-insensitive)
         if (!normalizedStatus || !["trial", "active"].includes(normalizedStatus)) {
           console.log(`[UNIVERSAL LOGIN] ❌ Subscription inactive for user ${email}, org ID: ${user.organizationId}`);
           console.log(`[UNIVERSAL LOGIN] ❌ Raw status: "${rawStatus}", Normalized: "${normalizedStatus}", Valid values: ["trial", "active"]`);
-          return res.status(403).json({ 
-            error: `Your subscription is inactive. Please renew your subscription. Status: ${rawStatus || 'unknown'}` 
+          return res.status(403).json({
+            error: `Your subscription is inactive. Please renew your subscription. Status: ${rawStatus || 'unknown'}`
           });
         }
-        
+
         console.log(`[UNIVERSAL LOGIN] ✅ Subscription status check passed: "${normalizedStatus}"`);
-        
+
         // SECOND: Check if subscription has expired based on expiresAt
         // This ensures expired subscriptions are blocked even if status is still "active"
         let isExpired = false;
@@ -1620,27 +1620,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             expiresAt = new Date(subscription.expiresAt);
           }
-          
+
           // Validate date parsing
           if (isNaN(expiresAt.getTime())) {
             console.log(`[UNIVERSAL LOGIN] ⚠️ Invalid expiresAt date for org ${user.organizationId}: ${subscription.expiresAt}`);
-            return res.status(403).json({ 
-              error: `Invalid subscription expiration date. Please contact support.` 
+            return res.status(403).json({
+              error: `Invalid subscription expiration date. Please contact support.`
             });
           }
-          
+
           const now = new Date();
-          
+
           // Compare timestamps directly for accurate comparison
           const expiresAtTimestamp = expiresAt.getTime();
           const nowTimestamp = now.getTime();
-          
+
           console.log(`[UNIVERSAL LOGIN] Comparing dates - Now: ${now.toISOString()} (${nowTimestamp}), ExpiresAt: ${expiresAt.toISOString()} (${expiresAtTimestamp})`);
           console.log(`[UNIVERSAL LOGIN] Time difference (ms): ${nowTimestamp - expiresAtTimestamp}, Is expired: ${expiresAtTimestamp < nowTimestamp}`);
-          
+
           // Compare current datetime with expires_at - if it's past, mark as expired
           isExpired = expiresAtTimestamp < nowTimestamp;
-          
+
           if (isExpired) {
             // Format expiration date/time for display
             const expirationDate = expiresAt.toLocaleString('en-US', {
@@ -1652,10 +1652,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               second: '2-digit',
               timeZoneName: 'short'
             });
-            
+
             console.log(`[UNIVERSAL LOGIN] ❌ Subscription expired for user ${email}, org ID: ${user.organizationId}, expiresAt: ${expiresAt.toISOString()} (${expiresAtTimestamp}), now: ${now.toISOString()} (${nowTimestamp})`);
-            return res.status(403).json({ 
-              error: `Your subscription has expired. Please renew. Subscription expired on: ${expirationDate}` 
+            return res.status(403).json({
+              error: `Your subscription has expired. Please renew. Subscription expired on: ${expirationDate}`
             });
           } else {
             console.log(`[UNIVERSAL LOGIN] ✅ Subscription expiration check passed for user ${email}, expiresAt: ${expiresAt.toISOString()}`);
@@ -1663,15 +1663,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           console.log(`[UNIVERSAL LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - checking status only`);
         }
-        
+
         // THIRD: Block login if packageId is 0 AND subscription is expired/inactive
         // Only block packageId: 0 if the subscription is also expired or inactive
         // If packageId: 0 but subscription is valid (not expired, status is trial/active), allow login
         const normalizedStatusForPackage = (subscription.status || '').toString().toLowerCase().trim();
         if ((subscription.packageId === 0 || subscription.packageId === null || subscription.packageId === undefined) && (isExpired || !["trial", "active"].includes(normalizedStatusForPackage))) {
           console.log(`[UNIVERSAL LOGIN] ❌ Blocking login - packageId is 0 and subscription is expired/inactive for user ${email}, org ID: ${user.organizationId}`);
-          return res.status(403).json({ 
-            error: `Your trial subscription is not valid. Please contact support to activate a proper subscription plan.` 
+          return res.status(403).json({
+            error: `Your trial subscription is not valid. Please contact support to activate a proper subscription plan.`
           });
         }
       }
@@ -1715,7 +1715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user!.id;
       const organizationId = requireOrgId(req);
       const user = await storage.getUser(userId, organizationId);
-      
+
       if (!user || !user.isActive) {
         return res.status(404).json({ error: "User not found or inactive" });
       }
@@ -1727,7 +1727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user.passwordHash) {
         return res.status(400).json({ error: "Password not set for this account. Please contact an administrator." });
       }
-      
+
       const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!isValidPassword) {
         return res.status(401).json({ error: "Current password is incorrect. Please check your password and try again." });
@@ -1765,10 +1765,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Don't fail the password change if email fails
       }
 
-      res.json({ 
-        success: true, 
-        message: emailSent 
-          ? "Password changed successfully. Your new password has been sent to your email with a secure viewing link." 
+      res.json({
+        success: true,
+        message: emailSent
+          ? "Password changed successfully. Your new password has been sent to your email with a secure viewing link."
           : "Password changed successfully."
       });
     } catch (error) {
@@ -1795,7 +1795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         user = await storage.getUserByUsername(email, req.tenant!.id);
       }
-      
+
       if (!user || !user.isActive) {
         console.log(`User not found or inactive: ${email}`);
         return res.status(401).json({ error: "Invalid credentials" });
@@ -1819,9 +1819,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 3. If expired or inactive, block login and show expiration message
       console.log(`[LOGIN] Checking subscription for user ${email}, organization ID: ${user.organizationId}`);
       const subscription = await storage.getOrganizationSubscription(user.organizationId);
-      
+
       console.log(`[LOGIN] Subscription lookup result:`, subscription ? `Found subscription (ID: ${subscription.subscriptionId}, Status: ${subscription.status}, Type: ${typeof subscription.status})` : `No subscription found`);
-      
+
       if (!subscription) {
         console.log(`[LOGIN] ⚠️ No subscription found for org ${user.organizationId} - allowing login (subscription may be optional)`);
         // Continue with login if no subscription found - some organizations may not have subscriptions yet
@@ -1834,19 +1834,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           statusType: typeof subscription.status,
           paymentStatus: subscription.paymentStatus
         });
-        
+
         // FIRST: Check subscription status - block "expired" or "cancelled" immediately
         // Normalize status to lowercase for case-insensitive comparison
         const normalizedStatus = (subscription.status || '').toString().toLowerCase().trim();
         console.log(`[LOGIN] Status check - Original: "${subscription.status}", Normalized: "${normalizedStatus}", Valid: ${["trial", "active"].includes(normalizedStatus)}`);
-        
+
         if (!["trial", "active"].includes(normalizedStatus)) {
           console.log(`[LOGIN] ❌ Subscription inactive for user ${email}, org ID: ${user.organizationId}, status: ${subscription.status} (normalized: ${normalizedStatus})`);
-          return res.status(403).json({ 
-            error: `Your subscription is inactive. Please renew your subscription. Status: ${subscription.status}` 
+          return res.status(403).json({
+            error: `Your subscription is inactive. Please renew your subscription. Status: ${subscription.status}`
           });
         }
-        
+
         // SECOND: Check if subscription has expired based on expiresAt
         // This ensures expired subscriptions are blocked even if status is still "active"
         let isExpired = false;
@@ -1860,27 +1860,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             expiresAt = new Date(subscription.expiresAt);
           }
-          
+
           // Validate date parsing
           if (isNaN(expiresAt.getTime())) {
             console.log(`[LOGIN] ⚠️ Invalid expiresAt date for org ${user.organizationId}: ${subscription.expiresAt}`);
-            return res.status(403).json({ 
-              error: `Invalid subscription expiration date. Please contact support.` 
+            return res.status(403).json({
+              error: `Invalid subscription expiration date. Please contact support.`
             });
           }
-          
+
           const now = new Date();
-          
+
           // Compare timestamps directly for accurate comparison
           const expiresAtTimestamp = expiresAt.getTime();
           const nowTimestamp = now.getTime();
-          
+
           console.log(`[LOGIN] Comparing dates - Now: ${now.toISOString()} (${nowTimestamp}), ExpiresAt: ${expiresAt.toISOString()} (${expiresAtTimestamp})`);
           console.log(`[LOGIN] Time difference (ms): ${nowTimestamp - expiresAtTimestamp}, Is expired: ${expiresAtTimestamp < nowTimestamp}`);
-          
+
           // Compare current datetime with expires_at - if it's past, mark as expired
           isExpired = expiresAtTimestamp < nowTimestamp;
-          
+
           if (isExpired) {
             // Format expiration date/time for display
             const expirationDate = expiresAt.toLocaleString('en-US', {
@@ -1892,10 +1892,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               second: '2-digit',
               timeZoneName: 'short'
             });
-            
+
             console.log(`[LOGIN] ❌ Subscription expired for user ${email}, org ID: ${user.organizationId}, expiresAt: ${expiresAt.toISOString()} (${expiresAtTimestamp}), now: ${now.toISOString()} (${nowTimestamp})`);
-            return res.status(403).json({ 
-              error: `Your subscription has expired. Please renew. Subscription expired on: ${expirationDate}` 
+            return res.status(403).json({
+              error: `Your subscription has expired. Please renew. Subscription expired on: ${expirationDate}`
             });
           } else {
             console.log(`[LOGIN] ✅ Subscription expiration check passed for user ${email}, expiresAt: ${expiresAt.toISOString()}`);
@@ -1903,21 +1903,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           console.log(`[LOGIN] ⚠️ Subscription found but expiresAt is null for org ${user.organizationId} - checking status only`);
         }
-        
+
         // THIRD: Block login if packageId is 0 AND subscription is expired/inactive
         // Only block packageId: 0 if the subscription is also expired or inactive
         // If packageId: 0 but subscription is valid (not expired, status is trial/active), allow login
         const normalizedStatusForPackage = (subscription.status || '').toString().toLowerCase().trim();
         if ((subscription.packageId === 0 || subscription.packageId === null || subscription.packageId === undefined) && (isExpired || !["trial", "active"].includes(normalizedStatusForPackage))) {
           console.log(`[LOGIN] ❌ Blocking login - packageId is 0 and subscription is expired/inactive for user ${email}, org ID: ${user.organizationId}`);
-          return res.status(403).json({ 
-            error: `Your trial subscription is not valid. Please contact support to activate a proper subscription plan.` 
+          return res.status(403).json({
+            error: `Your trial subscription is not valid. Please contact support to activate a proper subscription plan.`
           });
         }
       }
 
       const token = authService.generateToken(user);
-      
+
       // Update last login - remove this for now due to schema issues
       // await storage.updateUser(user.id, user.organizationId, { lastLoginAt: new Date() });
 
@@ -1955,7 +1955,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Find user by email across all organizations
       const user = await db.select().from(users).where(eq(users.email, email)).limit(1);
-      
+
       if (!user || user.length === 0 || !user[0].isActive) {
         // For security, return success even if user not found
         console.log(`[PASSWORD RESET] User not found or inactive: ${email}`);
@@ -2072,7 +2072,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/validate", async (req: TenantRequest, res) => {
     try {
       const token = authService.extractTokenFromHeader(req.get("Authorization"));
-      
+
       if (!token) {
         return res.status(401).json({ error: "No token provided" });
       }
@@ -2117,17 +2117,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/organizations/check-name", async (req: express.Request, res: express.Response) => {
     try {
       const { name } = req.query;
-      
+
       if (!name || typeof name !== "string") {
         return res.status(400).json({ error: "Organization name is required" });
       }
 
       // Convert organization name to subdomain format (lowercase, replace spaces with hyphens)
       const subdomain = name.trim().toLowerCase().replace(/\s+/g, "-");
-      
+
       // Check if subdomain already exists
       const existingOrg = await storage.getOrganizationBySubdomain(subdomain);
-      
+
       // Prevent caching
       res.setHeader(
         "Cache-Control",
@@ -2135,7 +2135,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
-      
+
       res.json({ exists: !!existingOrg });
     } catch (error) {
       console.error("[CHECK-NAME] Error:", error);
@@ -2156,7 +2156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Convert organization name to subdomain
       const subdomain = organizationName.trim().toLowerCase().replace(/\s+/g, "-");
-      
+
       // Check if subdomain already exists
       const existingOrg = await storage.getOrganizationBySubdomain(subdomain);
       if (existingOrg) {
@@ -2247,7 +2247,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Send verification email
       const verificationUrl = `${process.env.VITE_API_URL || "http://localhost:1100"}/create-trial/verify?token=${verificationToken}`;
-      
+
       try {
         await emailService.sendEmail({
           to: email,
@@ -2307,7 +2307,7 @@ The Cura EMR Team`,
         // Don't fail the entire operation if email fails
       }
 
-      res.json({ 
+      res.json({
         message: "Trial account created. Please check your email to verify your account.",
         organizationId: organization.id,
       });
@@ -2324,7 +2324,7 @@ The Cura EMR Team`,
   app.get("/api/create-trial/verify-email", async (req: express.Request, res: express.Response) => {
     try {
       const { token } = req.query;
-      
+
       if (!token || typeof token !== "string") {
         return res.status(400).json({ error: "Verification token is required" });
       }
@@ -2452,13 +2452,13 @@ The Cura EMR Team`,
   app.get("/api/organizations/check-name-exists", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { name, excludeId } = req.query;
-      
+
       if (!name || typeof name !== "string") {
         return res.status(400).json({ error: "Organization name is required" });
       }
 
       const organizationName = name.trim();
-      
+
       // Build where condition
       const conditions = [eq(organizations.name, organizationName)];
       if (excludeId && typeof excludeId === "string") {
@@ -2467,7 +2467,7 @@ The Cura EMR Team`,
           conditions.push(ne(organizations.id, excludeIdNum));
         }
       }
-      
+
       // Check if organization name already exists (excluding current organization)
       const existingOrgs = await db
         .select({ id: organizations.id, name: organizations.name })
@@ -2489,7 +2489,7 @@ The Cura EMR Team`,
   app.post("/api/admin/activate-subscription", async (req: express.Request, res: express.Response) => {
     try {
       const { email, status = "active" } = req.body;
-      
+
       if (!email) {
         return res.status(400).json({ error: "Email is required" });
       }
@@ -2539,40 +2539,40 @@ The Cura EMR Team`,
   app.get("/api/check-subscription/:email", async (req: express.Request, res: express.Response) => {
     try {
       const { email } = req.params;
-      
+
       if (!email) {
         return res.status(400).json({ error: "Email parameter is required" });
       }
-      
+
       // Get user by email
       const user = await storage.getUserByEmailGlobal(email);
       if (!user) {
         return res.status(404).json({ error: `User not found: ${email}` });
       }
-      
+
       // Get organization
       const organization = await storage.getOrganization(user.organizationId);
-      
+
       // Get subscription
       const subscription = await storage.getOrganizationSubscription(user.organizationId);
-      
+
       const now = new Date();
       let isExpired = false;
       let expirationDate = null;
       let daysExpired = null;
       let daysRemaining = null;
-      
+
       if (subscription && subscription.expiresAt) {
         expirationDate = new Date(subscription.expiresAt);
         isExpired = expirationDate < now;
-        
+
         if (isExpired) {
           daysExpired = Math.floor((now.getTime() - expirationDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
           daysRemaining = Math.floor((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         }
       }
-      
+
       res.json({
         user: {
           id: user.id,
@@ -2618,7 +2618,7 @@ The Cura EMR Team`,
             timeZoneName: 'short'
           }) : null
         },
-        verdict: subscription?.expiresAt 
+        verdict: subscription?.expiresAt
           ? (isExpired ? "EXPIRED" : "ACTIVE")
           : "NO_EXPIRATION_DATE"
       });
@@ -2634,20 +2634,20 @@ The Cura EMR Team`,
       if (!req.tenant || !req.tenant.id) {
         return res.status(404).json({ error: "Tenant not found" });
       }
-      
+
       // Fetch full organization data to ensure all fields are included
       const organization = await storage.getOrganization(req.tenant.id);
-      
+
       if (!organization) {
         return res.status(404).json({ error: "Organization not found" });
       }
-      
+
       // Ensure brandName is always included (fallback to name if not set)
       const response = {
         ...organization,
         brandName: organization.brandName || organization.name || "N/A"
       };
-      
+
       console.log("[TENANT-INFO] Returning organization:", JSON.stringify(response, null, 2));
       res.json(response);
     } catch (error) {
@@ -2688,7 +2688,7 @@ The Cura EMR Team`,
 
       // Get existing organization to merge settings if needed
       let finalUpdateData: any = { ...updateData };
-      
+
       // Only merge settings if settings are being updated
       if (updateData.settings) {
         const existingOrg = await storage.getOrganization(req.tenant.id);
@@ -2718,19 +2718,19 @@ The Cura EMR Team`,
       console.log("[ORG-SETTINGS] Final update data:", JSON.stringify(finalUpdateData, null, 2));
 
       const updatedOrganization = await storage.updateOrganization(req.tenant.id, finalUpdateData);
-      
+
       if (!updatedOrganization) {
         return res.status(404).json({ error: "Organization not found" });
       }
 
       console.log("[ORG-SETTINGS] Update successful, returning:", JSON.stringify(updatedOrganization, null, 2));
-      
+
       // Ensure brandName is included in the response
       const response = {
         ...updatedOrganization,
         brandName: updatedOrganization.brandName || updatedOrganization.name
       };
-      
+
       res.json(response);
     } catch (error: any) {
       console.error("[ORG-SETTINGS] Error:", error);
@@ -2739,26 +2739,26 @@ The Cura EMR Team`,
       console.error("[ORG-SETTINGS] Error stack:", error?.stack);
       console.error("[ORG-SETTINGS] Request body:", JSON.stringify(req.body, null, 2));
       console.error("[ORG-SETTINGS] Tenant:", req.tenant?.id);
-      
+
       // Check if it's a Zod validation error
       if (error.name === 'ZodError') {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Invalid request data",
           details: error.errors
         });
       }
-      
+
       // Return more detailed error information
       const errorResponse: any = {
         error: "Failed to update organization settings",
         message: error.message || "Unknown error"
       };
-      
+
       // Include validation errors if it's a Zod error
       if (error.name === 'ZodError' && error.errors) {
         errorResponse.validationErrors = error.errors;
       }
-      
+
       // Include database error details in development
       if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
         errorResponse.details = {
@@ -2768,7 +2768,7 @@ The Cura EMR Team`,
           detail: error.detail
         };
       }
-      
+
       res.status(500).json(errorResponse);
     }
   });
@@ -2811,7 +2811,7 @@ The Cura EMR Team`,
     try {
       console.log("[QUICKBOOKS] OAuth callback received!");
       const { code, realmId, state } = req.query;
-      
+
       if (!code || !realmId) {
         console.log("[QUICKBOOKS] Missing code or realmId");
         return res.status(400).send(`
@@ -2827,7 +2827,7 @@ The Cura EMR Team`,
       console.log("[QUICKBOOKS] Code:", code);
       console.log("[QUICKBOOKS] Realm ID:", realmId);
       console.log("[QUICKBOOKS] State:", state);
-      
+
       // Extract organization ID from state parameter
       let organizationId: number | undefined;
       if (state) {
@@ -2839,29 +2839,29 @@ The Cura EMR Team`,
           console.log("[QUICKBOOKS] Failed to parse state, falling back to tenant context");
         }
       }
-      
+
       // Fallback to tenant context if state parsing failed
       if (!organizationId) {
         organizationId = req.tenant?.id;
       }
-      
+
       if (!organizationId) {
         throw new Error("Organization ID not found in state or tenant context");
       }
-      
+
       // Exchange authorization code for access and refresh tokens manually
       const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5000'}/api/quickbooks/auth/callback`;
-      
+
       console.log("[QUICKBOOKS] Exchanging authorization code for tokens...");
       console.log("[QUICKBOOKS] Redirect URI:", redirectUri);
-      
+
       // Manually exchange token using axios
       const axios = (await import('axios')).default;
       const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
-      
+
       const requestBody = `grant_type=authorization_code&code=${encodeURIComponent(code as string)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
       console.log("[QUICKBOOKS] Request body length:", requestBody.length);
-      
+
       const tokenResponse = await axios.post(
         'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer',
         requestBody,
@@ -2873,16 +2873,16 @@ The Cura EMR Team`,
           },
         }
       );
-      
+
       const token = tokenResponse.data;
-      
+
       console.log("[QUICKBOOKS] Token exchange successful!");
       console.log("[QUICKBOOKS] Access token received:", !!token.access_token);
       console.log("[QUICKBOOKS] Refresh token received:", !!token.refresh_token);
       console.log("[QUICKBOOKS] Expires in:", token.expires_in, "seconds");
 
       console.log("[QUICKBOOKS] Saving connection to database for organization:", organizationId);
-      
+
       // Check if connection already exists
       const existingConnection = await db.select()
         .from(quickbooksConnections)
@@ -2893,8 +2893,8 @@ The Cura EMR Team`,
         .limit(1);
 
       // Determine baseUrl based on environment
-      const baseUrl = process.env.QUICKBOOKS_ENVIRONMENT === 'production' 
-        ? 'https://quickbooks.api.intuit.com' 
+      const baseUrl = process.env.QUICKBOOKS_ENVIRONMENT === 'production'
+        ? 'https://quickbooks.api.intuit.com'
         : 'https://sandbox-quickbooks.api.intuit.com';
 
       if (existingConnection.length > 0) {
@@ -2933,7 +2933,7 @@ The Cura EMR Team`,
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.setHeader('X-Frame-Options', 'SAMEORIGIN');
       console.log("[QUICKBOOKS] Headers set, building HTML...");
-      
+
       const successHtml = `<!DOCTYPE html>
         <html>
           <head>
@@ -3032,7 +3032,7 @@ The Cura EMR Team`,
             </script>
           </body>
         </html>`;
-      
+
       console.log("[QUICKBOOKS] HTML length:", successHtml.length);
       console.log("[QUICKBOOKS] Sending response now...");
       res.send(successHtml);
@@ -3066,7 +3066,7 @@ The Cura EMR Team`,
         .orderBy(imagingPricing.imagingType);
 
       console.log(`[IMAGING PRICING] Fetched ${pricing.length} imaging services for organization ${organizationId}`);
-      
+
       // Return empty array if no pricing found, not an error
       res.json(pricing || []);
     } catch (error) {
@@ -3083,7 +3083,7 @@ The Cura EMR Team`,
       }
 
       const { imagingTypes } = req.body;
-      
+
       if (!Array.isArray(imagingTypes) || imagingTypes.length === 0) {
         return res.status(400).json({ error: "imagingTypes must be a non-empty array" });
       }
@@ -3102,9 +3102,9 @@ The Cura EMR Team`,
 
       // Get existing imaging type names (case-insensitive)
       const existingTypes = existingImaging.map(img => img.imagingType?.toLowerCase()).filter(Boolean);
-      
+
       // Find duplicates (case-insensitive comparison)
-      const duplicates = imagingTypes.filter((type: string) => 
+      const duplicates = imagingTypes.filter((type: string) =>
         existingTypes.includes(type.toLowerCase())
       );
 
@@ -3134,8 +3134,8 @@ The Cura EMR Team`,
       }
 
       // Convert basePrice to string if it's a number (decimal fields need strings)
-      const basePrice = typeof req.body.basePrice === 'number' 
-        ? req.body.basePrice.toFixed(2) 
+      const basePrice = typeof req.body.basePrice === 'number'
+        ? req.body.basePrice.toFixed(2)
         : String(req.body.basePrice);
 
       // Prepare imaging pricing data with proper type conversions
@@ -3190,7 +3190,7 @@ The Cura EMR Team`,
   app.get("/api/prescriptions/:prescriptionId/pdf", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     try {
       console.log(`[VIEW-PRESCRIPTION-PDF] Route handler called - user: ${req.user?.id}, tenant: ${req.tenant?.id}`);
-      
+
       if (!req.user) {
         console.error(`[VIEW-PRESCRIPTION-PDF] No user found in request`);
         return res.status(401).json({ error: "User not authenticated" });
@@ -3214,7 +3214,7 @@ The Cura EMR Team`,
 
       // Get prescription from database to retrieve saved_pdf_path
       const prescription = await storage.getPrescription(prescriptionId, organizationId);
-      
+
       if (!prescription) {
         console.error(`[VIEW-PRESCRIPTION-PDF] Prescription not found: ${prescriptionId}`);
         return res.status(404).json({ error: "Prescription not found" });
@@ -3228,17 +3228,17 @@ The Cura EMR Team`,
       // Verify user can access (must be the owner, patient who owns the prescription, or admin/doctor/nurse)
       const isOwner = req.user.id === prescription.prescriptionCreatedBy;
       const isStaff = ['admin', 'doctor', 'nurse'].includes(req.user.role || '');
-      
+
       // Check if patient user can access this prescription
       let isPatientOwner = false;
       if (req.user.role === 'patient') {
         const prescriptionPatientId = typeof prescription.patientId === 'string' ? parseInt(prescription.patientId) : prescription.patientId;
         console.log(`[VIEW-PRESCRIPTION-PDF] Checking patient access - user: ${req.user.id}, prescription patientId: ${prescriptionPatientId}`);
-        
+
         if (!isNaN(prescriptionPatientId)) {
           // First, try to get the patient record associated with the logged-in user
           const userPatient = await storage.getPatientByUserId(req.user.id, organizationId);
-          
+
           if (userPatient && userPatient.id === prescriptionPatientId) {
             // User's patient record ID matches the prescription's patientId
             isPatientOwner = true;
@@ -3246,12 +3246,12 @@ The Cura EMR Team`,
           } else {
             // Fallback: Get the prescription's patient record and check if userId matches or email matches
             const prescriptionPatient = await storage.getPatient(prescriptionPatientId, organizationId);
-            
+
             if (prescriptionPatient) {
               // Check both userId and user_id fields
               const patientUserId = (prescriptionPatient as any).userId || (prescriptionPatient as any).user_id;
               console.log(`[VIEW-PRESCRIPTION-PDF] Prescription patient record found - patient.userId/user_id: ${patientUserId}, req.user.id: ${req.user.id}, patient.email: ${prescriptionPatient.email}, user.email: ${req.user.email}`);
-              
+
               if (patientUserId === req.user.id) {
                 isPatientOwner = true;
                 console.log(`[VIEW-PRESCRIPTION-PDF] Patient access granted - patient.userId (${patientUserId}) matches req.user.id (${req.user.id})`);
@@ -3270,7 +3270,7 @@ The Cura EMR Team`,
           }
         }
       }
-      
+
       const canAccess = isOwner || isPatientOwner || isStaff;
 
       if (!canAccess) {
@@ -3279,15 +3279,15 @@ The Cura EMR Team`,
       }
 
       // Use the exact path from database (remove leading slash if present for path.resolve)
-      const savedPath = prescription.savedPdfPath.startsWith('/') 
-        ? prescription.savedPdfPath.substring(1) 
+      const savedPath = prescription.savedPdfPath.startsWith('/')
+        ? prescription.savedPdfPath.substring(1)
         : prescription.savedPdfPath;
-      
+
       const filePath = path.resolve(process.cwd(), savedPath);
 
       console.log(`[VIEW-PRESCRIPTION-PDF] Using path from database: ${prescription.savedPdfPath}`);
       console.log(`[VIEW-PRESCRIPTION-PDF] Resolved file path: ${filePath}`);
-      
+
       if (!await fse.pathExists(filePath)) {
         console.error(`[VIEW-PRESCRIPTION-PDF] File not found at: ${filePath}`);
         return res.status(404).json({ error: "PDF file not found on server" });
@@ -3298,7 +3298,7 @@ The Cura EMR Team`,
       const fileName = path.basename(prescription.savedPdfPath);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-      
+
       // Use fs/promises readFile instead of fse.readFile
       const fileBuffer = await readFile(filePath);
       res.send(fileBuffer);
@@ -3489,7 +3489,7 @@ The Cura EMR Team`,
         ...req.body,
         organizationId: req.tenant!.id
       });
-      
+
       const consent = await gdprComplianceService.recordConsent(consentData);
       res.json(consent);
     } catch (error) {
@@ -3502,7 +3502,7 @@ The Cura EMR Team`,
     try {
       const { id } = req.params;
       const { reason } = req.body;
-      
+
       await gdprComplianceService.withdrawConsent(parseInt(id), req.tenant!.id, reason);
       res.json({ success: true });
     } catch (error) {
@@ -3529,7 +3529,7 @@ The Cura EMR Team`,
       // Calculate due date (30 days as per GDPR) before validation
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 30);
-      
+
       const body = req.body as Record<string, unknown>;
       const requestData = insertGdprDataRequestSchema.parse({
         ...body,
@@ -3537,7 +3537,7 @@ The Cura EMR Team`,
         dueDate,
         requestReason: body.requestReason ?? body.description ?? null,
       });
-      
+
       const dataRequest = await gdprComplianceService.submitDataRequest(requestData);
       res.json(dataRequest);
     } catch (error) {
@@ -3550,13 +3550,13 @@ The Cura EMR Team`,
     try {
       const { patientId } = req.params;
       const { requestId } = req.query;
-      
+
       const exportData = await gdprComplianceService.exportPatientData(
-        parseInt(patientId), 
-        req.tenant!.id, 
+        parseInt(patientId),
+        req.tenant!.id,
         parseInt(requestId as string)
       );
-      
+
       res.json(exportData);
     } catch (error) {
       console.error("GDPR data export error:", error);
@@ -3568,14 +3568,14 @@ The Cura EMR Team`,
     try {
       const { patientId } = req.params;
       const { requestId, reason } = req.body;
-      
+
       await gdprComplianceService.processDataErasure(
-        parseInt(patientId), 
-        req.tenant!.id, 
-        requestId, 
+        parseInt(patientId),
+        req.tenant!.id,
+        requestId,
         reason
       );
-      
+
       res.json({ success: true });
     } catch (error) {
       console.error("GDPR data erasure error:", error);
@@ -3587,13 +3587,13 @@ The Cura EMR Team`,
     try {
       const { patientId } = req.params;
       const { consentType } = req.query;
-      
+
       const consentStatus = await gdprComplianceService.checkConsentStatus(
-        parseInt(patientId), 
-        req.tenant!.id, 
+        parseInt(patientId),
+        req.tenant!.id,
         consentType as string
       );
-      
+
       res.json(consentStatus);
     } catch (error) {
       console.error("GDPR consent status error:", error);
@@ -3604,12 +3604,12 @@ The Cura EMR Team`,
   app.get("/api/gdpr/compliance-report", requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const { period = "monthly" } = req.query;
-      
+
       const report = await gdprComplianceService.generateComplianceReport(
-        req.tenant!.id, 
+        req.tenant!.id,
         period as "monthly" | "quarterly" | "annual"
       );
-      
+
       res.json(report);
     } catch (error) {
       console.error("GDPR compliance report error:", error);
@@ -3642,18 +3642,18 @@ The Cura EMR Team`,
   app.get("/api/subscriptions/current", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       // Query the database for the subscription
       const result = await db
         .select()
         .from(subscriptions)
         .where(eq(subscriptions.organizationId, organizationId))
         .limit(1);
-      
+
       if (result.length === 0) {
         return res.status(404).json({ error: "No subscription found for this organization" });
       }
-      
+
       // Count actual users in the organization (excluding SaaS owners)
       const userCountResult = await db
         .select({ count: sql<number>`count(*)::int` })
@@ -3662,9 +3662,9 @@ The Cura EMR Team`,
           eq(users.organizationId, organizationId),
           eq(users.isSaaSOwner, false)
         ));
-      
+
       const actualUserCount = userCountResult[0]?.count || 0;
-      
+
       // Return subscription with actual user count
       res.json({
         ...result[0],
@@ -3681,13 +3681,13 @@ The Cura EMR Team`,
     try {
       const organizationId = req.tenant!.id;
       const { saasPayments } = await import("../shared/schema");
-      
+
       const payments = await db
         .select()
         .from(saasPayments)
         .where(eq(saasPayments.organizationId, organizationId))
         .orderBy(desc(saasPayments.paymentDate));
-      
+
       res.json(payments);
     } catch (error) {
       console.error("Billing history fetch error:", error);
@@ -3701,7 +3701,7 @@ The Cura EMR Team`,
       const organizationId = req.tenant!.id;
       const paymentId = parseInt(req.params.paymentId);
       const { saasPayments, saasSubscriptions, saasPackages, organizations } = await import("../shared/schema");
-      
+
       // Get payment record
       const [payment] = await db
         .select()
@@ -3710,17 +3710,17 @@ The Cura EMR Team`,
           eq(saasPayments.id, paymentId),
           eq(saasPayments.organizationId, organizationId)
         ));
-      
+
       if (!payment) {
         return res.status(404).json({ error: "Payment not found" });
       }
-      
+
       // Get organization details
       const [org] = await db
         .select()
         .from(organizations)
         .where(eq(organizations.id, organizationId));
-      
+
       // Get subscription and package details
       let packageName = "Subscription";
       if (payment.subscriptionId) {
@@ -3728,7 +3728,7 @@ The Cura EMR Team`,
           .select()
           .from(saasSubscriptions)
           .where(eq(saasSubscriptions.id, payment.subscriptionId));
-        
+
         if (subscription?.packageId) {
           const [pkg] = await db
             .select()
@@ -3739,22 +3739,22 @@ The Cura EMR Team`,
           }
         }
       }
-      
+
       // Generate PDF using pdf-lib
       const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([595, 842]); // A4 size
       const { width, height } = page.getSize();
-      
+
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      
+
       const darkText = rgb(0.1, 0.1, 0.1);
       const mutedText = rgb(0.4, 0.4, 0.4);
       const primaryBlue = rgb(0.2, 0.4, 0.8);
-      
+
       let yPosition = height - 50;
-      
+
       // Header
       page.drawText('INVOICE', {
         x: 50,
@@ -3763,7 +3763,7 @@ The Cura EMR Team`,
         font: boldFont,
         color: primaryBlue
       });
-      
+
       page.drawText(payment.invoiceNumber, {
         x: width - 200,
         y: yPosition,
@@ -3771,9 +3771,9 @@ The Cura EMR Team`,
         font: boldFont,
         color: darkText
       });
-      
+
       yPosition -= 40;
-      
+
       // Invoice details
       page.drawText(`Date: ${payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}`, {
         x: 50,
@@ -3782,7 +3782,7 @@ The Cura EMR Team`,
         font,
         color: mutedText
       });
-      
+
       page.drawText(`Status: ${payment.paymentStatus.toUpperCase()}`, {
         x: width - 200,
         y: yPosition,
@@ -3790,9 +3790,9 @@ The Cura EMR Team`,
         font,
         color: payment.paymentStatus === 'completed' ? rgb(0.1, 0.6, 0.1) : mutedText
       });
-      
+
       yPosition -= 40;
-      
+
       // Bill To section
       page.drawText('Bill To:', {
         x: 50,
@@ -3801,9 +3801,9 @@ The Cura EMR Team`,
         font: boldFont,
         color: darkText
       });
-      
+
       yPosition -= 18;
-      
+
       page.drawText(org?.name || 'Organization', {
         x: 50,
         y: yPosition,
@@ -3811,9 +3811,9 @@ The Cura EMR Team`,
         font,
         color: darkText
       });
-      
+
       yPosition -= 50;
-      
+
       // Line separator
       page.drawLine({
         start: { x: 50, y: yPosition },
@@ -3821,9 +3821,9 @@ The Cura EMR Team`,
         thickness: 1,
         color: rgb(0.85, 0.85, 0.85)
       });
-      
+
       yPosition -= 30;
-      
+
       // Table header
       page.drawText('Description', {
         x: 50,
@@ -3832,7 +3832,7 @@ The Cura EMR Team`,
         font: boldFont,
         color: mutedText
       });
-      
+
       page.drawText('Period', {
         x: 250,
         y: yPosition,
@@ -3840,7 +3840,7 @@ The Cura EMR Team`,
         font: boldFont,
         color: mutedText
       });
-      
+
       page.drawText('Amount', {
         x: width - 100,
         y: yPosition,
@@ -3848,9 +3848,9 @@ The Cura EMR Team`,
         font: boldFont,
         color: mutedText
       });
-      
+
       yPosition -= 25;
-      
+
       // Table row
       page.drawText(packageName, {
         x: 50,
@@ -3859,7 +3859,7 @@ The Cura EMR Team`,
         font,
         color: darkText
       });
-      
+
       const periodStart = new Date(payment.periodStart).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
       const periodEnd = new Date(payment.periodEnd).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       page.drawText(`${periodStart} - ${periodEnd}`, {
@@ -3869,7 +3869,7 @@ The Cura EMR Team`,
         font,
         color: darkText
       });
-      
+
       page.drawText(`${payment.currency} ${parseFloat(payment.amount).toFixed(2)}`, {
         x: width - 100,
         y: yPosition,
@@ -3877,9 +3877,9 @@ The Cura EMR Team`,
         font: boldFont,
         color: darkText
       });
-      
+
       yPosition -= 40;
-      
+
       // Line separator
       page.drawLine({
         start: { x: 50, y: yPosition },
@@ -3887,9 +3887,9 @@ The Cura EMR Team`,
         thickness: 1,
         color: rgb(0.85, 0.85, 0.85)
       });
-      
+
       yPosition -= 25;
-      
+
       // Total
       page.drawText('Total:', {
         x: width - 180,
@@ -3898,7 +3898,7 @@ The Cura EMR Team`,
         font: boldFont,
         color: darkText
       });
-      
+
       page.drawText(`${payment.currency} ${parseFloat(payment.amount).toFixed(2)}`, {
         x: width - 100,
         y: yPosition,
@@ -3906,9 +3906,9 @@ The Cura EMR Team`,
         font: boldFont,
         color: primaryBlue
       });
-      
+
       yPosition -= 40;
-      
+
       // Payment method
       page.drawText(`Payment Method: ${payment.paymentMethod.replace('_', ' ').toUpperCase()}`, {
         x: 50,
@@ -3917,7 +3917,7 @@ The Cura EMR Team`,
         font,
         color: mutedText
       });
-      
+
       // Footer
       page.drawText('Thank you for your business!', {
         x: 50,
@@ -3926,9 +3926,9 @@ The Cura EMR Team`,
         font,
         color: mutedText
       });
-      
+
       let pdfBytes = await pdfDoc.save();
-      
+
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${payment.invoiceNumber}.pdf"`);
       res.send(Buffer.from(pdfBytes));
@@ -3942,13 +3942,13 @@ The Cura EMR Team`,
   app.get("/api/billing/search-suggestions", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const query = (req.query.query as string || "").toLowerCase().trim();
-      
+
       if (query.length < 2) {
         return res.json([]);
       }
 
       const organizationId = req.tenant!.id;
-      
+
       // Query invoices for suggestions
       const invoices = await db
         .select({
@@ -3976,7 +3976,7 @@ The Cura EMR Team`,
         display: string;
         searchValue: string;
       }> = [];
-      
+
       const seenValues = new Set<string>();
 
       // Add invoice number suggestions
@@ -4038,24 +4038,24 @@ The Cura EMR Team`,
   // Generate anatomical treatment plan using OpenAI
   app.post("/api/ai/generate-treatment-plan", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
-      const { 
+      const {
         patientId,
-        muscleGroup, 
-        analysisType, 
-        treatment, 
-        treatmentIntensity, 
+        muscleGroup,
+        analysisType,
+        treatment,
+        treatmentIntensity,
         sessionFrequency,
         primarySymptoms,
         severityScale,
         followUpPlan
       } = req.body;
-      
+
       if (!patientId || !muscleGroup || !analysisType || !treatment) {
         return res.status(400).json({ error: "Required fields missing" });
       }
 
       console.log(`[GENERATE-TREATMENT-PLAN] Starting AI treatment plan generation for patient ${patientId}`);
-      
+
       let treatmentPlan = "";
       try {
         // Generate treatment plan using OpenAI
@@ -4073,7 +4073,7 @@ The Cura EMR Team`,
       } catch (aiError) {
         console.log(`[GENERATE-TREATMENT-PLAN] OpenAI failed, using fallback template`);
         console.error(`[GENERATE-TREATMENT-PLAN] OpenAI Error:`, (aiError as Error)?.message || aiError);
-        
+
         // Fallback treatment plan template
         treatmentPlan = `PROFESSIONAL ANATOMICAL TREATMENT PLAN
 
@@ -4119,8 +4119,8 @@ SAFETY CONSIDERATIONS:
 This treatment plan should be reviewed and adjusted based on individual patient response and clinical judgment.`;
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         treatmentPlan
       });
     } catch (error) {
@@ -4133,7 +4133,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/ai/generate-insights", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const { patientId } = req.body;
-      
+
       if (!patientId) {
         return res.status(400).json({ error: "Patient ID is required" });
       }
@@ -4148,7 +4148,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const medicalRecords = await storage.getMedicalRecordsByPatient(parseInt(patientId), req.tenant!.id);
 
       console.log(`[GENERATE-INSIGHTS] Starting AI insight generation for patient ${patientId}`);
-      
+
       let aiInsightsData = [];
       try {
         // Generate AI insights using OpenAI
@@ -4157,7 +4157,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       } catch (aiError) {
         console.log(`[GENERATE-INSIGHTS] OpenAI failed, using fallback mock insights for patient ${patient.firstName} ${patient.lastName}`);
         console.error(`[GENERATE-INSIGHTS] OpenAI Error:`, (aiError as Error)?.message || aiError);
-        
+
         // Fallback to mock insights when OpenAI fails
         aiInsightsData = [
           {
@@ -4199,7 +4199,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             title: insightData.title,
             severity: insightData.severity
           });
-          
+
           const insight = await storage.createAiInsight({
             organizationId: req.tenant!.id,
             patientId: parseInt(patientId),
@@ -4211,7 +4211,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             confidence: insightData.confidence.toString(),
             status: "active"
           });
-          
+
           console.log('Successfully created AI insight:', insight.id);
           savedInsights.push(insight);
         } catch (insertError) {
@@ -4220,8 +4220,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         insights: savedInsights,
         generated: savedInsights.length,
         patientName: `${patient.firstName} ${patient.lastName}`,
@@ -4240,13 +4240,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const limitParam = req.query.limit as string;
       const limit = limitParam !== undefined && limitParam !== '' ? parseInt(limitParam, 10) : undefined;
       const isActiveParam = req.query.isActive as string;
-      
+
       // Parse isActive parameter: if provided, convert to boolean, otherwise undefined (return all)
       let isActive: boolean | undefined = undefined;
       if (isActiveParam !== undefined) {
         isActive = isActiveParam === 'true';
       }
-      
+
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, limit, isActive);
       res.json(patients);
     } catch (error) {
@@ -4256,23 +4256,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Check patient email availability - checks if email exists in patients, users, or organizations
-  
+
   // Symptom Checker API endpoints
   console.log("[ROUTE-REGISTRATION] Registering /api/symptom-checker/analyze endpoint");
-  
+
   // Add middleware to log all requests to symptom-checker routes
   app.use("/api/symptom-checker", (req, res, next) => {
     console.log(`[SYMPTOM-CHECKER-MIDDLEWARE] ${req.method} ${req.path} - Original URL: ${req.originalUrl}`);
     next();
   });
-  
+
   app.post("/api/symptom-checker/analyze", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     res.setHeader("Content-Type", "application/json");
     console.log("[SYMPTOM-CHECKER] Analyze endpoint called");
     console.log("[SYMPTOM-CHECKER] Request body:", req.body);
     console.log("[SYMPTOM-CHECKER] User:", req.user);
     console.log("[SYMPTOM-CHECKER] Tenant:", req.tenant);
-    
+
     try {
       const userId = req.user?.id;
       if (!userId) {
@@ -4335,9 +4335,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error: any) {
       console.error("[SYMPTOM-CHECKER] Error analyzing symptoms:", error);
       console.error("[SYMPTOM-CHECKER] Error stack:", error.stack);
-      
+
       if (!res.headersSent) {
-        res.status(500).json({ 
+        res.status(500).json({
           error: error.message || "Failed to analyze symptoms. Please try again.",
           details: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
@@ -4394,8 +4394,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
     } catch (error: any) {
       console.error("Error fetching symptom check history:", error);
-      res.status(500).json({ 
-        error: error.message || "Failed to fetch symptom check history" 
+      res.status(500).json({
+        error: error.message || "Failed to fetch symptom check history"
       });
     }
   });
@@ -4441,7 +4441,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
 
-      res.json({ 
+      res.json({
         emailAvailable,
         associatedWithAnotherOrg: !emailAvailable && associatedWithAnotherOrg
       });
@@ -4455,23 +4455,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/patients/my-prescriptions", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Starting request for user:", req.user?.email);
-      
+
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Found patients count:", patients.length);
-      
+
       const patient = patients.find(p => p.email === req.user!.email);
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Found matching patient:", patient ? { id: patient.id, email: patient.email } : null);
-      
+
       if (!patient) {
         console.log("🏥 MY-PRESCRIPTIONS DEBUG: No patient found for email:", req.user!.email);
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Getting prescriptions for patient ID:", patient.id);
       const prescriptions = await storage.getPrescriptionsByPatient(patient.id, req.tenant!.id);
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Found prescriptions count:", prescriptions.length);
-      
+
       res.json({
         prescriptions,
         totalCount: prescriptions.length,
@@ -4494,17 +4494,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Find patient by user email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id);
       const matchingPatient = patients.find(p => p.email === req.user?.email);
-      
+
       if (!matchingPatient) {
         return res.status(404).json({ error: "Patient record not found" });
       }
 
       // Get medical records for this patient
       const records = await storage.getMedicalRecordsByPatient(matchingPatient.id, req.tenant!.id);
-      
+
       // Calculate health score
       const healthScore = calculateHealthScore(records, matchingPatient);
-      
+
       res.json(healthScore);
     } catch (error) {
       console.error("Health score calculation error:", error);
@@ -4517,14 +4517,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("🔍 PATIENTS/:ID DEBUG - Raw ID param:", req.params.id);
       const patientId = parseInt(req.params.id);
       console.log("🔍 PATIENTS/:ID DEBUG - Parsed ID:", patientId);
-      
+
       if (isNaN(patientId)) {
         console.error("🔍 PATIENTS/:ID DEBUG - Invalid ID provided:", req.params.id);
         return res.status(400).json({ error: "Invalid patient ID provided" });
       }
-      
+
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -4546,7 +4546,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/patients/:id", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       // Verify patient exists and belongs to organization
       const patient = await storage.getPatient(patientId, req.tenant!.id);
       if (!patient) {
@@ -4555,7 +4555,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Delete patient (this will cascade delete related records)
       const deleted = await storage.deletePatient(patientId, req.tenant!.id);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "Failed to delete patient" });
       }
@@ -4585,7 +4585,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -4611,10 +4611,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/patients/:id/prescriptions", async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       // Get prescriptions directly from prescriptions table
       const prescriptions = await storage.getPrescriptionsByPatient(patientId, req.tenant!.id);
-      
+
       // Format prescriptions for frontend
       const formattedPrescriptions = prescriptions.map(prescription => ({
         id: prescription.id,
@@ -4651,16 +4651,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Fetch pending records from all relevant tables
       const pendingPrescriptions = await storage.getPrescriptionsByStatus(patientId, organizationId, "pending");
-      const pendingLabResults = await storage.getLabResultsByStatus(patientId, organizationId, "pending"); 
+      const pendingLabResults = await storage.getLabResultsByStatus(patientId, organizationId, "pending");
       const pendingAiInsights = await storage.getAiInsightsByStatus(patientId, organizationId, "pending");
       const pendingClaims = await storage.getClaimsByStatus(patientId, organizationId, "pending");
       const pendingVoiceNotes = await storage.getVoiceNotesByStatus(patientId, organizationId, "pending");
-      
+
       // Get all medical records (since they don't have status field)
       const allMedicalRecords = await storage.getMedicalRecordsByPatient(patientId, organizationId);
 
       // Calculate totals
-      const totalCount = 
+      const totalCount =
         (pendingPrescriptions?.length || 0) +
         (pendingLabResults?.length || 0) +
         (pendingAiInsights?.length || 0) +
@@ -4685,15 +4685,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/patients/:id/lab-results", async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       // Get lab results for this patient
       const labResults = await storage.getLabResultsByPatient(patientId, req.tenant!.id);
-      
+
       // Format lab results for frontend display
       const formattedLabResults = labResults.map(labResult => {
         // If results array has data, use the first result for main display
         const primaryResult = labResult.results && labResult.results.length > 0 ? labResult.results[0] : null;
-        
+
         return {
           id: labResult.id,
           testId: labResult.testId || 'Not specified',
@@ -4721,7 +4721,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           createdAt: labResult.createdAt
         };
       });
-      
+
       res.json(formattedLabResults);
     } catch (error) {
       console.error("Patient lab results fetch error:", error);
@@ -4733,10 +4733,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/patients/:id/medical-imaging", async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       // Get medical imaging for this patient
       const imaging = await storage.getMedicalImagesByPatient(patientId, req.tenant!.id);
-      
+
       res.json(imaging || []);
     } catch (error) {
       console.error("Patient medical imaging fetch error:", error);
@@ -4749,7 +4749,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -4767,7 +4767,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -4785,7 +4785,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -4803,14 +4803,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
 
       // Get invoices for this patient using patientId string
       const invoices = await storage.getInvoicesByPatient(patient.patientId, req.tenant!.id);
-      
+
       res.json(invoices || []);
     } catch (error) {
       console.error("Patient invoices fetch error:", error);
@@ -4823,21 +4823,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
 
       // Get all invoices for this patient (default to empty array if undefined)
       const invoices = await storage.getInvoicesByPatient(patient.patientId, req.tenant!.id) || [];
-      
+
       // Get payments for each invoice
       const allPayments = [];
       for (const invoice of invoices) {
         const payments = await storage.getPaymentsByInvoice(invoice.id, req.tenant!.id) || [];
         allPayments.push(...payments);
       }
-      
+
       res.json(allPayments);
     } catch (error) {
       console.error("Patient payments fetch error:", error);
@@ -4849,7 +4849,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/patients/:id/records", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       const recordData = z.object({
         type: z.enum(["consultation", "prescription", "lab_result", "imaging", "history", "examination", "assessment", "summary", "vitals"]),
         title: z.string().min(1),
@@ -4899,7 +4899,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("🔍 [PATIENT_CREATION] Insurance info from body:", JSON.stringify(req.body.insuranceInfo, null, 2));
       console.log("🔍 [PATIENT_CREATION] Insurance info type:", typeof req.body.insuranceInfo);
       console.log("🔍 [PATIENT_CREATION] Insurance info keys:", req.body.insuranceInfo ? Object.keys(req.body.insuranceInfo) : 'null/undefined');
-      
+
       const patientData = z.object({
         firstName: z.string().min(2, "First name must be at least 2 characters").max(30, "First name cannot exceed 30 characters"),
         lastName: z.string().min(2, "Last name must be at least 2 characters").max(30, "Last name cannot exceed 30 characters"),
@@ -4992,7 +4992,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.log("🔵 [PATIENT_CREATION] Starting transaction...");
         const hashedPassword = await bcrypt.hash("cura123", 10);
         console.log("🔵 [PATIENT_CREATION] Password hashed successfully");
-        
+
         const [newUser] = await tx.insert(users).values({
           organizationId: req.tenant!.id,
           email: patientData.email || `patient_${Date.now()}@placeholder.com`,
@@ -5010,7 +5010,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           isActive: true,
           isSaaSOwner: false
         }).returning();
-        
+
         console.log("✅ [PATIENT_CREATION] User created successfully:", { id: newUser.id, email: newUser.email, role: newUser.role });
 
         // Step 2: Create patient record with user_id foreign key
@@ -5053,7 +5053,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.log("🔍 [PATIENT_CREATION] Data being inserted into database - insuranceInfo:", JSON.stringify(patientInsertData.insuranceInfo, null, 2));
 
         const [patientRecord] = await tx.insert(patients).values(enforceCreatedBy(req, patientInsertData as any)).returning();
-        
+
         console.log("✅ [PATIENT_CREATION] Patient record created successfully:", { id: patientRecord.id, patientId: patientRecord.patientId, userId: newUser.id });
 
         // Step 3: Create insurance verification record if insurance info is provided
@@ -5065,7 +5065,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           policyNumberLength: (patientData.insuranceInfo?.policyNumber?.trim() ?? "").length,
           conditionResult: !!(patientData.insuranceInfo && (patientData.insuranceInfo.provider?.trim() || patientData.insuranceInfo.policyNumber?.trim()))
         });
-        
+
         // Check if either provider or policyNumber has a non-empty value (trim to handle whitespace-only strings)
         if (patientData.insuranceInfo && (patientData.insuranceInfo.provider?.trim() || patientData.insuranceInfo.policyNumber?.trim())) {
           console.log("✅ [INSURANCE_CHECK] Condition passed - Creating insurance verification record");
@@ -5104,7 +5104,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (req.tenant!.settings?.features?.aiEnabled) {
         try {
           const insights = await aiService.generatePreventiveCareReminders(patient);
-          
+
           for (const insight of insights) {
             await storage.createAiInsight({
               organizationId: req.tenant!.id,
@@ -5189,26 +5189,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.patch("/api/patients/:id", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       // Check permissions: doctors, nurses, and admins can update any patient
       // Patients can only update their own record
       const userRole = req.user?.role;
       const userEmail = req.user?.email;
-      
+
       if (userRole === "patient") {
         // For patients, verify they're updating their own record
         const patient = await storage.getPatient(patientId, req.tenant!.id);
         if (!patient) {
           return res.status(404).json({ error: "Patient not found" });
         }
-        
+
         if (patient.email !== userEmail) {
           return res.status(403).json({ error: "Patients can only update their own records" });
         }
       } else if (!["doctor", "nurse", "admin"].includes(userRole || "")) {
         return res.status(403).json({ error: "Insufficient permissions" });
       }
-      
+
       const updateData = z.object({
         firstName: z.string().trim().min(1, "First name is required").optional(),
         lastName: z.string().trim().min(1, "Last name is required").optional(),
@@ -5304,7 +5304,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Sync patient updates to the corresponding user record if userId exists
       if (patient.userId) {
         const userUpdates: any = {};
-        
+
         // Map patient fields to user fields
         if (updateData.email !== undefined) {
           userUpdates.email = updateData.email;
@@ -5318,7 +5318,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         if (updateData.phone !== undefined) {
           userUpdates.phone = updateData.phone;
         }
-        
+
         // Only update user if there are fields to sync
         if (Object.keys(userUpdates).length > 0) {
           try {
@@ -5337,7 +5337,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         let notificationTitle = "Patient Record Updated";
         let notificationMessage = "Your medical record has been updated.";
         let priority: "low" | "normal" | "high" | "critical" = "normal";
-        
+
         // Customize notification based on what changed
         if (updateData.riskLevel) {
           if (updateData.riskLevel === "critical" || updateData.riskLevel === "high") {
@@ -5352,7 +5352,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           notificationMessage = "A new medical alert has been added to your record. Please review.";
           priority = "high";
         }
-        
+
         await createNotification({
           organizationId: req.tenant!.id,
           userId: patient.userId,
@@ -5381,7 +5381,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.patientId);
       const recordId = parseInt(req.params.recordId);
-      
+
       const updateData = z.object({
         type: z.enum(["consultation", "prescription", "lab_result", "imaging", "history", "examination", "assessment", "summary", "vitals"]).optional(),
         title: z.string().optional(),
@@ -5619,7 +5619,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/patients/:id/send-reminder", requireRole(["doctor", "nurse", "receptionist", "admin"]), async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       const reminderData = z.object({
         type: z.enum(["appointment_reminder", "medication_reminder", "follow_up_reminder", "emergency_alert", "preventive_care", "billing_notice", "health_check"]).default("appointment_reminder"),
         message: z.string().optional(),
@@ -5629,7 +5629,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }).parse(req.body);
 
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -5641,14 +5641,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const messageText = reminderData.message || `Hi ${patient.firstName}, this is a reminder from your healthcare provider.`;
       const now = new Date();
-      
+
       // Check if this is a scheduled message (scheduledFor is in the future)
       const isScheduled = reminderData.scheduledFor && new Date(reminderData.scheduledFor) > now;
-      
+
       let messageSent = false;
       let messageResult = null;
       let status = 'pending';
-      
+
       if (isScheduled) {
         // Schedule for future - don't send now
         status = 'scheduled';
@@ -5662,7 +5662,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               message: messageText,
               type: reminderData.method as 'sms' | 'whatsapp'
             });
-            
+
             if (messageResult.success) {
               messageSent = true;
               status = 'sent';
@@ -5679,7 +5679,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // Voice call via Twilio TTS
           try {
             messageResult = await messagingService.makeVoiceCall(patient.phone, messageText);
-            
+
             if (messageResult.success) {
               messageSent = true;
               status = 'sent';
@@ -5700,7 +5700,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               reminderData.type,
               messageText
             );
-            
+
             if (emailResult) {
               messageSent = true;
               status = 'sent';
@@ -5749,8 +5749,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         responseMessage = `Reminder logged for ${patient.firstName} ${patient.lastName} (${reminderData.method === 'email' && !patient.email ? 'No email address available' : !patient.phone ? 'No phone number available' : 'System notification only'})`;
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: responseMessage,
         patientId,
         reminderType: reminderData.type,
@@ -5770,11 +5770,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/patients/:id/flags", requireRole(["doctor", "nurse", "receptionist", "admin"]), async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       const flagData = z.object({
         type: z.enum([
-          "medical_alert", "allergy_warning", "medication_interaction", 
-          "high_risk", "special_needs", "insurance_issue", 
+          "medical_alert", "allergy_warning", "medication_interaction",
+          "high_risk", "special_needs", "insurance_issue",
           "payment_overdue", "follow_up_required"
         ]).optional(),
         flagType: z.enum(["urgent", "follow-up", "billing", "general"]).optional(),
@@ -5788,19 +5788,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const finalPriority = flagData.severity || flagData.priority || "medium";
 
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
 
       // Create the flag string with type and priority
       const flagString = `${finalFlagType}:${finalPriority}:${flagData.reason}`;
-      
+
       // Get current flags array and add the new flag
       const currentFlags = patient.flags || [];
       if (!currentFlags.includes(flagString)) {
         currentFlags.push(flagString);
-        
+
         // Update patient with new flag and risk level based on flag severity
         await storage.updatePatient(patientId, req.tenant!.id, {
           flags: currentFlags,
@@ -5811,8 +5811,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch updated patient to return current state
       const updatedPatient = await storage.getPatient(patientId, req.tenant!.id);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: `${finalFlagType} flag (${finalPriority} priority) added to ${patient.firstName} ${patient.lastName}`,
         patientId,
         flagType: finalFlagType,
@@ -5832,9 +5832,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = parseInt(req.params.id);
       const flagIndex = parseInt(req.params.flagIndex);
-      
+
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
@@ -5846,7 +5846,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Remove the flag at the specified index
       const updatedFlags = currentFlags.filter((_, index) => index !== flagIndex);
-      
+
       // Update patient with new flags array
       await storage.updatePatient(patientId, req.tenant!.id, {
         flags: updatedFlags
@@ -5855,8 +5855,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch updated patient to return current state
       const updatedPatient = await storage.getPatient(patientId, req.tenant!.id);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: `Flag removed from ${patient.firstName} ${patient.lastName}`,
         patientId,
         totalFlags: updatedPatient?.flags?.length || 0,
@@ -5886,26 +5886,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const { start, end, doctorId, patientId, providerId, date } = req.query;
       const userRole = req.user!.role;
       const userId = req.user!.id;
-      
+
       let appointments: Appointment[] = [];
-      
+
       // Special case: Slot availability checking (providerId + date)
       // Allow ALL users to check slot availability for booking purposes
       if (providerId && date) {
         appointments = await storage.getAppointmentsByProvider(
-          parseInt(providerId as string), 
+          parseInt(providerId as string),
           req.tenant!.id
         );
-        
+
         // Filter by date
         const dateStr = date as string;
         appointments = appointments.filter(apt => {
-          const aptDate = apt.scheduledAt instanceof Date 
+          const aptDate = apt.scheduledAt instanceof Date
             ? apt.scheduledAt.toISOString().substring(0, 10)
             : apt.scheduledAt.substring(0, 10);
           return aptDate === dateStr;
         });
-        
+
         // Return minimal data for availability checking (no sensitive patient info)
         const availabilityData = appointments.map(apt => ({
           id: apt.id,
@@ -5914,21 +5914,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           duration: apt.duration,
           status: apt.status
         }));
-        
+
         return res.json(availabilityData);
       }
-      
+
       // Role-based access control as per architect specifications
       if (userRole === 'admin' || userRole === 'receptionist') {
         // Admin/receptionist can see all appointments with optional filters
         if (doctorId) {
           appointments = await storage.getAppointmentsByProvider(
-            parseInt(doctorId as string), 
+            parseInt(doctorId as string),
             req.tenant!.id
           );
         } else if (patientId) {
           appointments = await storage.getAppointmentsByPatient(
-            parseInt(patientId as string), 
+            parseInt(patientId as string),
             req.tenant!.id
           );
         } else {
@@ -5939,11 +5939,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Doctors can only see their own appointments unless they have read_all permission
         const user = req.user! as any;
         const hasReadAllPermission = user.permissions?.modules?.appointments?.view === true;
-        
+
         if (hasReadAllPermission && doctorId) {
           // Doctor with read_all permission can see other doctors' appointments
           appointments = await storage.getAppointmentsByProvider(
-            parseInt(doctorId as string), 
+            parseInt(doctorId as string),
             req.tenant!.id
           );
         } else {
@@ -5955,10 +5955,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Find the patient record by email (since userId may be null)
         const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
         const user = req.user! as any; // Cast to access firstName/lastName properties
-        
+
         // Match by email first (primary method), fallback to userId
         const patient = patients.find(p => p.email === user.email) || patients.find(p => p.userId === userId);
-        
+
         if (patient) {
           appointments = await storage.getAppointmentsByPatient(patient.id, req.tenant!.id);
         } else {
@@ -5971,32 +5971,32 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Default: no access for other roles
         return res.status(403).json({ error: "Access denied" });
       }
-      
+
       // Apply date range filters if provided
       if (start || end) {
         const startDate = start ? new Date(start as string) : new Date(0);
         const endDate = end ? new Date(end as string) : new Date('2099-12-31');
-        
+
         appointments = appointments.filter(apt => {
           const aptDate = new Date(apt.scheduledAt);
           return aptDate >= startDate && aptDate <= endDate;
         });
       }
-      
+
       // Enrich appointments with patient names (similar to lab results)
       // Get unique patient IDs from appointments
       const uniquePatientIds = [...new Set(appointments.map(apt => apt.patientId))];
-      
+
       // Fetch patients in parallel for better performance and reliability
       // This handles cases where getPatientsByOrganization limit might exclude some patients
-      const patientPromises = uniquePatientIds.map(patientId => 
+      const patientPromises = uniquePatientIds.map(patientId =>
         storage.getPatient(patientId, req.tenant!.id).catch(error => {
           console.warn(`[Appointments] Failed to fetch patient ${patientId}:`, error);
           return undefined;
         })
       );
       const patientResults = await Promise.all(patientPromises);
-      
+
       // Create a map for quick lookup
       const patientMap = new Map();
       patientResults.forEach((patient, index) => {
@@ -6004,7 +6004,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           patientMap.set(uniquePatientIds[index], patient);
         }
       });
-      
+
       const enrichedAppointments = appointments.map(apt => {
         const patient = patientMap.get(apt.patientId);
         if (patient) {
@@ -6021,7 +6021,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           patientName: `Patient ${apt.patientId}`
         };
       });
-      
+
       res.json(enrichedAppointments);
     } catch (error) {
       console.error("Appointments fetch error:", error);
@@ -6044,7 +6044,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Role-based access control for updating appointments
       let canUpdate = false;
-      
+
       if (userRole === 'admin' || userRole === 'receptionist') {
         // Admin/receptionist can update any appointment
         canUpdate = true;
@@ -6071,7 +6071,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Prepare update data (only allow updating certain fields)
       const allowedUpdates: any = {};
       const { title, description, scheduledAt, duration, status, type, location, isVirtual } = req.body;
-      
+
       if (title !== undefined) allowedUpdates.title = title;
       if (description !== undefined) allowedUpdates.description = description;
       if (scheduledAt !== undefined) {
@@ -6093,7 +6093,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       if (updatedAppointment) {
         console.log(`✅ Appointment ${appointmentId} updated successfully by user ${userId} (${userRole})`);
-        
+
         // Broadcast update to all connected clients
         if (global.appointmentClients) {
           const updateMessage = JSON.stringify({
@@ -6101,7 +6101,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             appointment: updatedAppointment,
             timestamp: Date.now()
           });
-          
+
           global.appointmentClients.forEach((client) => {
             if (client.organizationId === req.tenant!.id) {
               try {
@@ -6112,7 +6112,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             }
           });
         }
-        
+
         res.json(updatedAppointment);
       } else {
         res.status(400).json({ error: "Failed to update appointment" });
@@ -6126,7 +6126,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   // Real-time appointment updates via Server-Sent Events
   app.get("/api/appointments/stream", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
     console.log(`[SSE] New appointment stream connection for org ${req.tenant!.id}, user ${req.user!.id}`);
-    
+
     // Set up SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -6139,7 +6139,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     const organizationId = req.tenant!.id;
     const userId = req.user!.id;
     const clientId = `${organizationId}-${userId}-${Date.now()}`;
-    
+
     // Store client connection for broadcasting
     if (!global.appointmentClients) {
       global.appointmentClients = new Map();
@@ -6171,7 +6171,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   // Broadcast appointment events to all connected clients in the same organization
   const broadcastAppointmentEvent = (organizationId: number, eventType: string, data: any) => {
     if (!global.appointmentClients) return;
-    
+
     const eventData = {
       type: eventType,
       data,
@@ -6180,7 +6180,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     };
 
     console.log(`[SSE] Broadcasting ${eventType} to org ${organizationId}`);
-    
+
     for (const [clientId, client] of global.appointmentClients.entries()) {
       if (client.organizationId === organizationId) {
         try {
@@ -6198,18 +6198,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const { patientId, providerId, scheduledAt } = req.body;
       const organizationId = req.tenant!.id;
-      
+
       if (!patientId || !providerId || !scheduledAt) {
         return res.status(400).json({ error: "patientId, providerId, and scheduledAt are required" });
       }
-      
+
       // Parse the date/time directly from ISO string WITHOUT timezone conversion
       // scheduledAt format: "2025-12-12T12:45:00"
       const dateStr = scheduledAt.substring(0, 10); // "2025-12-12"
       const timeStr = scheduledAt.substring(11, 16); // "12:45"
-      
+
       console.log(`[CONFLICT CHECK] Checking for conflicts: patientId=${patientId}, providerId=${providerId}, date=${dateStr}, time=${timeStr}`);
-      
+
       // Check for patient conflicts (patient has appointment at same date/time with any doctor)
       const patientConflicts = await db.select()
         .from(schema.appointments)
@@ -6220,7 +6220,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           sql`TO_CHAR(${schema.appointments.scheduledAt}, 'HH24:MI') = ${timeStr}`,
           ne(schema.appointments.status, 'cancelled')
         ));
-      
+
       // Check for provider conflicts (doctor has appointment at same date/time with any patient)
       const providerConflicts = await db.select()
         .from(schema.appointments)
@@ -6231,9 +6231,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           sql`TO_CHAR(${schema.appointments.scheduledAt}, 'HH24:MI') = ${timeStr}`,
           ne(schema.appointments.status, 'cancelled')
         ));
-      
+
       console.log(`[CONFLICT CHECK] Found ${patientConflicts.length} patient conflicts, ${providerConflicts.length} provider conflicts`);
-      
+
       res.json({
         hasConflict: patientConflicts.length > 0 || providerConflicts.length > 0,
         patientConflict: patientConflicts,
@@ -6257,7 +6257,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       console.log("Appointment creation request received:", req.body);
       console.log("Tenant ID:", req.tenant?.id);
-      
+
       const normalizedBody = {
         ...req.body,
         appointmentType: req.body.appointmentType ?? req.body.appointment_type,
@@ -6303,26 +6303,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // If it's a string (like "P000007"), find the patient by patientId
         console.log("Looking up patient by patientId:", appointmentData.patientId);
         let patient = await storage.getPatientByPatientId(appointmentData.patientId, req.tenant!.id);
-        
+
         // If not found, try different formatting patterns
         if (!patient && appointmentData.patientId.startsWith("P")) {
           // Extract the numeric part and try different formats
           const numericPart = appointmentData.patientId.substring(1);
           const numericValue = parseInt(numericPart, 10);
-          
+
           if (!isNaN(numericValue)) {
             // Try with 6-digit padding: P000007
             const paddedId = `P${numericValue.toString().padStart(6, '0')}`;
             console.log("Trying padded patientId:", paddedId);
             patient = await storage.getPatientByPatientId(paddedId, req.tenant!.id);
-            
+
             // If still not found, try with 3-digit padding: P007
             if (!patient) {
               const shortPaddedId = `P${numericValue.toString().padStart(3, '0')}`;
               console.log("Trying short padded patientId:", shortPaddedId);
               patient = await storage.getPatientByPatientId(shortPaddedId, req.tenant!.id);
             }
-            
+
             // If still not found, try without padding: P7
             if (!patient) {
               const noPaddingId = `P${numericValue}`;
@@ -6331,11 +6331,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             }
           }
         }
-        
+
         if (!patient) {
           console.log("Patient not found for patientId:", appointmentData.patientId);
-          return res.status(400).json({ 
-            error: `Patient not found. Please use a valid patient ID like P000001, P000002, P000004, P000005, P000007, P000008, P000009, P000010, or P000158.` 
+          return res.status(400).json({
+            error: `Patient not found. Please use a valid patient ID like P000001, P000002, P000004, P000005, P000007, P000008, P000009, P000010, or P000158.`
           });
         }
         numericPatientId = patient.id;
@@ -6370,23 +6370,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       };
 
       // Note: Removed past time validation since we're using naive timestamps
-      
+
       console.log("Creating appointment with final data:", appointmentToCreate);
-      
+
       const appointment = await storage.createAppointment(appointmentToCreate);
-      
+
       // Get patient and provider details for notifications
       const patient = await storage.getPatient(numericPatientId, req.tenant!.id);
       const provider = await storage.getUser(appointmentData.providerId, req.tenant!.id);
-      
+
       // Create notifications for appointment creation
       if (patient && provider) {
         const appointmentDate = new Date(appointmentToCreate.scheduledAt!);
         const formattedDate = appointmentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const formattedTime = appointmentDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-        
+
         const notificationsToCreate = [];
-        
+
         // Notify patient
         if (patient.userId) {
           notificationsToCreate.push({
@@ -6405,7 +6405,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             }
           });
         }
-        
+
         // Notify provider
         notificationsToCreate.push({
           organizationId: req.tenant!.id,
@@ -6422,30 +6422,30 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             department: appointmentData.department || "General",
           }
         });
-        
+
         await createBulkNotifications(notificationsToCreate);
       }
-      
+
       // Broadcast appointment creation to all connected clients in the same organization
       broadcastAppointmentEvent(req.tenant!.id, 'appointment.created', appointment);
-      
+
       console.log("Appointment creation completed, returning:", appointment);
       res.status(201).json(appointment);
     } catch (error) {
       console.error("Appointment creation error:", error);
-      
+
       // Handle scheduling conflicts specifically
       if (error instanceof Error && error.message.includes("already scheduled at this time")) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: error.message
         });
       }
-      
+
       // Provide specific error message for validation failures
       const errorMessage = error instanceof Error ? error.message : "Failed to create appointment";
-      
+
       // Always provide detailed error message for appointment failures
-      res.status(400).json({ 
+      res.status(400).json({
         error: errorMessage,
         type: "appointment_validation_error",
         timestamp: new Date().toISOString()
@@ -6457,7 +6457,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/appointments-with-invoice", requireRole(["doctor", "nurse", "receptionist", "admin", "patient"]), async (req: TenantRequest, res) => {
     try {
       console.log("Appointment with invoice creation request received:", req.body);
-      
+
       const requestData = z.object({
         patientId: z.number(),
         providerId: z.number(),
@@ -6567,7 +6567,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.patch("/api/appointments/:id", authMiddleware, requireModulePermission('appointments', 'edit'), async (req: TenantRequest, res) => {
     try {
       const appointmentId = parseInt(req.params.id);
-      
+
       if (isNaN(appointmentId)) {
         return res.status(400).json({ error: "Invalid appointment ID" });
       }
@@ -6595,7 +6595,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const updated = await storage.updateAppointment(appointmentId, req.tenant!.id, updatePayload);
-      
+
       if (!updated) {
         return res.status(404).json({ error: "Appointment not found" });
       }
@@ -6614,9 +6614,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/appointments/:id", authMiddleware, requireModulePermission('appointments', 'delete'), async (req: TenantRequest, res) => {
     try {
       console.log(`📞 DELETE REQUEST - Appointment ID: ${req.params.id}, User: ${req.user?.email}, Tenant: ${req.tenant?.id}`);
-      
+
       const appointmentId = parseInt(req.params.id);
-      
+
       if (isNaN(appointmentId)) {
         console.log(`❌ Invalid appointment ID: ${req.params.id}`);
         return res.status(400).json({ error: "Invalid appointment ID" });
@@ -6625,7 +6625,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log(`🚀 Calling deleteAppointment with ID: ${appointmentId}, OrgID: ${req.tenant!.id}`);
       const deleted = await storage.deleteAppointment(appointmentId, req.tenant!.id);
       console.log(`✅ Deletion response: ${deleted}`);
-      
+
       if (!deleted) {
         console.log(`❌ Appointment not found or not deleted`);
         return res.status(404).json({ error: "Appointment not found" });
@@ -6650,7 +6650,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/doctors-fee/:doctorId", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const doctorId = parseInt(req.params.doctorId);
-      
+
       if (isNaN(doctorId)) {
         return res.status(400).json({ error: "Invalid doctor ID" });
       }
@@ -6689,7 +6689,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/pricing/doctors-fees/check-duplicate", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const serviceName = req.query.serviceName as string;
-      
+
       if (!serviceName) {
         return res.status(400).json({ error: "Service name is required" });
       }
@@ -6720,7 +6720,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: "Organization context required. Ensure X-Tenant-Subdomain header is set." });
       }
       const { serviceNames, doctorId } = req.body;
-      
+
       if (!Array.isArray(serviceNames) || serviceNames.length === 0) {
         return res.status(400).json({ error: "Service names array is required" });
       }
@@ -6752,7 +6752,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const result = await pool.query(query, values);
 
       const existingNames = result.rows.map((row: { service_name: string }) => row.service_name);
-      const duplicates = serviceNames.filter((name: string) => 
+      const duplicates = serviceNames.filter((name: string) =>
         existingNames.includes(String(name).toLowerCase())
       );
 
@@ -6799,7 +6799,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           .orderBy(schema.doctorsFee.serviceName);
         console.log(`[DOCTORS FEES] Fetched ${fees.length} doctors fees for organization ${organizationId}`);
       }
-      
+
       res.json(fees || []);
     } catch (error) {
       console.error("Error fetching doctors fees:", error);
@@ -6827,8 +6827,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       // Convert basePrice to string if it's a number (decimal fields need strings)
-      const basePrice = typeof req.body.basePrice === 'number' 
-        ? req.body.basePrice.toFixed(2) 
+      const basePrice = typeof req.body.basePrice === 'number'
+        ? req.body.basePrice.toFixed(2)
         : String(req.body.basePrice);
 
       // Prepare fee data with proper type conversions
@@ -6877,17 +6877,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.error("Error creating doctors fee:", error);
       if (error instanceof z.ZodError) {
         console.error("Validation errors:", JSON.stringify(error.errors, null, 2));
-        return res.status(400).json({ 
-          error: "Invalid request data", 
+        return res.status(400).json({
+          error: "Invalid request data",
           details: error.errors.map(err => ({
             path: err.path.join('.'),
             message: err.message
           }))
         });
       }
-      res.status(500).json({ 
-        error: "Failed to create doctors fee", 
-        details: error instanceof Error ? error.message : String(error) 
+      res.status(500).json({
+        error: "Failed to create doctors fee",
+        details: error instanceof Error ? error.message : String(error)
       });
     }
   });
@@ -7018,7 +7018,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         .orderBy(schema.labTestPricing.testName);
 
       console.log(`[LAB TESTS PRICING] Fetched ${tests.length} lab tests for organization ${organizationId}`);
-      
+
       // Return empty array if no tests found, not an error
       res.json(tests || []);
     } catch (error) {
@@ -7562,13 +7562,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/clinic-headers", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     // Set content-type header explicitly FIRST
     res.setHeader('Content-Type', 'application/json');
-    
+
     console.log(`[CLINIC-HEADER POST] ⚡ Route handler reached!`);
     console.log(`[CLINIC-HEADER POST] Method: ${req.method}, URL: ${req.url}, OriginalUrl: ${req.originalUrl}`);
     console.log(`[CLINIC-HEADER POST] Body exists:`, !!req.body);
     console.log(`[CLINIC-HEADER POST] Body keys:`, req.body ? Object.keys(req.body) : 'no body');
     console.log(`[CLINIC-HEADER POST] Content-Type header:`, req.get('Content-Type'));
-    
+
     try {
       if (!req.tenant) {
         console.error(`[CLINIC-HEADER POST] ❌ No tenant found`);
@@ -7576,18 +7576,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const organizationId = req.tenant.id;
-      
+
       // Log incoming request data
       console.log(`[CLINIC-HEADER POST] Organization ID: ${organizationId}`);
       console.log(`[CLINIC-HEADER POST] Request body keys:`, Object.keys(req.body || {}));
       console.log(`[CLINIC-HEADER POST] logoBase64 present:`, !!req.body?.logoBase64);
       console.log(`[CLINIC-HEADER POST] logoBase64 length:`, req.body?.logoBase64 ? req.body.logoBase64.length : 0);
       console.log(`[CLINIC-HEADER POST] clinicName:`, req.body?.clinicName);
-      
+
       // Check if there's an existing active header first
       const existingHeader = await storage.getActiveClinicHeader(organizationId);
       console.log(`[CLINIC-HEADER POST] Existing header found:`, !!existingHeader, existingHeader ? `ID: ${existingHeader.id}` : 'none');
-      
+
       // Handle logoBase64: if provided and non-empty, use it; if empty string, set to null; if not provided, preserve existing
       let logoBase64Value: string | null = null;
       if (req.body?.logoBase64 !== undefined) {
@@ -7609,7 +7609,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         logoBase64Value = null;
         console.log(`[CLINIC-HEADER POST] No existing header and logoBase64 not provided, setting to null`);
       }
-      
+
       console.log(`[CLINIC-HEADER POST] Final logoBase64Value:`, logoBase64Value ? `present (${logoBase64Value.length} chars)` : 'null');
 
       // Validate and parse request body
@@ -7632,7 +7632,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       });
 
       console.log(`[CLINIC-HEADER POST] Validated headerData - logoBase64:`, headerData.logoBase64 ? `present (${headerData.logoBase64.length} chars)` : 'null');
-      
+
       let savedHeader;
       if (existingHeader) {
         // Update existing header
@@ -7660,7 +7660,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log(`[CLINIC-HEADER POST] ✅ Successfully saved header ID: ${savedHeader.id}`);
       console.log(`[CLINIC-HEADER POST] Saved logoBase64:`, savedHeader.logoBase64 ? `present (${savedHeader.logoBase64.length} chars)` : 'null');
       console.log(`[CLINIC-HEADER POST] Saved clinicName:`, savedHeader.clinicName);
-      
+
       // Explicitly set JSON response
       res.status(201).json(savedHeader);
     } catch (error: any) {
@@ -7710,10 +7710,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/clinic-footers", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     // Set content-type header explicitly
     res.setHeader('Content-Type', 'application/json');
-    
+
     console.log(`[CLINIC-FOOTER POST] ⚡ Route handler reached!`);
     console.log(`[CLINIC-FOOTER POST] Method: ${req.method}, URL: ${req.url}`);
-    
+
     try {
       if (!req.tenant) {
         console.error(`[CLINIC-FOOTER POST] ❌ No tenant found`);
@@ -7721,13 +7721,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const organizationId = req.tenant.id;
-      
+
       // Log incoming request data
       console.log(`[CLINIC-FOOTER POST] Organization ID: ${organizationId}`);
       console.log(`[CLINIC-FOOTER POST] Request body keys:`, Object.keys(req.body || {}));
       console.log(`[CLINIC-FOOTER POST] footerText:`, req.body?.footerText);
       console.log(`[CLINIC-FOOTER POST] backgroundColor:`, req.body?.backgroundColor);
-      
+
       // Validate and parse request body
       const footerData = insertClinicFooterSchema.parse({
         organizationId: organizationId,
@@ -7751,7 +7751,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Check if there's an existing active footer
       const existingFooter = await storage.getActiveClinicFooter(organizationId);
       console.log(`[CLINIC-FOOTER POST] Existing footer found:`, !!existingFooter, existingFooter ? `ID: ${existingFooter.id}` : 'none');
-      
+
       let savedFooter;
       if (existingFooter) {
         // Update existing footer
@@ -7772,7 +7772,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       console.log(`[CLINIC-FOOTER POST] ✅ Successfully saved footer ID: ${savedFooter.id}`);
       console.log(`[CLINIC-FOOTER POST] Saved footerText:`, savedFooter.footerText);
-      
+
       // Explicitly set JSON response
       res.status(201).json(savedFooter);
     } catch (error: any) {
@@ -7860,15 +7860,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         .returning();
 
       console.log("Invoice created successfully:", newInvoice[0]);
-      
+
       // Send payment due notification to patient
       const patient = await storage.getPatientByPatientId(invoiceData.patientId, req.tenant!.id);
-      
+
       if (patient && patient.userId) {
         const dueDate = new Date(invoiceData.dueDate);
         const formattedDueDate = dueDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const isPastDue = dueDate < new Date();
-        
+
         await createNotification({
           organizationId: req.tenant!.id,
           userId: patient.userId,
@@ -7884,7 +7884,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           }
         });
       }
-      
+
       res.status(201).json(newInvoice[0]);
     } catch (error) {
       console.error("Invoice creation error:", error);
@@ -7901,7 +7901,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const { dateRange } = req.query;
       const organizationId = req.tenant?.id;
-      
+
       if (!organizationId) {
         return res.status(400).json({ error: "Organization ID is required" });
       }
@@ -7976,11 +7976,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       allInvoices.forEach((invoice) => {
         const invoiceDate = new Date(invoice.dateOfService);
         const monthKey = monthNames[invoiceDate.getMonth()];
-        
+
         if (monthlyData[monthKey]) {
           const totalAmount = parseFloat(invoice.totalAmount.toString()) || 0;
           const paidAmount = parseFloat(invoice.paidAmount.toString()) || 0;
-          
+
           monthlyData[monthKey].revenue += totalAmount;
           monthlyData[monthKey].collections += paidAmount;
           monthlyData[monthKey].invoiceCount += 1;
@@ -8015,7 +8015,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       });
 
       console.log(`[FINANCIAL-REVENUE] Fetched revenue data for ${revenueData.length} months, total invoices: ${allInvoices.length}`);
-      
+
       res.json(revenueData);
     } catch (error: any) {
       console.error("[FINANCIAL-REVENUE] Error fetching revenue data:", error);
@@ -8027,7 +8027,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/financial/profitability", authMiddleware, requireRole(["admin", "finance", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant?.id;
-      
+
       if (!organizationId) {
         return res.status(400).json({ error: "Organization ID is required" });
       }
@@ -8052,7 +8052,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Calculate profitability for each service type
       // Cost is estimated as 60% of revenue (adjustable)
       const expenseRatio = 0.6;
-      
+
       const profitabilityData = invoicesByService.map((service) => {
         const revenue = parseFloat(service.revenue.toString()) || 0;
         const cost = revenue * expenseRatio;
@@ -8083,7 +8083,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       profitabilityData.sort((a, b) => b.revenue - a.revenue);
 
       console.log(`[FINANCIAL-PROFITABILITY] Fetched profitability data for ${profitabilityData.length} service types`);
-      
+
       res.json(profitabilityData);
     } catch (error: any) {
       console.error("[FINANCIAL-PROFITABILITY] Error fetching profitability data:", error);
@@ -8096,13 +8096,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = requireOrgId(req);
       const claims = await storage.getClaimsByOrganization(organizationId);
-      
+
       // Get all unique patient IDs to fetch patient names in one query
       const patientIds = [...new Set(claims.map(claim => claim.patientId))];
       const patients = await Promise.all(
         patientIds.map(id => storage.getPatient(id, organizationId))
       );
-      
+
       // Create a map of patient ID to patient name
       const patientMap = new Map();
       patients.forEach(patient => {
@@ -8110,7 +8110,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           patientMap.set(patient.id, `${patient.firstName} ${patient.lastName}`);
         }
       });
-      
+
       // Transform the claims data to match the expected frontend format
       const transformedClaims = claims.map(claim => ({
         id: claim.id.toString(),
@@ -8127,7 +8127,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         insuranceProvider: claim.insuranceProvider,
         procedures: claim.procedures || []
       }));
-      
+
       res.json(transformedClaims);
     } catch (error) {
       handleRouteError(error, "fetch claims data", res);
@@ -8139,7 +8139,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = requireOrgId(req);
       const { dateRange, insuranceType, role, userName } = req.query;
-      
+
       console.log("[REVENUE-BREAKDOWN] Fetching revenue breakdown with filters:", {
         organizationId,
         dateRange,
@@ -8147,12 +8147,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         role,
         userName
       });
-      
+
       // Calculate date range
       const now = new Date();
       let startDate = new Date();
       let endDate = new Date();
-      
+
       switch (dateRange) {
         case 'today':
           startDate.setHours(0, 0, 0, 0);
@@ -8183,9 +8183,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           startDate = new Date(now.getFullYear(), now.getMonth(), 1);
           endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       }
-      
+
       console.log("[REVENUE-BREAKDOWN] Date range:", { startDate, endDate });
-      
+
       // Build query conditions
       const { invoices, patients, users } = await import("../shared/schema");
       let conditions: any[] = [
@@ -8193,26 +8193,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         gte(invoices.dateOfService, startDate),
         lte(invoices.dateOfService, endDate)
       ];
-      
+
       // Fetch invoices with filters - CRITICAL: Include organizationId in join to prevent tenant data leaks
       let query = db.select({
         invoice: invoices,
         patient: patients
       })
-      .from(invoices)
-      .leftJoin(patients, and(
-        eq(invoices.patientId, patients.patientId),
-        eq(patients.organizationId, organizationId)
-      ))
-      .where(and(...conditions));
-      
+        .from(invoices)
+        .leftJoin(patients, and(
+          eq(invoices.patientId, patients.patientId),
+          eq(patients.organizationId, organizationId)
+        ))
+        .where(and(...conditions));
+
       const results = await query;
-      
+
       console.log("[REVENUE-BREAKDOWN] Total invoices found:", results.length);
-      
+
       // Filter results based on role and userName
       let filteredResults = results;
-      
+
       // Filter by insurance type
       if (insuranceType && insuranceType !== 'all') {
         filteredResults = filteredResults.filter(r => {
@@ -8221,7 +8221,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
         console.log("[REVENUE-BREAKDOWN] After insurance filter:", filteredResults.length);
       }
-      
+
       // Filter by role and userName
       if (role && role !== 'all') {
         if (role === 'patient' && userName && userName !== 'all') {
@@ -8238,7 +8238,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.log("[REVENUE-BREAKDOWN] After staff filter:", filteredResults.length);
         }
       }
-      
+
       // Aggregate revenue by service type
       const serviceTypeMap = new Map<string, {
         procedures: number;
@@ -8246,12 +8246,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         insurance: number;
         selfPay: number;
       }>();
-      
+
       let totalRevenue = 0;
       let totalInsurance = 0;
       let totalSelfPay = 0;
       let totalProcedures = 0;
-      
+
       filteredResults.forEach(({ invoice }) => {
         // NULL SAFETY: Guard against null or non-array items
         if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
@@ -8259,7 +8259,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             const serviceType = item.description || item.code || 'Uncategorized';
             const itemTotal = parseFloat(String(item.total || item.amount || 0));
             const isInsurance = invoice.insurance?.provider && invoice.insurance.provider !== 'Self-Pay';
-            
+
             if (!serviceTypeMap.has(serviceType)) {
               serviceTypeMap.set(serviceType, {
                 procedures: 0,
@@ -8268,17 +8268,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 selfPay: 0
               });
             }
-            
+
             const entry = serviceTypeMap.get(serviceType)!;
             entry.procedures += 1;
             entry.revenue += itemTotal;
-            
+
             if (isInsurance) {
               entry.insurance += itemTotal;
             } else {
               entry.selfPay += itemTotal;
             }
-            
+
             totalRevenue += itemTotal;
             totalProcedures += 1;
             if (isInsurance) {
@@ -8289,7 +8289,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           });
         }
       });
-      
+
       // Convert map to array
       const breakdown = Array.from(serviceTypeMap.entries()).map(([serviceName, data]) => ({
         serviceName,
@@ -8299,7 +8299,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         selfPay: data.selfPay,
         collectionRate: data.revenue > 0 ? Math.round((data.revenue / data.revenue) * 100) : 0
       }));
-      
+
       // Add total row
       breakdown.push({
         serviceName: 'Total',
@@ -8309,7 +8309,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         selfPay: totalSelfPay,
         collectionRate: totalRevenue > 0 ? Math.round((totalRevenue / totalRevenue) * 100) : 0
       });
-      
+
       // Get patient info if specific patient selected
       let patientInfo = null;
       if (role === 'patient' && userName && userName !== 'all') {
@@ -8325,13 +8325,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           };
         }
       }
-      
+
       console.log("[REVENUE-BREAKDOWN] Breakdown summary:", {
         totalServices: breakdown.length - 1,
         totalRevenue,
         totalProcedures
       });
-      
+
       res.json({
         breakdown,
         dateRange: { start: startDate, end: endDate },
@@ -8366,7 +8366,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }).parse(req.body);
 
       const organizationId = requireOrgId(req);
-      
+
       // Create claim record for database
       const newClaimData = {
         organizationId: organizationId,
@@ -8408,7 +8408,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const claimId = parseInt(req.params.id);
       const organizationId = requireOrgId(req);
-      
+
       if (isNaN(claimId)) {
         return res.status(400).json({ error: "Invalid claim ID" });
       }
@@ -8416,10 +8416,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Validate status field
       const { status } = req.body;
       const validStatuses = ["pending", "submitted", "approved", "denied", "paid"];
-      
+
       if (!status || !validStatuses.includes(status)) {
-        return res.status(400).json({ 
-          error: "Invalid status. Must be one of: " + validStatuses.join(", ") 
+        return res.status(400).json({
+          error: "Invalid status. Must be one of: " + validStatuses.join(", ")
         });
       }
 
@@ -8431,8 +8431,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Update the claim status
       const updatedClaim = await storage.updateClaim(claimId, organizationId, { status });
-      
-      res.json({ 
+
+      res.json({
         success: true,
         message: "Claim status updated successfully",
         claim: updatedClaim
@@ -8447,7 +8447,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const claimId = parseInt(req.params.id);
       const organizationId = requireOrgId(req);
-      
+
       if (isNaN(claimId)) {
         return res.status(400).json({ error: "Invalid claim ID" });
       }
@@ -8460,7 +8460,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Delete the claim
       await storage.deleteClaim(claimId);
-      
+
       res.json({ message: "Claim deleted successfully" });
     } catch (error) {
       handleRouteError(error, "delete claim", res);
@@ -8586,9 +8586,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = requireOrgId(req);
       const insuranceData = req.body;
-      
+
       console.log(`[FINANCIAL] New insurance record creation requested:`, insuranceData);
-      
+
       // Use provided patientId or find patient by name as fallback
       let patientId;
       if (insuranceData.patientId) {
@@ -8597,7 +8597,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Fallback: Find patient by name
         const patients = await storage.getPatientsByOrganization(organizationId);
         const patient = patients.find(p => `${p.firstName} ${p.lastName}` === insuranceData.patientName);
-        
+
         if (!patient) {
           return res.status(400).json({
             success: false,
@@ -8606,7 +8606,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
         patientId = patient.id;
       }
-      
+
       // Create insurance record for database
       const insuranceRecord = {
         organizationId,
@@ -8632,15 +8632,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           outOfPocketMet: 0
         }
       };
-      
+
       // Save to database
       const newInsurance = await storage.createInsuranceVerification(insuranceRecord);
-      
+
       // Update patient's is_insured status to true
       await storage.updatePatientInsuranceStatus(patientId, organizationId, true);
-      
+
       console.log(`[FINANCIAL] New insurance record created and patient insurance status updated:`, newInsurance);
-      
+
       res.json({
         success: true,
         message: "Insurance record created successfully",
@@ -8656,12 +8656,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/financial/insurance/:id/verify", authMiddleware, requireRole(["admin", "finance", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const insuranceId = req.params.id;
-      
+
       console.log(`[FINANCIAL] Insurance verification requested for: ${insuranceId}`);
-      
+
       // Simulate insurance verification process
       await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call delay
-      
+
       // Mock verification response - in production this would call insurance provider APIs
       const verificationResult = {
         insuranceId,
@@ -8677,9 +8677,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         },
         message: "Insurance eligibility verification completed successfully"
       };
-      
+
       console.log(`[FINANCIAL] Verification completed for ${insuranceId}:`, verificationResult);
-      
+
       res.json(verificationResult);
     } catch (error) {
       console.error(`[FINANCIAL] Insurance verification error:`, error);
@@ -8693,21 +8693,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const insuranceId = parseInt(req.params.id);
       const organizationId = requireOrgId(req);
       const updateData = req.body;
-      
+
       console.log(`[FINANCIAL] Insurance update requested for: ${insuranceId}`, updateData);
-      
+
       // Update the insurance record in the database
       const updatedInsurance = await storage.updateInsuranceVerification(insuranceId, organizationId, updateData);
-      
+
       if (!updatedInsurance) {
         return res.status(404).json({
           success: false,
           message: "Insurance record not found"
         });
       }
-      
+
       console.log(`[FINANCIAL] Insurance updated successfully:`, updatedInsurance);
-      
+
       res.json({
         success: true,
         data: updatedInsurance,
@@ -8724,21 +8724,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const insuranceId = parseInt(req.params.id);
       const organizationId = requireOrgId(req);
-      
+
       console.log(`[FINANCIAL] Insurance deletion requested for: ${insuranceId}`);
-      
+
       // Delete the insurance record from the database
       const deleted = await storage.deleteInsuranceVerification(insuranceId, organizationId);
-      
+
       if (!deleted) {
         return res.status(404).json({
           success: false,
           message: "Insurance record not found"
         });
       }
-      
+
       console.log(`[FINANCIAL] Insurance deleted successfully:`, insuranceId);
-      
+
       res.json({
         success: true,
         message: "Insurance record deleted successfully",
@@ -8756,21 +8756,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const insuranceId = parseInt(req.params.id);
       const organizationId = requireOrgId(req);
       const updateData = req.body;
-      
+
       console.log(`[FINANCIAL] Insurance PATCH update requested for: ${insuranceId}`, updateData);
-      
+
       // Update the insurance record in the database
       const updatedInsurance = await storage.updateInsuranceVerification(insuranceId, organizationId, updateData);
-      
+
       if (!updatedInsurance) {
         return res.status(404).json({
           success: false,
           message: "Insurance record not found"
         });
       }
-      
+
       console.log(`[FINANCIAL] Insurance PATCH updated successfully:`, updatedInsurance);
-      
+
       res.json({
         success: true,
         data: updatedInsurance,
@@ -8815,7 +8815,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           factors: ["Staff salary increases", "Equipment maintenance", "Inflation"]
         }
       ];
-      
+
       res.json(mockForecasts);
     } catch (error) {
       handleRouteError(error, "fetch financial forecasts", res);
@@ -8829,19 +8829,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log('🏥 MEDICAL STAFF API: Fetching doctors from users table');
       console.log('🏢 MEDICAL STAFF API: Organization ID from subdomain/tenant:', req.tenant!.id);
       console.log('📋 MEDICAL STAFF API: Tenant info:', { id: req.tenant!.id, name: req.tenant!.name, subdomain: req.tenant!.subdomain });
-      
+
       // Get query parameters for specialty filtering
       const { specialty, subSpecialty } = req.query as { specialty?: string; subSpecialty?: string };
-      
+
       console.log('🔍 MEDICAL STAFF API: Querying users table where organizationId =', req.tenant!.id);
       const users = await storage.getUsersByOrganization(req.tenant!.id);
       console.log('📊 MEDICAL STAFF API: Found', users.length, 'total users in organization from users table');
-      
+
       // Get today's date for shift checking
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-      
+
       // Get all staff shifts for today
       let todayShifts: any[] = [];
       try {
@@ -8850,41 +8850,41 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.log("No staff shifts data available, using fallback logic");
         todayShifts = [];
       }
-      
+
       // Get total doctor count
       const totalDoctors = users.filter(user => isDoctorLike(user.role) && user.isActive).length;
-      
+
       console.log(`=== MEDICAL STAFF DEBUG ===`);
       console.log(`Total users: ${users.length}`);
       console.log(`Total doctors (where role='doctor' and isActive=true): ${totalDoctors}`);
       console.log(`👨‍⚕️ MEDICAL STAFF API: Filtering users table where role = 'doctor'`);
       console.log(`Today shifts count: ${todayShifts.length}`);
       console.log(`Day of week: ${dayOfWeek}`);
-      
+
       // Filter for all staff roles needed for shift management and appointments
       let medicalStaff = users
         .filter(user => ['doctor', 'nurse', 'sample_taker', 'lab_technician', 'admin', 'receptionist'].includes(user.role) && user.isActive);
-      
+
       // Apply specialty filtering if provided
       if (specialty || subSpecialty) {
         console.log(`Filtering doctors - Specialty: "${specialty}", Sub-specialty: "${subSpecialty}"`);
         medicalStaff = medicalStaff.filter(user => {
           // Only filter doctors by specialty
           if (user.role !== 'doctor') return true;
-          
+
           let matchesSpecialty = true;
           let matchesSubSpecialty = true;
-          
+
           if (specialty) {
-            matchesSpecialty = Boolean(user.medicalSpecialtyCategory && 
+            matchesSpecialty = Boolean(user.medicalSpecialtyCategory &&
               user.medicalSpecialtyCategory.toLowerCase().trim() === specialty.toLowerCase().trim());
           }
-          
+
           if (subSpecialty) {
-            matchesSubSpecialty = Boolean(user.subSpecialty && 
+            matchesSubSpecialty = Boolean(user.subSpecialty &&
               user.subSpecialty.toLowerCase().trim() === subSpecialty.toLowerCase().trim());
           }
-          
+
           const matches = matchesSpecialty && matchesSubSpecialty;
           if (isDoctorLike(user.role)) {
             console.log(`  Doctor: ${user.firstName} ${user.lastName}`);
@@ -8892,67 +8892,67 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             console.log(`    Sub-specialty: "${user.subSpecialty}" matches "${subSpecialty}": ${matchesSubSpecialty}`);
             console.log(`    Overall match: ${matches}`);
           }
-          
+
           return matches;
         });
       }
-      
+
       medicalStaff = medicalStaff.filter(user => {
-          // For doctors specifically, apply minimal restrictions for patient access
-          if (isDoctorLike(user.role)) {
-            console.log(`Checking doctor: ${user.firstName} ${user.lastName} (ID: ${user.id})`);
-            
-            // If this is a specialty filtering request (for doctor selection/browsing),
-            // show ALL active doctors regardless of working days or shifts
-            // This allows patients to freely browse and select doctors by specialty
-            if (specialty || subSpecialty) {
-              console.log(`  - Specialty filtering mode: showing all active doctors for patient access`);
-              console.log(`  - Doctor is active: ${user.isActive}`);
-              // Return all active doctors for specialty browsing - no working day restrictions
-              return user.isActive;
-            }
-            
-            // For non-specialty filtering requests (like dashboard/shift management), 
-            // use the original availability logic
-            // Check if doctor has a shift today and is marked as available
-            const todayShift = todayShifts.find(shift => shift.staffId === user.id);
-            
-            if (todayShift) {
-              console.log(`  - Has shift today: available=${todayShift.isAvailable}, status=${todayShift.status}`);
-              // Doctor has a shift today - check if they're available and not absent
-              const isAvailable = todayShift.isAvailable && 
-                     todayShift.status !== 'absent' && 
-                     todayShift.status !== 'cancelled';
-              console.log(`  - Final availability: ${isAvailable}`);
-              return isAvailable;
-            } else {
-              // No shift found - check working days to see if they normally work today
-              const hasWorkingDays = user.workingDays && user.workingDays.length > 0;
-              const worksToday = hasWorkingDays && user.workingDays!.some(day => day.toLowerCase() === dayOfWeek);
-              
-              console.log(`  - No shift found. Working days: ${user.workingDays || 'none'}`);
-              console.log(`  - Works today (${dayOfWeek}): ${worksToday}`);
-              
-              // If no working days are set, assume doctor is available (fallback)
-              const isAvailable = hasWorkingDays ? worksToday : true;
-              console.log(`  - Final availability: ${isAvailable}`);
-              return isAvailable;
-            }
+        // For doctors specifically, apply minimal restrictions for patient access
+        if (isDoctorLike(user.role)) {
+          console.log(`Checking doctor: ${user.firstName} ${user.lastName} (ID: ${user.id})`);
+
+          // If this is a specialty filtering request (for doctor selection/browsing),
+          // show ALL active doctors regardless of working days or shifts
+          // This allows patients to freely browse and select doctors by specialty
+          if (specialty || subSpecialty) {
+            console.log(`  - Specialty filtering mode: showing all active doctors for patient access`);
+            console.log(`  - Doctor is active: ${user.isActive}`);
+            // Return all active doctors for specialty browsing - no working day restrictions
+            return user.isActive;
           }
-          // For non-doctors, show all active staff
-          return true;
-        })
+
+          // For non-specialty filtering requests (like dashboard/shift management), 
+          // use the original availability logic
+          // Check if doctor has a shift today and is marked as available
+          const todayShift = todayShifts.find(shift => shift.staffId === user.id);
+
+          if (todayShift) {
+            console.log(`  - Has shift today: available=${todayShift.isAvailable}, status=${todayShift.status}`);
+            // Doctor has a shift today - check if they're available and not absent
+            const isAvailable = todayShift.isAvailable &&
+              todayShift.status !== 'absent' &&
+              todayShift.status !== 'cancelled';
+            console.log(`  - Final availability: ${isAvailable}`);
+            return isAvailable;
+          } else {
+            // No shift found - check working days to see if they normally work today
+            const hasWorkingDays = user.workingDays && user.workingDays.length > 0;
+            const worksToday = hasWorkingDays && user.workingDays!.some(day => day.toLowerCase() === dayOfWeek);
+
+            console.log(`  - No shift found. Working days: ${user.workingDays || 'none'}`);
+            console.log(`  - Works today (${dayOfWeek}): ${worksToday}`);
+
+            // If no working days are set, assume doctor is available (fallback)
+            const isAvailable = hasWorkingDays ? worksToday : true;
+            console.log(`  - Final availability: ${isAvailable}`);
+            return isAvailable;
+          }
+        }
+        // For non-doctors, show all active staff
+        return true;
+      })
         .map(user => {
           const { passwordHash, ...safeUser } = user;
           return safeUser;
         });
-      
+
       // Count available doctors
       const availableDoctors = medicalStaff.filter(user => isDoctorLike(user.role)).length;
-      
+
       console.log(`Available doctors after filtering: ${availableDoctors}`);
       console.log(`=== END DEBUG ===`);
-      
+
       res.json({
         staff: medicalStaff,
         totalDoctors,
@@ -8968,9 +8968,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/doctors", authMiddleware, async (req: TenantRequest, res) => {
     try {
       console.log('🔄 DIRECT DOCTORS: Fetching doctors directly from database for organization:', req.tenant!.id);
-      
+
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       // Filter for active doctors only
       const doctors = users
         .filter(user => isDoctorLike(user.role) && user.isActive)
@@ -8978,11 +8978,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           const { passwordHash, ...safeUser } = user;
           return safeUser;
         });
-      
+
       console.log('🔄 DIRECT DOCTORS: Found doctors:', doctors.length);
       console.log('🔄 DIRECT DOCTORS: Doctor names:', doctors.map(d => `${d.firstName} ${d.lastName}`).join(', '));
-      
-      res.json({ 
+
+      res.json({
         doctors,
         count: doctors.length
       });
@@ -9011,32 +9011,32 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const { mainSpecialty, subSpecialty } = parseResult.data;
-      
+
       // Get users filtered by organization (tenant isolation)
       const users = await storage.getUsersByOrganization(req.tenant.id);
-      
+
       // Filter for active doctors only
-      let filteredDoctors = users.filter(user => 
-        isDoctorLike(user.role) && 
-        user.isActive && 
+      let filteredDoctors = users.filter(user =>
+        isDoctorLike(user.role) &&
+        user.isActive &&
         user.organizationId === req.tenant!.id
       );
-      
+
       // Apply specialization filtering with case-insensitive exact matching
       if (mainSpecialty || subSpecialty) {
         filteredDoctors = filteredDoctors.filter(doctor => {
-          const matchesMainSpecialty = !mainSpecialty || 
-            (doctor.medicalSpecialtyCategory && 
-             doctor.medicalSpecialtyCategory.toLowerCase().trim() === mainSpecialty.toLowerCase().trim());
-          
-          const matchesSubSpecialty = !subSpecialty || 
-            (doctor.subSpecialty && 
-             doctor.subSpecialty.toLowerCase().trim() === subSpecialty.toLowerCase().trim());
-          
+          const matchesMainSpecialty = !mainSpecialty ||
+            (doctor.medicalSpecialtyCategory &&
+              doctor.medicalSpecialtyCategory.toLowerCase().trim() === mainSpecialty.toLowerCase().trim());
+
+          const matchesSubSpecialty = !subSpecialty ||
+            (doctor.subSpecialty &&
+              doctor.subSpecialty.toLowerCase().trim() === subSpecialty.toLowerCase().trim());
+
           return matchesMainSpecialty && matchesSubSpecialty;
         });
       }
-      
+
       // Sanitize response - only include necessary fields for UI
       const safeDoctors = filteredDoctors.map(doctor => ({
         id: doctor.id,
@@ -9049,7 +9049,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         subSpecialty: doctor.subSpecialty,
         isActive: doctor.isActive
       }));
-      
+
       res.json({
         doctors: safeDoctors,
         count: safeDoctors.length
@@ -9065,9 +9065,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
-      
+
       const preferences = await storage.getUserDocumentPreferences(userId, organizationId);
-      
+
       // If no preferences exist, return default values
       if (!preferences) {
         return res.json({
@@ -9082,7 +9082,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           headerPosition: "left"
         });
       }
-      
+
       res.json(preferences);
     } catch (error) {
       console.error("Error fetching user document preferences:", error);
@@ -9094,23 +9094,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
-      
+
       // Import the update schema from shared/schema.ts
       const { updateUserDocumentPreferencesSchema } = await import("@shared/schema");
       const validationResult = updateUserDocumentPreferencesSchema.safeParse(req.body);
-      
+
       if (!validationResult.success) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Invalid request data",
           details: validationResult.error.issues
         });
       }
-      
+
       const updateData = validationResult.data;
-      
+
       // Check if preferences already exist
       const existingPreferences = await storage.getUserDocumentPreferences(userId, organizationId);
-      
+
       let preferences;
       if (existingPreferences) {
         // Update existing preferences
@@ -9124,11 +9124,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         };
         preferences = await storage.createUserDocumentPreferences(newPreferences);
       }
-      
+
       if (!preferences) {
         return res.status(500).json({ error: "Failed to save document preferences" });
       }
-      
+
       res.json(preferences);
     } catch (error) {
       console.error("Error updating user document preferences:", error);
@@ -9140,11 +9140,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/users", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       // Remove passwordHash from response and add patient-specific data if role is patient
       const safeUsersPromises = users.map(async user => {
         const { passwordHash, ...safeUser } = user;
-        
+
         // If user is a patient, fetch and merge patient-specific data
         if (user.role === 'patient') {
           const patient = await storage.getPatientByUserId(user.id, req.tenant!.id);
@@ -9152,7 +9152,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             // Fetch insurance verifications from insurance_verifications table
             const insuranceVerifications = await storage.getInsuranceVerificationsByPatient(patient.id, req.tenant!.id);
             const latestInsurance = insuranceVerifications[0]; // Get most recent verification
-            
+
             return {
               ...safeUser,
               dateOfBirth: patient.dateOfBirth || "",
@@ -9180,7 +9180,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             };
           }
         }
-        
+
         return safeUser;
       });
 
@@ -9197,13 +9197,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const role = req.params.role;
       const users = await storage.getUsersByRole(role, req.tenant!.id);
-      
+
       // Remove passwordHash from response
       const safeUsers = users.map(user => {
         const { passwordHash, ...safeUser } = user;
         return safeUser;
       });
-      
+
       res.json(safeUsers);
     } catch (error) {
       console.error("Error fetching users by role:", error);
@@ -9442,21 +9442,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/users/check-subscription-limit", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       // Get active subscription for the organization
       const [activeSubscription] = await db.select({
         maxUsers: saasSubscriptions.maxUsers,
         maxPatients: saasSubscriptions.maxPatients,
         status: saasSubscriptions.status
       })
-      .from(saasSubscriptions)
-      .where(eq(saasSubscriptions.organizationId, organizationId))
-      .limit(1);
+        .from(saasSubscriptions)
+        .where(eq(saasSubscriptions.organizationId, organizationId))
+        .limit(1);
 
       if (!activeSubscription) {
-        return res.status(403).json({ 
+        return res.status(403).json({
           error: "No active subscription found for this organization",
-          canCreateUser: false 
+          canCreateUser: false
         });
       }
 
@@ -9464,25 +9464,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const [nonPatientUserCount] = await db.select({
         count: sql<number>`count(*)::int`
       })
-      .from(users)
-      .where(
-        and(
-          eq(users.organizationId, organizationId),
-          ne(users.role, 'patient')
-        )
-      );
+        .from(users)
+        .where(
+          and(
+            eq(users.organizationId, organizationId),
+            ne(users.role, 'patient')
+          )
+        );
 
       // Count existing patients (users with role='patient')
       const [patientCount] = await db.select({
         count: sql<number>`count(*)::int`
       })
-      .from(users)
-      .where(
-        and(
-          eq(users.organizationId, organizationId),
-          eq(users.role, 'patient')
-        )
-      );
+        .from(users)
+        .where(
+          and(
+            eq(users.organizationId, organizationId),
+            eq(users.role, 'patient')
+          )
+        );
 
       const currentUserCount = nonPatientUserCount?.count || 0;
       const maxUsers = activeSubscription.maxUsers || 0;
@@ -9512,7 +9512,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       console.log("Creating user with role-based permissions");
       console.log("Request body:", req.body);
-      
+
       const userData = z.object({
         email: z.string().email(),
         username: z.string().min(3),
@@ -9555,19 +9555,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Check subscription limits based on role
       const organizationId = req.tenant!.id;
-      
+
       // Get active subscription for the organization
       const [activeSubscription] = await db.select({
         maxUsers: saasSubscriptions.maxUsers,
         maxPatients: saasSubscriptions.maxPatients,
         status: saasSubscriptions.status
       })
-      .from(saasSubscriptions)
-      .where(eq(saasSubscriptions.organizationId, organizationId))
-      .limit(1);
+        .from(saasSubscriptions)
+        .where(eq(saasSubscriptions.organizationId, organizationId))
+        .limit(1);
 
       if (!activeSubscription) {
-        return res.status(403).json({ 
+        return res.status(403).json({
           error: "No active subscription found for this organization"
         });
       }
@@ -9577,19 +9577,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const [patientCount] = await db.select({
           count: sql<number>`count(*)::int`
         })
-        .from(users)
-        .where(
-          and(
-            eq(users.organizationId, organizationId),
-            eq(users.role, 'patient')
-          )
-        );
+          .from(users)
+          .where(
+            and(
+              eq(users.organizationId, organizationId),
+              eq(users.role, 'patient')
+            )
+          );
 
         const currentPatientCount = patientCount?.count || 0;
         const maxPatients = activeSubscription.maxPatients || 0;
 
         if (currentPatientCount >= maxPatients) {
-          return res.status(403).json({ 
+          return res.status(403).json({
             error: `Patient limit reached. Your subscription allows ${maxPatients} patients, and you currently have ${currentPatientCount} patients. Please upgrade your subscription to add more patients.`
           });
         }
@@ -9598,19 +9598,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const [nonPatientUserCount] = await db.select({
           count: sql<number>`count(*)::int`
         })
-        .from(users)
-        .where(
-          and(
-            eq(users.organizationId, organizationId),
-            ne(users.role, 'patient')
-          )
-        );
+          .from(users)
+          .where(
+            and(
+              eq(users.organizationId, organizationId),
+              ne(users.role, 'patient')
+            )
+          );
 
         const currentNonPatientUserCount = nonPatientUserCount?.count || 0;
         const maxUsers = activeSubscription.maxUsers || 0;
 
         if (currentNonPatientUserCount >= maxUsers) {
-          return res.status(403).json({ 
+          return res.status(403).json({
             error: `User limit reached. Your subscription allows ${maxUsers} users, and you currently have ${currentNonPatientUserCount} users. Please upgrade your subscription to add more users.`
           });
         }
@@ -9636,7 +9636,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (userData.role === 'patient') {
         try {
           console.log("Creating patient record for user with role 'patient'");
-          
+
           // Generate patient ID
           const patientCount = await storage.getPatientsByOrganization(req.tenant!.id, 999999);
           const patientId = `P${(patientCount.length + 1).toString().padStart(6, '0')}`;
@@ -9680,7 +9680,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.log("🔍 DEBUG patientData BEFORE storage.createPatient:", { userId: patientData.userId, patientId: patientData.patientId });
           const patient = await storage.createPatient(patientData);
           console.log(`Created patient record with ID: ${patient.id}, patientId: ${patient.patientId}, userId: ${patient.userId}`);
-          
+
         } catch (patientError) {
           console.error("Error creating patient record:", patientError);
           // Don't fail user creation if patient creation fails
@@ -9694,26 +9694,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error: any) {
       console.error("User creation error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
-      
+
       // Handle duplicate username error
       if (error.code === '23505' && error.constraint === 'users_username_key') {
-        return res.status(400).json({ 
-          error: "Username already exists. Please choose a different username." 
+        return res.status(400).json({
+          error: "Username already exists. Please choose a different username."
         });
       }
-      
+
       // Handle duplicate email error
       if (error.code === '23505' && error.constraint === 'users_email_key') {
-        return res.status(400).json({ 
-          error: "Email address already exists. Please use a different email." 
+        return res.status(400).json({
+          error: "Email address already exists. Please use a different email."
         });
       }
-      
+
       res.status(500).json({ error: "Failed to create user" });
     }
   });
@@ -9724,7 +9724,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("📧 [EMAIL ENDPOINT] Received welcome email request");
       console.log("📧 [EMAIL ENDPOINT] Request body:", req.body);
       console.log("📧 [EMAIL ENDPOINT] Organization ID:", req.tenant!.id);
-      
+
       const emailData = z.object({
         userEmail: z.string().email(),
         userName: z.string().min(1),
@@ -9737,7 +9737,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Get organization details
       const organization = await storage.getOrganization(req.tenant!.id);
       console.log("📧 [EMAIL ENDPOINT] Organization retrieved:", organization);
-      
+
       if (!organization) {
         console.error("❌ [EMAIL ENDPOINT] Organization not found for ID:", req.tenant!.id);
         return res.status(404).json({ error: "Organization not found" });
@@ -9766,8 +9766,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.error("❌ [EMAIL ENDPOINT] Error sending welcome email:", error);
       console.error("❌ [EMAIL ENDPOINT] Error stack:", error.stack);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -9780,11 +9780,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const userId = parseInt(req.params.id);
       const updates = req.body;
-      
+
       // Check if user has permission to update this user
       const isAdmin = req.user?.role === "admin";
       const isSelfUpdate = req.user?.id === userId;
-      
+
       if (!isAdmin && !isSelfUpdate) {
         return res.status(403).json({ error: "Permission denied" });
       }
@@ -9797,7 +9797,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           return res.status(403).json({ error: "Can only update schedule and specialty information" });
         }
       }
-      
+
       // Hash password if provided (admin only)
       if (updates.password && isAdmin) {
         updates.passwordHash = await authService.hashPassword(updates.password);
@@ -9815,9 +9815,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Separate patient-specific fields from user fields
       const patientFields = [
-        'dateOfBirth', 'genderAtBirth', 'phone', 'nhsNumber', 
-        'address', 'emergencyContact', 'insuranceInfo', 
-        'medicalHistory', 'riskLevel', 'flags', 
+        'dateOfBirth', 'genderAtBirth', 'phone', 'nhsNumber',
+        'address', 'emergencyContact', 'insuranceInfo',
+        'medicalHistory', 'riskLevel', 'flags',
         'communicationPreferences', 'isActive', 'isInsured'
       ];
       const patientUpdates: any = {};
@@ -9851,15 +9851,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (user.role === 'patient' && Object.keys(patientUpdates).length > 0) {
         // Use OLD email to find patient (before email change)
         let patient = await storage.getPatientByEmail(currentUser.email, req.tenant!.id);
-        
+
         // AUTO-CREATE MISSING PATIENT RECORD (Option 2 implementation)
         if (!patient) {
           console.log(`⚠️ Patient record missing for user ${user.id} (${user.email}). Auto-creating...`);
-          
+
           // Generate patient ID
           const patientCount = await storage.getPatientsByOrganization(req.tenant!.id, 999999);
           const generatedPatientId = `P${(patientCount.length + 1).toString().padStart(6, '0')}`;
-          
+
           // Create patient record with basic info from user
           patient = await storage.createPatient({
             organizationId: req.tenant!.id,
@@ -9901,15 +9901,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             isActive: true,
             isInsured: false
           });
-          
+
           console.log(`✅ Auto-created patient record with ID: ${patient.id}, patientId: ${generatedPatientId}`);
         }
-        
+
         // Now update the patient record (whether it was just created or already existed)
         if (patient) {
           console.log("Updating patient record with data:", patientUpdates);
           await storage.updatePatient(patient.id, req.tenant!.id, patientUpdates);
-          
+
           // Update insurance verification if insurance info is provided
           if (updates.insuranceInfo) {
             const insuranceVerifications = await storage.getInsuranceVerificationsByPatient(patient.id, req.tenant!.id);
@@ -9931,7 +9931,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               lastVerified: new Date().toISOString().split('T')[0],
               benefits: updates.insuranceInfo.benefits || {},
             };
-            
+
             if (insuranceVerifications.length > 0) {
               // Update existing insurance verification
               await storage.updateInsuranceVerification(insuranceVerifications[0].id, req.tenant!.id, insuranceData);
@@ -9951,7 +9951,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // Fetch insurance verifications from insurance_verifications table
           const insuranceVerifications = await storage.getInsuranceVerificationsByPatient(patient.id, req.tenant!.id);
           const latestInsurance = insuranceVerifications[0];
-          
+
           responseData = {
             ...responseData,
             dateOfBirth: patient.dateOfBirth || "",
@@ -10001,9 +10001,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const userId = parseInt(req.params.id);
       console.log(`Deleting user ${userId} for organization ${req.tenant!.id}`);
-      
+
       const success = await storage.deleteUser(userId, req.tenant!.id);
-      
+
       if (!success) {
         console.log(`User ${userId} not found or already deleted`);
         return res.status(404).json({ error: "User not found" });
@@ -10032,18 +10032,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/roles/by-name/:roleName", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { roleName } = req.params;
-      
+
       // Security check: Only allow users to fetch their own role permissions, or admins to fetch any
       if (req.user?.role !== "admin" && req.user?.role?.toLowerCase() !== roleName.toLowerCase()) {
         return res.status(403).json({ error: "Access denied. You can only fetch permissions for your own role." });
       }
 
       const role = await storage.getRoleByName(roleName, req.tenant!.id);
-      
+
       if (!role) {
         return res.status(404).json({ error: "Role not found" });
       }
-      
+
       res.json(role);
     } catch (error) {
       console.error("Role fetch by name error:", error);
@@ -10185,7 +10185,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("Incoming permissions payload:", JSON.stringify(req.body?.permissions));
       const permissionsPayload = preparePermissionsForValidation(req.body?.permissions);
       console.log("Incoming permissions payload 2:", JSON.stringify(permissionsPayload));
-      
+
       const validatedPermissions = rolePermissionsUpdate.parse(permissionsPayload);
       console.log("Incoming permissions payload 3:", JSON.stringify(req.body?.permissions));
 
@@ -10224,19 +10224,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/roles/:id", requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const roleId = parseInt(req.params.id);
-      
+
       // Check if this is a system role
       const role = await storage.getRole(roleId, req.tenant!.id);
       if (!role) {
         return res.status(404).json({ error: "Role not found" });
       }
-      
+
       if (role.isSystem) {
         return res.status(400).json({ error: "Cannot delete system roles" });
       }
 
       const success = await storage.deleteRole(roleId, req.tenant!.id);
-      
+
       if (!success) {
         return res.status(404).json({ error: "Role not found" });
       }
@@ -10290,16 +10290,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/ai/analyze-patient/:id", requireRole(["doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const patientId = parseInt(req.params.id);
-      
+
       const patient = await storage.getPatient(patientId, req.tenant!.id);
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
 
       const medicalRecords = await storage.getMedicalRecordsByPatient(patientId, req.tenant!.id);
-      
+
       const insights = await aiService.analyzePatientRisk(patient, medicalRecords);
-      
+
       // Save insights to database
       for (const insight of insights) {
         await storage.createAiInsight({
@@ -10324,7 +10324,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.patch("/api/ai/insights/:id", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const insightId = parseInt(req.params.id);
-      
+
       const updateData = z.object({
         status: z.enum(["active", "dismissed", "resolved"]).optional(),
         aiStatus: z.enum(["pending", "reviewed", "implemented", "dismissed"]).optional()
@@ -10337,7 +10337,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const insight = await storage.updateAiInsight(insightId, req.tenant!.id, updateData);
-      
+
       if (!insight) {
         return res.status(404).json({ error: "AI insight not found" });
       }
@@ -10369,7 +10369,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/ai-insights/events", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       // Set SSE headers
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -10415,7 +10415,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       });
 
       console.log(`[SSE] Client connected to AI insights events for organization ${organizationId}`);
-      
+
     } catch (error) {
       console.error('[SSE] Error setting up SSE connection:', error);
       res.status(500).json({ error: 'Failed to establish SSE connection' });
@@ -10423,12 +10423,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // AI Insights CRUD Routes
-  
+
   // GET /api/ai-insights - List insights with optional patient filter
   app.get("/api/ai-insights", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const patientId = req.query.patientId ? parseInt(req.query.patientId as string) : undefined;
-      
+
       let insights;
       if (patientId) {
         // Validate that patient belongs to the same organization
@@ -10473,7 +10473,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }).passthrough();
 
       const validatedData = createInsightSchema.parse(req.body);
-      
+
       // Validate that patient belongs to the same organization if patientId is provided
       if (validatedData.patientId) {
         const patient = await storage.getPatient(validatedData.patientId, req.tenant!.id);
@@ -10485,11 +10485,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Prepare metadata with symptoms and history
       const { symptoms, history, ...insightDataRaw } = validatedData;
       const { id, ...insightData } = insightDataRaw;
-      
+
       // Generate suggested actions based on insight type and severity
       const generateSuggestedActions = (type: string, severity: string, actionRequired: boolean) => {
         const actions = [];
-        
+
         if (actionRequired) {
           switch (type) {
             case 'risk_alert':
@@ -10519,18 +10519,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         } else {
           actions.push('Review and acknowledge findings', 'Consider for future reference', 'Update patient care plan if needed');
         }
-        
+
         return actions;
       };
 
       const suggestedActions = generateSuggestedActions(insightData.type || '', insightData.severity || '', insightData.actionRequired || false);
-      
+
       // Generate related conditions based on insight type and content
       const generateRelatedConditions = (type: string, title: string, description: string) => {
         const conditions = [];
         const lowerTitle = title.toLowerCase();
         const lowerDesc = description.toLowerCase();
-        
+
         switch (type) {
           case 'risk_alert':
             if (lowerTitle.includes('cardiac') || lowerDesc.includes('heart')) {
@@ -10564,12 +10564,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           default:
             conditions.push('Clinical Assessment', 'Patient Care', 'Medical Evaluation');
         }
-        
+
         return conditions.slice(0, 4); // Limit to 4 conditions max
       };
 
       const relatedConditions = generateRelatedConditions(insightData.type || '', insightData.title || '', insightData.description || '');
-      
+
       const metadata = {
         ...(insightData.metadata || {}),
         ...(symptoms && { symptoms }),
@@ -10592,7 +10592,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         createdAt: new Date(),
       };
       const newInsight = await storage.createAiInsight(insertableInsight as any);
-      
+
       // Transform confidence back to number for frontend response
       const transformedInsight = {
         ...newInsight,
@@ -10611,7 +10611,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/ai-insights/:id", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const insightId = parseInt(req.params.id);
-      
+
       if (isNaN(insightId)) {
         return res.status(400).json({ error: "Invalid insight ID" });
       }
@@ -10623,7 +10623,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const deleted = await storage.deleteAiInsight(insightId, req.tenant!.id);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "AI insight not found" });
       }
@@ -10638,7 +10638,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.patch("/api/ai-insights/:id", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const insightId = parseInt(req.params.id);
-      
+
       if (isNaN(insightId)) {
         return res.status(400).json({ error: "Invalid insight ID" });
       }
@@ -10661,7 +10661,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Update the insight in the database
       const updatedInsight = await storage.updateAiInsight(insightId, req.tenant!.id, updateData);
-      
+
       if (!updatedInsight) {
         return res.status(404).json({ error: "AI insight not found or update failed" });
       }
@@ -10685,7 +10685,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/clinical/insights", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const insights = await storage.getAiInsightsByOrganization(req.tenant!.id, 50);
-      
+
       // Transform to match the expected clinical insights format
       const transformedInsights = insights.map(insight => ({
         ...insight,
@@ -10703,20 +10703,20 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.patch("/api/clinical/insights/:id", requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const insightId = req.params.id;
-      
+
       const updateData = z.object({
         status: z.enum(["active", "reviewed", "dismissed", "implemented"]).optional(),
         notes: z.string().optional()
       }).parse(req.body);
 
       console.log(`Updating clinical insight ${insightId} with status: ${updateData.status}`);
-      
+
       // For now, return success response
       // In a real implementation, this would update the database
-      res.json({ 
-        id: insightId, 
+      res.json({
+        id: insightId,
         status: updateData.status,
-        message: "Clinical insight updated successfully" 
+        message: "Clinical insight updated successfully"
       });
     } catch (error) {
       console.error("Clinical insight update error:", error);
@@ -10733,7 +10733,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const patientId = req.query.patientId ? parseInt(req.query.patientId as string) : null;
-      
+
       // Get all patients if no specific patient ID provided
       let patients = [];
       if (patientId) {
@@ -10744,7 +10744,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const interactions = [];
-      
+
       // First, get manually added patient drug interactions from the new table
       let manualInteractions = [];
       if (patientId) {
@@ -10795,23 +10795,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           });
         }
       }
-      
+
       // Then check for automatic interactions from patient medications
       for (const patient of patients) {
         if (patient.medicalHistory?.medications && patient.medicalHistory.medications.length > 0) {
           const patientMeds = patient.medicalHistory.medications;
-          
+
           // Check for interactions between patient's medications
           for (let i = 0; i < patientMeds.length; i++) {
             for (let j = i + 1; j < patientMeds.length; j++) {
               const med1 = patientMeds[i];
               const med2 = patientMeds[j];
-              
+
               // Skip if medication doesn't have a name
               if (!med1?.name || !med2?.name) {
                 continue;
               }
-              
+
               // Query medications database for interaction data
               const [medication1] = await db
                 .select()
@@ -10820,12 +10820,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                   eq(medicationsDatabase.organizationId, req.tenant!.id),
                   sql`lower(${medicationsDatabase.name}) = lower(${sql.raw(`'${med1.name.replace(/'/g, "''")}'`)})`
                 ));
-              
+
               if (medication1 && medication1.interactions) {
-                const interacts = medication1.interactions.some((interaction: string) => 
+                const interacts = medication1.interactions.some((interaction: string) =>
                   interaction.toLowerCase().includes(med2.name.toLowerCase())
                 );
-                
+
                 if (interacts) {
                   interactions.push({
                     id: `${patient.id}-${i}-${j}`,
@@ -10892,21 +10892,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         medication2Frequency: z.string().optional()
       }).parse(req.body);
 
-      const result = await aiService.generateDrugInteractionAnalysis(
+      console.log(`[DRUG-INTERACTION] Analyzing via Clinical Support: ${body.medication1Name} + ${body.medication2Name}`);
+      const result = await clinicalDecisionSupport.generateDrugInteractionAnalysis(
         { name: body.medication1Name, dosage: body.medication1Dosage, frequency: body.medication1Frequency },
         { name: body.medication2Name, dosage: body.medication2Dosage, frequency: body.medication2Frequency }
       );
       return res.json(result);
     } catch (error: any) {
-      console.error("Drug interaction analyze error:", error);
-      if (error?.name === "ZodError" && error?.errors) {
-        const msg = error.errors.map((e: { path: string[]; message: string }) => e.message).join("; ") || "Invalid request";
-        return res.status(400).json({ error: msg });
-      }
-      const errMsg = error?.message && typeof error.message === "string" ? error.message : "AI analysis unavailable";
-      return res.status(503).json({
-        error: "AI analysis unavailable. Please try again or enter details manually.",
-        details: errMsg
+      console.error("[DRUG-INTERACTION] Request Failed:", error);
+      const isConfigError = error?.message?.includes("API key") || error?.status === 401;
+      const status = isConfigError ? 503 : 500;
+      const message = isConfigError
+        ? "AI Service is not configured. Please enter interaction details manually."
+        : `AI analysis error: ${error.message || "Unknown error"}`;
+
+      return res.status(status).json({
+        error: message,
+        details: error.message
       });
     }
   });
@@ -11018,13 +11020,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/clinical/patient-drug-interactions", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       // Fetch all drug interactions for the organization
       const interactions = await db
         .select()
         .from(patientDrugInteractions)
         .where(eq(patientDrugInteractions.organizationId, organizationId));
-      
+
       res.json({
         success: true,
         count: interactions.length,
@@ -11040,11 +11042,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/clinical/risk-assessments", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       // Fetch all lab results with patient data
       const labResults = await storage.getLabResultsByOrganization(organizationId);
       const patients = await storage.getPatientsByOrganization(organizationId);
-      
+
       // Group lab results by patient
       const patientResultsMap = new Map<number, any[]>();
       labResults.forEach(result => {
@@ -11053,18 +11055,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
         patientResultsMap.get(result.patientId)!.push(result);
       });
-      
+
       const allAssessments = [];
-      
+
       // Analyze each patient's lab results
       for (const [patientId, results] of patientResultsMap.entries()) {
         const patient = patients.find(p => p.id === patientId);
         if (!patient) continue;
-        
+
         // Aggregate all test results from all lab orders
         const allTests: any[] = [];
         let hasCritical = false;
-        
+
         results.forEach(labResult => {
           if (labResult.criticalValues) {
             hasCritical = true;
@@ -11083,49 +11085,49 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             });
           }
         });
-        
+
         // Cardiovascular Disease Risk Assessment
         const cvdFactors = [];
         const cvdRecommendations = [];
         let cvdScore = 0;
-        
+
         const cholesterolTest = allTests.find(t => t.testName?.toLowerCase().includes('cholesterol'));
         const glucoseTest = allTests.find(t => t.testName?.toLowerCase().includes('glucose'));
         const hemoglobinA1cTest = allTests.find(t => t.testName?.toLowerCase().includes('hemoglobin a1c') || t.testName?.toLowerCase().includes('a1c'));
-        
+
         if (cholesterolTest && (cholesterolTest.status === 'abnormal_high' || cholesterolTest.flag === 'HIGH')) {
           cvdFactors.push('High cholesterol');
           cvdScore += 5;
           cvdRecommendations.push('Statin therapy');
         }
-        
+
         if (glucoseTest && parseFloat(glucoseTest.value) > 100) {
           cvdFactors.push('Elevated glucose');
           cvdScore += 3;
         }
-        
+
         if (hasCritical) {
           cvdFactors.push('Critical lab values detected');
           cvdScore += 7;
         }
-        
+
         // Age factor (if patient > 65)
         const age = patient.dateOfBirth ? Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 0;
         if (age > 65) {
           cvdFactors.push('Age >65');
           cvdScore += 5;
         }
-        
+
         if (cvdScore > 0) {
           cvdRecommendations.push('Blood pressure control');
           cvdRecommendations.push('Regular cardiovascular screening');
         }
-        
+
         // Diabetes Risk Assessment
         const diabetesFactors = [];
         const diabetesRecommendations = [];
         let diabetesScore = 0;
-        
+
         if (glucoseTest) {
           const glucoseValue = parseFloat(glucoseTest.value);
           if (glucoseValue >= 126 || glucoseTest.status === 'abnormal_high') {
@@ -11138,7 +11140,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             diabetesRecommendations.push('Lifestyle modification');
           }
         }
-        
+
         if (hemoglobinA1cTest) {
           const a1cValue = parseFloat(hemoglobinA1cTest.value);
           if (a1cValue >= 6.5 || hemoglobinA1cTest.status === 'abnormal_high') {
@@ -11150,13 +11152,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             diabetesScore += 4;
           }
         }
-        
+
         if (diabetesScore > 0) {
           diabetesRecommendations.push('Annual glucose screening');
           diabetesRecommendations.push('Weight management');
           diabetesRecommendations.push('Diet counseling');
         }
-        
+
         // Determine risk levels
         const getCvdRiskLevel = (score: number): 'low' | 'moderate' | 'high' | 'critical' => {
           if (score >= 15) return 'critical';
@@ -11164,14 +11166,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           if (score >= 5) return 'moderate';
           return 'low';
         };
-        
+
         const getDiabetesRiskLevel = (score: number): 'low' | 'moderate' | 'high' | 'critical' => {
           if (score >= 12) return 'critical';
           if (score >= 8) return 'high';
           if (score >= 4) return 'moderate';
           return 'low';
         };
-        
+
         // Save and return assessments if there are risk factors
         if (cvdFactors.length > 0) {
           const cvdAssessment = await storage.createRiskAssessment({
@@ -11191,7 +11193,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             patientName: `${patient.firstName} ${patient.lastName}`
           });
         }
-        
+
         if (diabetesFactors.length > 0) {
           const diabetesAssessment = await storage.createRiskAssessment({
             organizationId,
@@ -11211,14 +11213,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           });
         }
       }
-      
+
       // Fetch all existing assessments from database (including the ones just created)
       const allSavedAssessments = await storage.getRiskAssessmentsByOrganization(organizationId);
-      
+
       // Add patient details to saved assessments
       const assessmentsWithDetails = allSavedAssessments.map(assessment => {
         const patient = patients.find(p => p.id === assessment.patientId);
-        
+
         // Calculate age if patient has date of birth
         let age = null;
         if (patient?.dateOfBirth) {
@@ -11230,7 +11232,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             age--;
           }
         }
-        
+
         return {
           ...assessment,
           patientName: patient ? `${patient.firstName} ${patient.lastName}` : `Patient ${assessment.patientId}`,
@@ -11240,7 +11242,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           assessmentDate: assessment.assessmentDate || assessment.createdAt
         };
       });
-      
+
       // Transform for frontend
       const transformedAssessments = assessmentsWithDetails.map((assessment: any) => ({
         category: assessment.category,
@@ -11255,7 +11257,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         patientDateOfBirth: assessment.patientDateOfBirth,
         assessmentDate: assessment.assessmentDate
       }));
-      
+
       res.json(transformedAssessments);
     } catch (error) {
       console.error("Risk assessments error:", error);
@@ -11268,35 +11270,35 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const labResultId = parseInt(req.params.labResultId);
-      
+
       // Fetch the lab result
       const labResult = await storage.getLabResult(labResultId, organizationId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
-      
+
       // Get patient details
       const patient = await storage.getPatient(labResult.patientId, organizationId);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
-      
+
       // Prepare lab results for OpenAI analysis
-      const labResultsText = labResult.results.map((result: any) => 
+      const labResultsText = labResult.results.map((result: any) =>
         `${result.name}: ${result.value} ${result.unit} (Reference: ${result.referenceRange}, Status: ${result.status})`
       ).join('\n');
-      
+
       // Try to use OpenAI for analysis, fallback to rule-based analysis if it fails
       let analysis;
-      
+
       try {
         // Call OpenAI API for analysis using SDK (same as aiService)
         if (!process.env.OPENAI_API_KEY) {
           throw new Error("OpenAI API key not configured");
         }
-        
+
         const completion = await openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [
@@ -11312,23 +11314,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           temperature: 0.3,
           max_tokens: 1000
         });
-        
+
         const aiContent = completion.choices[0].message.content;
         analysis = JSON.parse(aiContent);
         console.log("[LAB-ASSESSMENT] OpenAI analysis succeeded");
       } catch (aiError) {
         console.log("[LAB-ASSESSMENT] OpenAI failed, using rule-based analysis");
         console.error("[LAB-ASSESSMENT] OpenAI Error:", (aiError as Error)?.message || aiError);
-        
+
         // Fallback: Rule-based analysis of lab results
         const abnormalResults = labResult.results.filter((r: any) => r.status !== 'normal');
         const criticalResults = labResult.results.filter((r: any) => r.flag === 'critical' || r.flag === 'high' || r.flag === 'low');
-        
+
         // Determine risk category based on test type
         let category = 'Other';
         let riskFactors: string[] = [];
         let recommendations: string[] = [];
-        
+
         if (labResult.testType.toLowerCase().includes('glucose') || labResult.testType.toLowerCase().includes('hba1c') || labResult.testType.toLowerCase().includes('diabetes')) {
           category = 'Diabetes';
           riskFactors = abnormalResults.length > 0 ? ['Abnormal glucose metabolism indicators detected'] : ['Lab results within acceptable range'];
@@ -11349,11 +11351,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           riskFactors = abnormalResults.length > 0 ? [`${abnormalResults.length} abnormal result(s) detected`] : ['All results within normal range'];
           recommendations = abnormalResults.length > 0 ? ['Consult with healthcare provider', 'Follow-up testing as needed'] : ['Continue routine health monitoring'];
         }
-        
+
         // Determine risk level and score
         let riskLevel = 'low';
         let riskScore = 20;
-        
+
         if (criticalResults.length > 0) {
           riskLevel = 'critical';
           riskScore = 85;
@@ -11364,7 +11366,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           riskLevel = 'moderate';
           riskScore = 45;
         }
-        
+
         analysis = {
           riskCategory: category,
           riskFactors,
@@ -11373,7 +11375,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           riskScore
         };
       }
-      
+
       // Save risk assessment to database
       const riskAssessment = await storage.createRiskAssessment({
         organizationId,
@@ -11393,7 +11395,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         hasCriticalValues: labResult.criticalValues,
         assessmentDate: new Date()
       });
-      
+
       res.json({
         success: true,
         assessment: {
@@ -11482,12 +11484,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const patientId = parseInt(req.params.patientId);
-      
+
       const labResults = await storage.getLabResultsByPatient(patientId);
-      
+
       // Filter by organization
       const filteredResults = labResults.filter(lr => lr.organizationId === organizationId);
-      
+
       res.json(filteredResults);
     } catch (error) {
       console.error("Get lab results error:", error);
@@ -11502,7 +11504,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (!organization) {
         return res.status(404).json({ error: "Organization not found" });
       }
-      
+
       res.json({
         name: organization.name,
         region: organization.region,
@@ -11592,48 +11594,48 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         role: req.user.role
       });
       console.log("Original providerId from form:", prescriptionData.providerId);
-      
+
       // Validate required fields
       if (!prescriptionData.patientId || isNaN(parseInt(prescriptionData.patientId))) {
         return res.status(400).json({ error: "Valid patient ID is required" });
       }
-      
+
       if (!prescriptionData.providerId || isNaN(parseInt(prescriptionData.providerId))) {
         return res.status(400).json({ error: "Valid provider ID is required" });
       }
-      
+
       // Use the selected provider ID from the form
       const providerId = parseInt(prescriptionData.providerId);
       console.log("Using selected provider ID:", providerId);
-      
+
       // Check for duplicate prescriptions only if created_at timestamp is exactly the same
       // This prevents accidental double-clicks but allows duplicates at different times
       const existingPrescriptions = await storage.getPrescriptionsByOrganization(req.tenant!.id);
-      
+
       const isDuplicate = existingPrescriptions.some(existing => {
         const existingCreatedAt = existing.createdAt ? new Date(existing.createdAt).getTime() : 0;
         const newCreatedAt = new Date().getTime();
-        
+
         // Only reject if created_at timestamps are exactly the same (same millisecond)
         // This handles double-click scenarios while allowing legitimate duplicates at different times
         return existing.patientId === parseInt(prescriptionData.patientId) &&
           existing.status === 'active' &&
           existingCreatedAt === newCreatedAt &&
-          existing.medications?.some(med => 
-            prescriptionData.medications?.some((newMed: any) => 
-              newMed.name === med.name && 
+          existing.medications?.some(med =>
+            prescriptionData.medications?.some((newMed: any) =>
+              newMed.name === med.name &&
               newMed.dosage === med.dosage
             )
           );
       });
-      
+
       if (isDuplicate) {
         return res.status(400).json({ error: "A duplicate prescription was just created at the exact same time. Please try again." });
       }
-      
+
       // Extract first medication for legacy columns (required for backward compatibility)
       const firstMedication = prescriptionData.medications?.[0] || {};
-      
+
       // Create prescription data for database (with enforced created_by)
       const prescriptionToInsert = enforceCreatedBy(req, {
         organizationId: req.tenant!.id,
@@ -11659,15 +11661,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("About to create prescription with data:", prescriptionToInsert);
       const newPrescription = await storage.createPrescription(prescriptionToInsert);
       console.log("Prescription created successfully:", newPrescription.id);
-      
+
       // Send notification to patient about new prescription
       const patient = await storage.getPatient(parseInt(prescriptionData.patientId), req.tenant!.id);
       const provider = await storage.getUser(providerId, req.tenant!.id);
-      
+
       if (patient && patient.userId && provider) {
         const medications = prescriptionData.medications || [];
         const medicationNames = medications.map((med: any) => med.name).join(', ') || firstMedication.name;
-        
+
         await createNotification({
           organizationId: req.tenant!.id,
           userId: patient.userId,
@@ -11684,7 +11686,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           }
         });
       }
-      
+
       res.status(201).json(newPrescription);
     } catch (error: any) {
       console.error("DETAILED ERROR creating prescription:", error);
@@ -11705,10 +11707,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const prescriptionId = parseInt(req.params.id);
       const prescriptionData = req.body;
-      
+
       // Build update object with only provided fields to avoid overwriting existing data
       const prescriptionUpdates: any = {};
-      
+
       if (prescriptionData.status !== undefined) {
         prescriptionUpdates.status = prescriptionData.status;
       }
@@ -11732,7 +11734,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const updatedPrescription = await storage.updatePrescription(prescriptionId, req.tenant!.id, prescriptionUpdates);
-      
+
       if (!updatedPrescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
@@ -11753,7 +11755,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const prescriptionId = parseInt(req.params.id);
       const { pharmacyData } = req.body;
-      
+
       // Get prescription details
       const prescription = await storage.getPrescription(prescriptionId, req.tenant!.id);
       if (!prescription) {
@@ -11820,7 +11822,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(500).json({ error: "Failed to send email to pharmacy" });
       }
 
-      res.json({ 
+      res.json({
         success: true,
         message: "Prescription successfully sent to Halo Health pharmacy",
         pharmacy: pharmacyData,
@@ -11869,9 +11871,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const prescriptionId = parseInt(req.params.id);
-      
+
       const deletedPrescription = await storage.deletePrescription(prescriptionId, req.tenant!.id);
-      
+
       if (!deletedPrescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
@@ -11892,7 +11894,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const prescriptionId = parseInt(req.params.id);
       const { signature } = req.body;
-      
+
       if (!signature) {
         return res.status(400).json({ error: "Signature data is required" });
       }
@@ -11917,7 +11919,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         signature: signatureData,
         status: 'signed'
       });
-      
+
       if (!updatedPrescription) {
         console.error(`[PRESCRIPTION E-SIGN] Failed to update prescription ${prescriptionId}`);
         return res.status(404).json({ error: "Failed to update prescription with signature" });
@@ -11931,7 +11933,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         signedBy: (updatedPrescription.signature as any)?.signedBy
       });
 
-      res.json({ 
+      res.json({
         success: true,
         message: "Prescription e-signed successfully",
         signature: signatureData,
@@ -11952,7 +11954,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.error('[LAB RESULTS API] No user in request');
         return res.status(401).json({ error: "User not authenticated" });
       }
-      
+
       console.log('[LAB RESULTS API] User authenticated:', req.user.id, 'Organization:', req.tenant?.id);
 
       // Check if workflow columns exist, if not, add them automatically
@@ -11966,11 +11968,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             WHERE table_name = 'lab_results' 
             AND column_name IN ('ready_to_generate_lab', 'lab_result_generated_report')
           `);
-          
+
           const existingColumns = columnCheck.rows.map((row: any) => row.column_name);
           const needsReadyToGenerateLab = !existingColumns.includes('ready_to_generate_lab');
           const needsLabResultGeneratedReport = !existingColumns.includes('lab_result_generated_report');
-          
+
           if (needsReadyToGenerateLab) {
             // First add column as nullable
             await pool.query(`
@@ -11991,7 +11993,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             `);
             console.log('[LAB RESULTS API] Created column: ready_to_generate_lab');
           }
-          
+
           if (needsLabResultGeneratedReport) {
             // First add column as nullable
             await pool.query(`
@@ -12012,7 +12014,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             `);
             console.log('[LAB RESULTS API] Created column: lab_result_generated_report');
           }
-          
+
           // Ensure existing rows have FALSE values (in case columns existed but had NULLs)
           if (!needsReadyToGenerateLab) {
             await pool.query(`
@@ -12028,7 +12030,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               WHERE lab_result_generated_report IS NULL;
             `);
           }
-          
+
           if (!needsReadyToGenerateLab && !needsLabResultGeneratedReport) {
             console.log('[LAB RESULTS API] Workflow columns already exist');
           }
@@ -12056,7 +12058,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Return all lab results (for Admin, Doctor, Nurse, etc.)
         console.log(`[LAB RESULTS API] Returning all lab results for organization ${req.tenant!.id}`);
         labResults = await storage.getLabResultsByOrganization(req.tenant!.id);
-        
+
         // Debug: Log the first result to see what fields are returned
         if (labResults.length > 0 && req.tenant!.id === 20) {
           const firstResult = labResults[0] as any;
@@ -12067,7 +12069,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.log(`[LAB RESULTS API DEBUG] ready_to_generate_lab (snake_case):`, firstResult.ready_to_generate_lab, typeof firstResult.ready_to_generate_lab);
           console.log(`[LAB RESULTS API DEBUG] labResultGeneratedReport (camelCase):`, firstResult.labResultGeneratedReport, typeof firstResult.labResultGeneratedReport);
           console.log(`[LAB RESULTS API DEBUG] lab_result_generated_report (snake_case):`, firstResult.lab_result_generated_report, typeof firstResult.lab_result_generated_report);
-          
+
           // Log all results for organization 20
           labResults.forEach((lr: any, index: number) => {
             console.log(`[LAB RESULTS API DEBUG] Result ${index + 1} (${lr.testId}):`, {
@@ -12096,20 +12098,20 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             'All keys in labResult': Object.keys(labResult),
           });
         }
-        
+
         // Find related invoice using serviceId matching testId
         const invoices = await db
           .select()
           .from(schema.invoices)
           .where(eq(schema.invoices.serviceId, labResult.testId));
-        
+
         const invoice = invoices[0]; // Get the first matching invoice
-        
+
         // Extract workflow fields - check both camelCase and snake_case
         // Use nullish coalescing (??) NOT logical OR (||) to preserve false values
         let readyToGenerateLabValue: boolean | undefined = labResult.readyToGenerateLab ?? labResult.ready_to_generate_lab;
         let labResultGeneratedReportValue: boolean | undefined = labResult.labResultGeneratedReport ?? labResult.lab_result_generated_report;
-        
+
         // If fields are still undefined, query database directly as fallback
         if (readyToGenerateLabValue === undefined || labResultGeneratedReportValue === undefined) {
           try {
@@ -12121,7 +12123,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               WHERE test_id = ${labResult.testId}
               LIMIT 1
             `);
-            
+
             if (workflowFields.rows && workflowFields.rows.length > 0) {
               const row = workflowFields.rows[0] as any;
               if (readyToGenerateLabValue === undefined) {
@@ -12142,11 +12144,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             labResultGeneratedReportValue = labResultGeneratedReportValue ?? false;
           }
         }
-        
+
         // Ensure we have boolean values (not undefined) - use ?? not ||
         const finalReadyToGenerateLab: boolean = readyToGenerateLabValue ?? false;
         const finalLabResultGeneratedReport: boolean = labResultGeneratedReportValue ?? false;
-        
+
         // 🔍 LOG 2: After mapping/normalization
         if (req.tenant!.id === 20 && labResult.testId) {
           console.log(`[LOG 2 - MAPPED] TestID: ${labResult.testId}`, {
@@ -12156,10 +12158,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             'finalLabResultGeneratedReport_type': typeof finalLabResultGeneratedReport,
           });
         }
-        
+
         // Ensure workflow fields are included (provide both camelCase and snake_case for compatibility)
         // IMPORTANT: Set workflow fields AFTER spread to ensure they're not overwritten
-        
+
         // For nurse/doctor roles in Request Report tab, show invoice status instead of payment method
         // If invoice exists, show its status (e.g., "unpaid", "paid", "draft")
         // If no invoice exists, show "unpaid" status
@@ -12171,7 +12173,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // For other roles, show payment method as before
           paymentMethodDisplay = invoice?.paymentMethod || null;
         }
-        
+
         const result = {
           ...labResult,
           paymentMethod: paymentMethodDisplay,
@@ -12183,7 +12185,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           readyToGenerateLab: finalReadyToGenerateLab,
           labResultGeneratedReport: finalLabResultGeneratedReport,
         };
-        
+
         // 🔍 LOG 3: Final API response
         if (req.tenant!.id === 20 && labResult.testId) {
           console.log(`[LOG 3 - API RESPONSE] TestID: ${labResult.testId}`, {
@@ -12197,7 +12199,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             'result.labResultGeneratedReport_type': typeof result.labResultGeneratedReport,
           });
         }
-        
+
         return result;
       }));
 
@@ -12207,8 +12209,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.error("[LAB RESULTS API] Error stack:", error?.stack);
       console.error("[LAB RESULTS API] Error message:", error?.message);
       if (!res.headersSent) {
-        res.status(500).json({ 
-          error: "Failed to fetch lab results", 
+        res.status(500).json({
+          error: "Failed to fetch lab results",
           details: error?.message || "Unknown error",
           stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
         });
@@ -12223,19 +12225,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const labData = req.body;
-      
+
       // Generate unique test ID
       const testId = `LAB${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
-      
+
       // Convert patientId from string to number if needed
-      const patientId = typeof labData.patientId === 'string' ? 
-        parseInt(labData.patientId) || null : 
+      const patientId = typeof labData.patientId === 'string' ?
+        parseInt(labData.patientId) || null :
         labData.patientId;
-      
+
       if (!patientId) {
         return res.status(400).json({ error: "Valid patient ID is required" });
       }
-      
+
       const newLabResult = await storage.createLabResult(enforceCreatedBy(req, {
         organizationId: req.tenant!.id,
         patientId: patientId,
@@ -12275,11 +12277,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const { id } = req.params;
       const updateData = req.body;
-      
+
       // Convert patientId from string to number if needed
       if (updateData.patientId) {
-        updateData.patientId = typeof updateData.patientId === 'string' ? 
-          parseInt(updateData.patientId) || null : 
+        updateData.patientId = typeof updateData.patientId === 'string' ?
+          parseInt(updateData.patientId) || null :
           updateData.patientId;
       }
 
@@ -12292,10 +12294,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Send notification when lab result is completed (check persisted status, case-insensitive)
       if (updatedLabResult.status && updatedLabResult.status.toLowerCase() === "completed" && updatedLabResult.patientId) {
         const patient = await storage.getPatient(updatedLabResult.patientId, req.tenant!.id);
-        
+
         if (patient) {
           const notificationsToCreate = [];
-          
+
           // Notify patient
           if (patient.userId) {
             notificationsToCreate.push({
@@ -12313,7 +12315,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               }
             });
           }
-          
+
           // Notify ordering doctor if specified
           if (updatedLabResult.orderedBy) {
             notificationsToCreate.push({
@@ -12331,7 +12333,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               }
             });
           }
-          
+
           if (notificationsToCreate.length > 0) {
             await createBulkNotifications(notificationsToCreate);
           }
@@ -12348,29 +12350,29 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/lab-results/:id", authMiddleware, requireRole(["doctor", "nurse", "admin"]), async (req: TenantRequest, res) => {
     try {
       const labResultId = parseInt(req.params.id);
-      
+
       if (isNaN(labResultId)) {
         return res.status(400).json({ error: "Invalid lab result ID" });
       }
-      
+
       const organizationId = req.tenant!.id;
-      
+
       // Verify lab result exists and belongs to organization
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
 
       // Delete both PDF files (prescription and test result) if they exist
       const deletedFiles: string[] = [];
-      
+
       // Delete prescription PDF
       const prescriptionDir = path.join(process.cwd(), 'uploads', 'Lab_Prescription', organizationId.toString(), labResult.patientId.toString());
       const prescriptionFileName = `${labResult.testId}_prescription.pdf`;
       const prescriptionFilePath = path.join(prescriptionDir, prescriptionFileName);
-      
+
       try {
         if (await fse.pathExists(prescriptionFilePath)) {
           await fse.remove(prescriptionFilePath);
@@ -12386,7 +12388,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const testResultDir = path.join(process.cwd(), 'uploads', 'Lab_TestResults', organizationId.toString(), labResult.patientId.toString());
       const testResultFileName = `${labResult.testId}.pdf`;
       const testResultFilePath = path.join(testResultDir, testResultFileName);
-      
+
       try {
         if (await fse.pathExists(testResultFilePath)) {
           await fse.remove(testResultFilePath);
@@ -12400,15 +12402,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Delete the database record
       const deleted = await storage.deleteLabResult(labResultId, organizationId);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "Failed to delete lab result" });
       }
 
       console.log(`[LAB-DELETE] Successfully deleted lab result ID: ${labResultId}, Deleted files: ${deletedFiles.join(', ')}`);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: "Lab result and associated files deleted successfully",
         deletedFiles: deletedFiles
       });
@@ -12481,7 +12483,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch the lab result
       const labResults = await storage.getLabResults(req.tenant!.id);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -12500,7 +12502,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Add collection notes if provided
       if (notes) {
-        updateData.notes = labResult.notes 
+        updateData.notes = labResult.notes
           ? `${labResult.notes}\n\nCollection Notes (${new Date().toLocaleString()}): ${notes}`
           : `Collection Notes (${new Date().toLocaleString()}): ${notes}`;
       }
@@ -12511,10 +12513,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Failed to update lab result" });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: "Sample collected successfully",
-        labResult: updatedLabResult 
+        labResult: updatedLabResult
       });
     } catch (error) {
       console.error("Error collecting sample:", error);
@@ -12543,7 +12545,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch the lab result
       const labResults = await storage.getLabResults(req.tenant!.id);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -12560,10 +12562,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Failed to update lab result" });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: `Sample marked as ${sampleCollected ? 'collected' : 'not collected'}`,
-        labResult: updatedLabResult 
+        labResult: updatedLabResult
       });
     } catch (error) {
       console.error("Error toggling sample collected status:", error);
@@ -12585,14 +12587,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const allInvoices = await storage.getInvoicesByOrganization(organizationId);
 
       // Filter invoices to only include paid invoices with serviceType = "lab_result"
-      const paidLabInvoices = allInvoices.filter(invoice => 
+      const paidLabInvoices = allInvoices.filter(invoice =>
         invoice.status === 'paid' && invoice.serviceType === 'lab_result'
       );
 
       // Join lab results with paid invoices using polymorphic association
       const joinedData = labResults.map(labResult => {
         // Find matching paid invoice using polymorphic association (service_type + service_id matching testId)
-        const matchingInvoice = paidLabInvoices.find(invoice => 
+        const matchingInvoice = paidLabInvoices.find(invoice =>
           invoice.serviceId === labResult.testId
         );
 
@@ -12645,10 +12647,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Failed to update lab result" });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: sampleCollected ? "Sample marked as collected" : "Sample marked as not collected",
-        labResult: updatedLabResult 
+        labResult: updatedLabResult
       });
     } catch (error) {
       console.error("Error toggling sample collected status:", error);
@@ -12668,10 +12670,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Fetch all lab results for the organization
       const labResults = await storage.getLabResults(req.tenant!.id);
-      
+
       // Find the lab result by testId
       const labResult = labResults.find(lr => lr.testId === testId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -12683,9 +12685,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Failed to update lab result" });
       }
 
-      res.json({ 
-        success: true, 
-        labResult: updatedLabResult 
+      res.json({
+        success: true,
+        labResult: updatedLabResult
       });
     } catch (error) {
       console.error("Error updating lab result:", error);
@@ -13154,12 +13156,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         .where(eq(schema.invoices.id, paymentData.invoiceId))
         .execute();
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         payment,
         totalPaid,
         remaining,
-        message: "Insurance payment recorded successfully" 
+        message: "Insurance payment recorded successfully"
       });
     } catch (error) {
       console.error("Error recording insurance payment:", error);
@@ -13210,7 +13212,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -13227,11 +13229,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Check if this is a prescription PDF request (from Request Report tab)
       const isPrescription = req.query.type === 'prescription' || req.body.type === 'prescription';
-      
+
       // Construct directory path based on type
       const pdfDirectoryName = isPrescription ? 'Lab_Prescription' : 'Lab_TestResults';
       const dirPath = path.join(process.cwd(), 'uploads', pdfDirectoryName, organizationId.toString(), labResult.patientId.toString());
-      
+
       // Ensure directory exists
       await fse.ensureDir(dirPath);
 
@@ -13250,7 +13252,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // If this is a prescription PDF, generate a different layout
       if (isPrescription) {
         // ========== PRESCRIPTION PDF LAYOUT ==========
-        
+
         // Fetch doctor/user who ordered the test
         let orderedByUser = null;
         if (labResult.orderedBy) {
@@ -13289,7 +13291,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           doc.setFontSize(9);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
-          
+
           if (clinicHeader.address) {
             doc.text(clinicHeader.address, pageWidth / 2, yPos, { align: 'center' });
             yPos += 5;
@@ -13307,7 +13309,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             yPos += 5;
           }
         }
-        
+
         // Separator line
         yPos += 3;
         doc.setDrawColor(200, 200, 200);
@@ -13326,7 +13328,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const doctorName = labResult.doctorName || (orderedByUser ? `${orderedByUser.firstName || ''} ${orderedByUser.lastName || ''}`.trim() : 'N/A');
         doc.text(`Name: ${doctorName}`, 20, yPos);
         yPos += 6;
-        
+
         // Priority
         const priority = labResult.priority || 'routine';
         doc.text(`Priority: ${priority}`, 20, yPos);
@@ -13342,34 +13344,34 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         doc.setFont('helvetica', 'normal');
         doc.text(`Name: ${patient.firstName} ${patient.lastName}`, 20, yPos);
         yPos += 6;
-        
+
         // Date
-        const orderedDate = labResult.orderedAt 
-          ? new Date(labResult.orderedAt).toLocaleDateString('en-GB', { 
-              day: '2-digit', 
-              month: 'short', 
-              year: 'numeric'
-            })
-          : new Date().toLocaleDateString('en-GB', { 
-              day: '2-digit', 
-              month: 'short', 
-              year: 'numeric'
-            });
+        const orderedDate = labResult.orderedAt
+          ? new Date(labResult.orderedAt).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+          })
+          : new Date().toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+          });
         doc.text(`Date: ${orderedDate}`, 20, yPos);
         yPos += 6;
-        
+
         // Time
-        const orderedTime = labResult.orderedAt 
-          ? new Date(labResult.orderedAt).toLocaleTimeString('en-GB', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false
-            })
-          : new Date().toLocaleTimeString('en-GB', { 
-              hour: '2-digit', 
-              minute: '2-digit',
-              hour12: false
-            });
+        const orderedTime = labResult.orderedAt
+          ? new Date(labResult.orderedAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          })
+          : new Date().toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
         doc.text(`Time: ${orderedTime}`, 20, yPos);
         yPos += 12;
 
@@ -13382,7 +13384,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Draw light grey background box
         doc.setFillColor(240, 240, 240);
         doc.rect(boxX, boxY, boxWidth, boxHeight, 'F');
-        
+
         // Draw border
         doc.setDrawColor(200, 200, 200);
         doc.rect(boxX, boxY, boxWidth, boxHeight);
@@ -13397,23 +13399,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
-        
+
         // Two-column layout for TEST ID and TEST TYPE
         const leftColX = boxX + 10;
         const rightColX = boxX + boxWidth / 2 + 10;
         const labelY = boxContentY;
-        
+
         // Left Column: TEST ID
         doc.setFont('helvetica', 'bold');
         doc.text('TEST ID', leftColX, labelY);
         doc.setFont('helvetica', 'normal');
         doc.text(labResult.testId, leftColX, labelY + 6);
-        
+
         // Right Column: TEST TYPE
         doc.setFont('helvetica', 'bold');
         doc.text('TEST TYPE', rightColX, labelY);
         doc.setFont('helvetica', 'normal');
-        
+
         // Format TEST TYPE as a list (split by | or newlines)
         let testTypeText = labResult.testType || 'N/A';
         // Split by | or newline and format as bullet list
@@ -13425,7 +13427,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           doc.text(testTypeLines, rightColX, testTypeY);
           testTypeY += testTypeLines.length * 5;
         });
-        
+
         boxContentY = Math.max(labelY + 6 + testTypeItems.length * 5, testTypeY) + 8;
 
         // Two-column layout for ORDERED DATE and STATUS
@@ -13433,17 +13435,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         doc.setFont('helvetica', 'bold');
         doc.text('ORDERED DATE', leftColX, boxContentY);
         doc.setFont('helvetica', 'normal');
-        const orderedDateTime = labResult.orderedAt 
-          ? new Date(labResult.orderedAt).toLocaleString('en-GB', { 
-              day: '2-digit', 
-              month: 'short', 
-              year: 'numeric', 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            })
+        const orderedDateTime = labResult.orderedAt
+          ? new Date(labResult.orderedAt).toLocaleString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
           : 'N/A';
         doc.text(orderedDateTime, leftColX, boxContentY + 6);
-        
+
         // Right Column: STATUS
         doc.setFont('helvetica', 'bold');
         doc.text('STATUS', rightColX, boxContentY);
@@ -13481,7 +13483,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             const signatureHeight = 25;
             const signatureX = pageWidth / 2 - signatureWidth / 2;
             const signatureY = yPos;
-            
+
             doc.addImage(signatureImg, 'PNG', signatureX, signatureY, signatureWidth, signatureHeight);
             hasSignature = true;
             yPos += signatureHeight + 5;
@@ -13494,7 +13496,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const signatureLineY = hasSignature ? yPos - 5 : yPos;
         doc.setDrawColor(0, 0, 0);
         doc.line(20, signatureLineY, pageWidth - 20, signatureLineY);
-        
+
         if (!hasSignature) {
           yPos += 8;
         }
@@ -13560,7 +13562,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       // ========== LAB TEST RESULT REPORT PDF LAYOUT (existing code) ==========
-      
+
       // Fetch doctor/user who ordered the test
       let orderedByUser = null;
       if (labResult.orderedBy) {
@@ -13570,7 +13572,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.error('Error fetching ordered by user:', error);
         }
       }
-      
+
       // Fetch user who created the report (for REPORT CREATED BY section)
       let reportCreator = null;
       if (req.user?.id) {
@@ -13585,11 +13587,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const logoWidth = 35;
       const logoHeight = 35;
       const logoMargin = 10;
-      
+
       // Determine layout based on logo position
       let hasLogo = false;
       let logoEndX = 20;
-      
+
       if (clinicHeader?.logoBase64) {
         hasLogo = true;
         try {
@@ -13611,7 +13613,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Header text positioning - avoid overlapping with logo
       let textStartX = hasLogo && (clinicHeader?.logoPosition === 'left' || clinicHeader?.logoPosition === 'center') ? logoEndX : 20;
       let textMaxWidth = hasLogo && clinicHeader?.logoPosition === 'right' ? pageWidth - 20 - logoWidth - logoMargin - 20 : pageWidth - textStartX - 20;
-      
+
       let headerTextY = yPos;
 
       // Header - Clinic Name
@@ -13641,7 +13643,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           headerTextY += 5;
         }
       }
-      
+
       // Set yPos to whichever is lower: end of logo or end of header text
       const logoEndY = hasLogo ? yPos + logoHeight : yPos;
       yPos = Math.max(logoEndY, headerTextY) + 10;
@@ -13664,7 +13666,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       yPos += 6;
 
       doc.setFont('helvetica', 'normal');
-      
+
       // Patient Name
       doc.setFont('helvetica', 'bold');
       doc.text('Patient Name:', 20, yPos);
@@ -13723,7 +13725,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       yPos += 6;
 
       doc.setFont('helvetica', 'normal');
-      const creatorName = reportCreator 
+      const creatorName = reportCreator
         ? `${reportCreator.firstName || ''} ${reportCreator.lastName || ''}`.trim() || reportCreator.email || 'N/A'
         : 'N/A';
       doc.setFont('helvetica', 'bold');
@@ -13731,7 +13733,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       doc.setFont('helvetica', 'normal');
       doc.text(creatorName, 70, yPos);
       yPos += 5;
-      
+
       const creatorEmail = reportCreator?.email || req.user?.email || 'N/A';
       if (creatorEmail !== 'N/A') {
         doc.setFont('helvetica', 'bold');
@@ -13740,7 +13742,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         doc.text(creatorEmail, 70, yPos);
         yPos += 5;
       }
-      
+
       const creatorRole = reportCreator?.role || req.user?.role || 'N/A';
       doc.setFont('helvetica', 'bold');
       doc.text('Role:', 20, yPos);
@@ -13751,8 +13753,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Results Table - Group by test type
       if (labResult.results) {
         try {
-          const results = typeof labResult.results === 'string' 
-            ? JSON.parse(labResult.results) 
+          const results = typeof labResult.results === 'string'
+            ? JSON.parse(labResult.results)
             : labResult.results;
 
           if (Array.isArray(results) && results.length > 0) {
@@ -13762,7 +13764,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               // Extract test type and parameter name
               let testType = result.testType;
               let paramName = result.name || result.testName || '';
-              
+
               // Always try to extract from name if it has the separator
               const nameParts = paramName.split(' - ');
               if (nameParts.length > 1) {
@@ -13773,7 +13775,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 // Always use the parameter name after the separator
                 paramName = nameParts[1];
               }
-              
+
               // Skip results without a valid test type
               if (testType) {
                 if (!resultsByTestType[testType]) {
@@ -13807,15 +13809,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               const colWidths = [60, 30, 30, 50]; // Parameter, Value, Unit, Reference Range
               const tableX = 20;
               const tableWidth = colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
-              
+
               // Header background (light gray)
               doc.setFillColor(240, 240, 240);
               doc.rect(tableX, tableStartY, tableWidth, rowHeight, 'F');
-              
+
               // Header border
               doc.setDrawColor(200, 200, 200);
               doc.rect(tableX, tableStartY, tableWidth, rowHeight);
-              
+
               // Header text
               doc.setFont('helvetica', 'bold');
               doc.setFontSize(9);
@@ -13823,7 +13825,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               doc.text('Value', tableX + colWidths[0] + 2, tableStartY + 4);
               doc.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 4);
               doc.text('Reference Range', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, tableStartY + 4);
-              
+
               yPos = tableStartY + rowHeight;
 
               // Sort parameters by displayName
@@ -13841,24 +13843,24 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                   doc.addPage();
                   yPos = 20;
                 }
-                
+
                 // Draw row borders
                 doc.setDrawColor(200, 200, 200);
                 doc.rect(tableX, yPos, tableWidth, rowHeight);
-                
+
                 // Draw vertical lines between columns
                 doc.line(tableX + colWidths[0], yPos, tableX + colWidths[0], yPos + rowHeight);
                 doc.line(tableX + colWidths[0] + colWidths[1], yPos, tableX + colWidths[0] + colWidths[1], yPos + rowHeight);
                 doc.line(tableX + colWidths[0] + colWidths[1] + colWidths[2], yPos, tableX + colWidths[0] + colWidths[1] + colWidths[2], yPos + rowHeight);
-                
+
                 // Row data - use the displayName (parameter name without test type prefix)
                 const paramName = result.displayName || result.testName || result.name || '';
-                
+
                 doc.text(paramName, tableX + 2, yPos + 4);
                 doc.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 4);
                 doc.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 4);
                 doc.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 4);
-                
+
                 yPos += rowHeight;
               });
 
@@ -13916,7 +13918,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // When prescription PDF is saved (from Request Report tab), 
           // set ready_to_generate_lab = true in lab_results table
           // PDF is saved to: uploads/Lab_Prescription/{organization_id}/{patient_id}/{TestID}.pdf
-      await storage.updateLabResult(labResultId, organizationId, {
+          await storage.updateLabResult(labResultId, organizationId, {
             readyToGenerateLab: true
           });
           console.log(`✅ Successfully updated ready_to_generate_lab to true for lab result ID: ${labResultId}`);
@@ -13974,7 +13976,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -13994,7 +13996,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Check if file exists
       const fileExists = await fse.pathExists(filePath);
       console.log(`[LAB-DOWNLOAD] File exists: ${fileExists}`);
-      
+
       if (!fileExists) {
         return res.status(404).json({ error: "PDF file not found. Please generate the report first." });
       }
@@ -14034,7 +14036,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -14052,7 +14054,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Check if file exists
       const fileExists = await fse.pathExists(filePath);
       console.log(`[LAB-DELETE] File exists: ${fileExists}`);
-      
+
       if (!fileExists) {
         return res.status(404).json({ error: "PDF file not found." });
       }
@@ -14101,8 +14103,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       for (const labResult of labResultsList) {
         if (!labResult.results || !labResult.testType) continue;
 
-        const results = typeof labResult.results === 'string' 
-          ? JSON.parse(labResult.results) 
+        const results = typeof labResult.results === 'string'
+          ? JSON.parse(labResult.results)
           : labResult.results;
 
         if (!Array.isArray(results) || results.length === 0) continue;
@@ -14124,7 +14126,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
 
         // Build a map of parameter names to test types
-        const TEST_FIELD_DEFINITIONS: Record<string, Array<{name: string}>> = {
+        const TEST_FIELD_DEFINITIONS: Record<string, Array<{ name: string }>> = {
           "Complete Blood Count (CBC)": [
             { name: "White Blood Cell Count (WBC)" },
             { name: "Red Blood Cell Count (RBC)" },
@@ -14215,7 +14217,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -14250,7 +14252,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       console.log("📥 RAW REQUEST BODY:", JSON.stringify(req.body, null, 2));
-      
+
       const { labResultId, testId, patientId, testData, testTypes, testFieldDefinitions } = req.body;
       const organizationId = req.tenant!.id;
 
@@ -14272,7 +14274,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result details
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -14291,7 +14293,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         .from(schema.clinicHeaders)
         .where(eq(schema.clinicHeaders.organizationId, organizationId))
         .limit(1);
-      
+
       const clinicFooters = await db
         .select()
         .from(schema.clinicFooters)
@@ -14312,7 +14314,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Import PDF library
       const { default: PDFDocument } = await import('pdfkit');
       const doc = new PDFDocument({ margin: 50, size: 'A4' });
-      
+
       // Create write stream
       const stream = fse.createWriteStream(filePath);
       doc.pipe(stream);
@@ -14335,7 +14337,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Add clinic info next to logo
         doc.fontSize(16).font('Helvetica-Bold').text(clinicHeader.clinicName, 150, yPosition);
         yPosition += 20;
-        
+
         if (clinicHeader.address) {
           doc.fontSize(10).font('Helvetica').text(clinicHeader.address, 150, yPosition);
           yPosition += 15;
@@ -14362,14 +14364,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       doc.fontSize(10).font('Helvetica-Bold').text('Patient Name:', leftCol, yPosition);
       doc.font('Helvetica').text(patient ? `${patient.firstName} ${patient.lastName}` : 'N/A', leftCol + 100, yPosition);
-      
+
       doc.font('Helvetica-Bold').text('Ordered By:', rightCol, yPosition);
       doc.font('Helvetica').text(doctor ? `${doctor.firstName} ${doctor.lastName}` : 'N/A', rightCol + 80, yPosition);
       yPosition += 20;
 
       doc.font('Helvetica-Bold').text('Test ID:', leftCol, yPosition);
       doc.font('Helvetica').text(testId, leftCol + 100, yPosition);
-      
+
       doc.font('Helvetica-Bold').text('Priority:', rightCol, yPosition);
       doc.font('Helvetica').text(labResult.priority || 'routine', rightCol + 80, yPosition);
       yPosition += 20;
@@ -14382,7 +14384,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (testTypes && Array.isArray(testTypes)) {
         for (let idx = 0; idx < testTypes.length; idx++) {
           const testType = testTypes[idx];
-          
+
           // Check if we need a new page
           if (yPosition > 700) {
             doc.addPage();
@@ -14403,27 +14405,27 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           yPosition += 20;
 
           // Find all fields for this test type that have values (not empty strings)
-          const fields = Object.keys(testData).filter(key => 
-            key.startsWith(`${testType}_`) && 
-            testData[key] && 
+          const fields = Object.keys(testData).filter(key =>
+            key.startsWith(`${testType}_`) &&
+            testData[key] &&
             testData[key].toString().trim() !== ''
           );
-          
+
           if (fields.length > 0) {
             doc.fontSize(9).font('Helvetica');
-            
+
             fields.forEach(fieldKey => {
               const fieldName = fieldKey.replace(`${testType}_`, '');
               const fieldValue = testData[fieldKey];
-              
+
               // Find matching field definition for unit and reference range
-              const fieldDef = testFieldDefinitions && testFieldDefinitions[testType] 
+              const fieldDef = testFieldDefinitions && testFieldDefinitions[testType]
                 ? testFieldDefinitions[testType].find((f: any) => f.name === fieldName)
                 : null;
-              
+
               const unit = fieldDef?.unit || '';
               const referenceRange = fieldDef?.referenceRange || '';
-              
+
               // Check if we need a new page
               if (yPosition > 720) {
                 doc.addPage();
@@ -14512,7 +14514,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -14561,7 +14563,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Fetch lab result to verify access
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(result => result.id === labResultId);
-      
+
       if (!labResult) {
         return res.status(404).json({ error: "Lab result not found" });
       }
@@ -14583,15 +14585,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const token = jwt.sign(
-        { 
+        {
           fileId: labResultId,
           organizationId: organizationId,
           patientId: labResult.patientId,
           testId: labResult.testId,
           userId: req.user.id,
           fileType: isPrescription ? 'prescription' : 'testresult'
-        }, 
-        fileSecret, 
+        },
+        fileSecret,
         { expiresIn: "5m" }
       );
 
@@ -14600,7 +14602,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       let baseUrl;
       const origin = req.get('origin');
       const referer = req.get('referer');
-      
+
       if (origin) {
         // Use origin if available (most reliable)
         baseUrl = origin;
@@ -14612,17 +14614,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Fallback to constructing from headers
         const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
         let host = req.get('x-forwarded-host') || req.get('host') || req.headers.host;
-        
+
         // Remove port if it's 5000 (development port shouldn't be in production URLs)
         if (typeof host === 'string' && host.includes(':5000')) {
           host = host.replace(':5000', '');
         }
-        
+
         baseUrl = `${protocol}://${host}`;
       }
-      
+
       const signedUrl = `${baseUrl}/api/files/view/${labResultId}?token=${token}`;
-      
+
       console.log(`[SIGNED-URL] Generated for lab result ${labResultId}, valid for 5 minutes`);
       console.log(`[SIGNED-URL] Base URL: ${baseUrl}`);
       console.log(`[SIGNED-URL] Full signed URL: ${signedUrl}`);
@@ -14658,10 +14660,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const { fileId, organizationId, patientId, testId, fileType } = payload;
-      
+
       // Determine directory based on file type (prescription or test result)
       const directoryName = fileType === 'prescription' ? 'Lab_Prescription' : 'Lab_TestResults';
-      
+
       // Construct file path
       const fileName = `${testId}.pdf`;
       const relativePath = `uploads/${directoryName}/${organizationId}/${patientId}/${fileName}`;
@@ -14675,11 +14677,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       console.log(`[FILE-VIEW] Serving file: ${fullPath}`);
-      
+
       // Set headers for PDF viewing
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'inline; filename="' + fileName + '"');
-      
+
       // Stream the file
       res.sendFile(fullPath);
 
@@ -14718,14 +14720,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const token = jwt.sign(
-        { 
+        {
           fileId: medicalImage.id,
           imageId: imageId,
           organizationId: organizationId,
           patientId: medicalImage.patientId,
           userId: req.user.id
-        }, 
-        fileSecret, 
+        },
+        fileSecret,
         { expiresIn: "5m" }
       );
 
@@ -14734,7 +14736,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       let baseUrl;
       const origin = req.get('origin');
       const referer = req.get('referer');
-      
+
       if (origin) {
         // Use origin if available (most reliable)
         baseUrl = origin;
@@ -14746,17 +14748,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Fallback to constructing from headers
         const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
         let host = req.get('x-forwarded-host') || req.get('host') || req.headers.host;
-        
+
         // Remove port if it's 5000 (development port shouldn't be in production URLs)
         if (typeof host === 'string' && host.includes(':5000')) {
           host = host.replace(':5000', '');
         }
-        
+
         baseUrl = `${protocol}://${host}`;
       }
-      
+
       const signedUrl = `${baseUrl}/api/imaging-files/view/${imageId}?token=${token}`;
-      
+
       console.log(`[SIGNED-URL] Generated for imaging report ${imageId}, valid for 5 minutes`);
       console.log(`[SIGNED-URL] Base URL: ${baseUrl}`);
       console.log(`[SIGNED-URL] Full signed URL: ${signedUrl}`);
@@ -14792,11 +14794,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const { imageId, organizationId, patientId, fileId } = payload;
-      
+
       // Get medical image from database to retrieve reportFileName
       let fileName: string;
       let fullPath: string;
-      
+
       if (fileId) {
         // Try to get the medical image to retrieve reportFileName
         try {
@@ -14834,11 +14836,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       console.log(`[IMAGING-VIEW] Serving file: ${fullPath}`);
-      
+
       // Set headers for PDF viewing
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'inline; filename="' + fileName + '"');
-      
+
       // Stream the file
       res.sendFile(fullPath);
 
@@ -14883,7 +14885,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (invalidFiles.length > 0) {
         // Clean up uploaded files
         await Promise.all(files.map(file => fse.remove(file.path)));
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Invalid file type",
           details: `Files must be images. Invalid files: ${invalidFiles.map(f => f.originalname).join(', ')}`
         });
@@ -14917,11 +14919,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Process each uploaded file
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        
+
         // Move file to the correct directory structure if needed
         const targetPath = path.join(imagesDir, file.filename);
         let finalPath = file.path;
-        
+
         // If file is not already in the target directory, move it
         if (file.path !== targetPath) {
           try {
@@ -14936,17 +14938,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
 
         uploadedImages.push({
-        fileName: file.filename,
-        originalName: file.originalname,
-        fileSize: file.size,
-        mimeType: file.mimetype,
+          fileName: file.filename,
+          originalName: file.originalname,
+          fileSize: file.size,
+          mimeType: file.mimetype,
           path: finalPath,
         });
 
         // Save to radiology_images table
         try {
           const fileStats = await fs.promises.stat(finalPath);
-          
+
           // Determine MIME type from extension
           const ext = path.extname(file.filename).toLowerCase();
           let mimeType = 'image/jpeg';
@@ -14967,7 +14969,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           const absoluteFilePath = path.resolve(finalPath);
           const projectRoot = process.cwd();
           let relativeFilePath: string;
-          
+
           try {
             relativeFilePath = path.relative(projectRoot, absoluteFilePath);
             relativeFilePath = relativeFilePath.replace(/\\/g, '/');
@@ -15014,16 +15016,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       });
     } catch (error) {
       console.error("Error uploading report images:", error);
-      
+
       // Clean up any uploaded files on error
       if (req.files) {
         const files = req.files as Express.Multer.File[];
-        await Promise.all(files.map(file => fse.remove(file.path).catch(err => 
+        await Promise.all(files.map(file => fse.remove(file.path).catch(err =>
           console.error(`Failed to clean up file ${file.path}:`, err)
         )));
       }
-      
-      res.status(500).json({ 
+
+      res.status(500).json({
         error: "Failed to upload images",
         details: error instanceof Error ? error.message : "Unknown error"
       });
@@ -15119,18 +15121,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       console.log("📋 Fetching invoices from database for organization:", req.tenant!.id, "User role:", req.user.role);
-      
+
       // Fetch all invoices from the database
       let invoices = await storage.getInvoicesByOrganization(req.tenant!.id);
-      
+
       // Filter invoices for patient users - only show their own invoices
       if (req.user.role === "patient") {
         console.log("👤 User is a patient - filtering invoices by patient email:", req.user.email);
-        
+
         // Find the patient record for this user to get their patientId
         const patients = await storage.getPatientsByOrganization(req.tenant!.id);
         const userPatient = patients.find(p => p.email?.toLowerCase() === req.user!.email.toLowerCase());
-        
+
         if (userPatient) {
           console.log("✅ Found patient record:", userPatient.id, "Filtering invoices...");
           // Filter to only show invoices for this patient
@@ -15142,9 +15144,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           invoices = [];
         }
       }
-      
+
       console.log(`✅ Returning ${invoices.length} invoices`);
-      
+
       res.json(invoices);
     } catch (error) {
       console.error("Error fetching billing data:", error);
@@ -15398,9 +15400,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const { resetTwilioClient } = await import('./messaging-service');
       const success = resetTwilioClient();
-      res.json({ 
-        success, 
-        message: success ? 'Twilio client reset successfully' : 'Failed to reset Twilio client - check credentials' 
+      res.json({
+        success,
+        message: success ? 'Twilio client reset successfully' : 'Failed to reset Twilio client - check credentials'
       });
     } catch (error) {
       console.error("Error resetting Twilio client:", error);
@@ -15417,10 +15419,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }));
       console.log('🔍 TENANT INFO:', JSON.stringify(req.tenant));
       console.log('🔍 USER INFO:', JSON.stringify(req.user));
-      
+
       const orgId = req.user?.organizationId || req.tenant?.id || 1; // Fallback to org 1
       console.log(`🔍 USING ORG ID: ${orgId}`);
-      
+
       const conversations = await storage.getConversations(orgId, req.user?.id);
       console.log(`🔍 RETURNED CONVERSATIONS: ${conversations.length}`);
       res.json(conversations);
@@ -15438,10 +15440,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         'Pragma': 'no-cache',
         'Expires': '0'
       });
-      
+
       const conversationId = req.params.conversationId;
       const userId = req.user?.id;
-      
+
       // Mark messages as read when user opens the conversation
       if (userId) {
         try {
@@ -15451,7 +15453,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // Continue even if marking as read fails
         }
       }
-      
+
       try {
         const messages = await storage.getMessages(conversationId, req.tenant!.id);
         console.log(`🔍 API GET MESSAGES - Returning ${messages.length} messages for conversation ${conversationId}`);
@@ -15469,12 +15471,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 eq(messages.organizationId, req.tenant!.id)
               ))
               .orderBy(asc(messages.timestamp));
-            
+
             const messagesWithEmptyTags = messagesWithoutTags.map((msg: any) => ({
               ...msg,
               tags: []
             }));
-            
+
             res.json(messagesWithEmptyTags);
             return;
           } catch (fallbackError: any) {
@@ -15571,7 +15573,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const { conversationId, recipientId, content, message: messageText, type, priority, phoneNumber, messageType } = req.body;
       console.log(`📨 MESSAGE ROUTING - messageType: "${messageType}", type: "${type}", recipientId: "${recipientId}"`);
       console.log(`📨 EMAIL CHECK - isEmail: ${messageType === 'email'}, notInternal: ${type !== 'internal'}, willSendEmail: ${messageType === 'email' && type !== 'internal'}`);
-      
+
       // Add authenticated user information to message data
       const messageDataWithUser = {
         conversationId, // Include conversationId from request
@@ -15585,18 +15587,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         senderName: req.user!.email, // Using email as fallback since firstName/lastName might not be available
         senderRole: req.user!.role
       };
-      
+
       // Consolidate any duplicate conversations before sending the message
       await storage.consolidateDuplicateConversations(messageDataWithUser.senderId, messageDataWithUser.recipientId, req.tenant!.id);
-      
+
       // Store the message in the database
       const message = await storage.sendMessage(messageDataWithUser, req.tenant!.id);
-      
+
       // If phone number is provided AND messageType is sms/whatsapp, attempt external delivery
       const recipientPhone = phoneNumber || req.body.recipient;
       console.log(`📱 EXTERNAL DELIVERY CHECK - phoneNumber: "${phoneNumber}", recipientPhone: "${recipientPhone}", messageType: "${messageType}", type: "${type}"`);
       console.log(`📱 CONDITION CHECK - hasPhone: ${!!recipientPhone}, isSmsOrWhatsApp: ${messageType === 'sms' || messageType === 'whatsapp'}, notInternal: ${type !== 'internal'}`);
-      
+
       if (recipientPhone && (messageType === 'sms' || messageType === 'whatsapp') && type !== 'internal') {
         try {
           const result = await messagingService.sendMessage({
@@ -15605,15 +15607,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             type: messageType,
             priority: priority || 'normal'
           });
-          
+
           console.log(`${messageType.toUpperCase()} delivery result:`, result);
-          
+
           if (result.success) {
             console.log(`${messageType.toUpperCase()} sent successfully:`, result.messageId);
             // Update message with delivery status and external ID
             message.deliveryStatus = 'sent';
             message.externalMessageId = result.messageId;
-            
+
             // Start polling for delivery status after a short delay
             setTimeout(async () => {
               try {
@@ -15626,22 +15628,22 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 console.error('📱 Error polling message status:', error);
               }
             }, 5000); // Poll after 5 seconds
-            
+
             return res.json(message);
           } else {
             console.error(`${messageType.toUpperCase()} sending failed:`, result.error);
-            
+
             // Only treat as internal if credentials are completely missing (not authentication failures)
             if (result.error?.includes('not properly configured') && !process.env.TWILIO_ACCOUNT_SID) {
               console.log(`📱 Twilio not configured (missing credentials), treating SMS as internal message`);
               await storage.updateMessageDeliveryStatus(message.id, 'delivered', undefined, undefined);
               return res.json(message);
             }
-            
+
             message.deliveryStatus = 'failed';
             message.error = result.error;
             // Return error response for failed delivery
-            return res.status(400).json({ 
+            return res.status(400).json({
               error: `Failed to send ${messageType.toUpperCase()}: ${result.error}`,
               message: message
             });
@@ -15654,11 +15656,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             await storage.updateMessageDeliveryStatus(message.id, 'delivered', undefined, undefined);
             return res.json(message);
           }
-          
+
           message.deliveryStatus = 'failed';
           message.error = 'Failed to send via Twilio';
           // Return error response for Twilio failures
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: `SMS/WhatsApp delivery failed: ${twilioError.message || 'Twilio authentication error'}`,
             message: message
           });
@@ -15669,7 +15671,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         try {
           // Get phone number from recipient if not provided
           let voicePhoneNumber = phoneNumber;
-          
+
           if (!voicePhoneNumber && typeof recipientId === 'string') {
             // Try to find phone number from patients
             const allPatients = await storage.getPatientsByOrganization(req.tenant!.id);
@@ -15677,12 +15679,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               const fullName = `${patient.firstName} ${patient.lastName}`.trim();
               return fullName === recipientId || patient.firstName === recipientId;
             });
-            
+
             if (matchedPatient) {
               voicePhoneNumber = matchedPatient.phone || matchedPatient.phoneNumber || matchedPatient.mobile;
             }
           }
-          
+
           if (!voicePhoneNumber) {
             console.error('📞 No phone number found for voice call to:', recipientId);
             await storage.updateMessageDeliveryStatus(message.id, 'failed', undefined, 'No phone number found for voice call');
@@ -15691,10 +15693,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               message: message
             });
           }
-          
+
           console.log(`📞 Making voice call to: ${voicePhoneNumber}`);
           const voiceResult = await messagingService.makeVoiceCall(voicePhoneNumber, messageDataWithUser.content);
-          
+
           if (voiceResult.success) {
             console.log(`📞 Voice call initiated successfully:`, voiceResult.messageId);
             message.deliveryStatus = 'sent';
@@ -15728,14 +15730,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // Get recipient's email address
           let recipientEmail = null;
           let recipientName = 'Recipient';
-          
+
           // Check if recipientId is a number (ID) or string (name)
           if (typeof recipientId === 'number') {
             // Try to get recipient from users table first
             const recipientUser = await storage.getUser(recipientId, req.tenant!.id);
             if (recipientUser && recipientUser.email) {
               recipientEmail = recipientUser.email;
-              recipientName = recipientUser.firstName && recipientUser.lastName 
+              recipientName = recipientUser.firstName && recipientUser.lastName
                 ? `${recipientUser.firstName} ${recipientUser.lastName}`
                 : recipientUser.firstName || recipientUser.email;
             } else {
@@ -15752,11 +15754,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
             const matchedUser = allUsers.find(user => {
               const fullName = `${user.firstName} ${user.lastName}`.trim();
-              return fullName === recipientId || 
-                     user.firstName === recipientId ||
-                     user.email === recipientId;
+              return fullName === recipientId ||
+                user.firstName === recipientId ||
+                user.email === recipientId;
             });
-            
+
             if (matchedUser && matchedUser.email) {
               recipientEmail = matchedUser.email;
               recipientName = `${matchedUser.firstName} ${matchedUser.lastName}`;
@@ -15765,35 +15767,35 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               const allPatients = await storage.getPatientsByOrganization(req.tenant!.id);
               const matchedPatient = allPatients.find(patient => {
                 const fullName = `${patient.firstName} ${patient.lastName}`.trim();
-                return fullName === recipientId || 
-                       patient.firstName === recipientId ||
-                       patient.email === recipientId;
+                return fullName === recipientId ||
+                  patient.firstName === recipientId ||
+                  patient.email === recipientId;
               });
-              
+
               if (matchedPatient && matchedPatient.email) {
                 recipientEmail = matchedPatient.email;
                 recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
               }
             }
           }
-          
+
           console.log(`📧 EMAIL LOOKUP RESULT - recipientEmail: "${recipientEmail}", recipientName: "${recipientName}"`);
-          
+
           if (!recipientEmail) {
             console.error('No email address found for recipient:', recipientId);
             await storage.updateMessageDeliveryStatus(message.id, 'failed', undefined, 'No email address found for recipient');
-            return res.status(400).json({ 
+            return res.status(400).json({
               error: 'Email sending failed: No email address found for recipient',
               message: message
             });
           }
-          
+
           // Get sender's name for email
           const senderUser = await storage.getUser(req.user!.id, req.tenant!.id);
           const senderName = senderUser && senderUser.firstName && senderUser.lastName
             ? `${senderUser.firstName} ${senderUser.lastName}`
             : req.user!.email;
-          
+
           // Send email using the email service
           const subject = req.body.subject || 'Message from your healthcare provider';
           const emailSuccess = await emailService.sendEmail({
@@ -15815,7 +15817,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             `,
             text: messageDataWithUser.content
           });
-          
+
           if (emailSuccess) {
             console.log(`📧 Email sent successfully to ${recipientEmail}`);
             await storage.updateMessageDeliveryStatus(message.id, 'delivered', undefined, undefined);
@@ -15826,7 +15828,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             await storage.updateMessageDeliveryStatus(message.id, 'failed', undefined, 'Email service failed');
             message.deliveryStatus = 'failed';
             message.error = 'Email service failed';
-            return res.status(400).json({ 
+            return res.status(400).json({
               error: 'Failed to send email',
               message: message
             });
@@ -15836,7 +15838,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           await storage.updateMessageDeliveryStatus(message.id, 'failed', undefined, emailError.message);
           message.deliveryStatus = 'failed';
           message.error = 'Email sending error';
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: `Email delivery failed: ${emailError.message || 'Unknown error'}`,
             message: message
           });
@@ -15845,19 +15847,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // For internal messages, mark as delivered immediately since they don't go through SMS/WhatsApp/Email
         await storage.updateMessageDeliveryStatus(message.id, 'delivered', undefined, undefined);
         console.log(`✅ Internal message ${message.id} marked as delivered`);
-        
+
         // For internal messages, broadcast to other users via WebSocket
         // Add delay to ensure database transaction is fully committed across all connections
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // Use the message's conversationId from the storage response, not messageDataWithUser
         const actualConversationId = message.conversationId;
         console.log(`🔍 DEBUG - Using actual conversationId from message: ${actualConversationId}`);
-        
+
         // Verify the message exists in database before broadcasting
         const verifyMessage = await storage.getMessages(actualConversationId, req.tenant!.id);
         console.log(`🔍 VERIFICATION - Database contains ${verifyMessage.length} messages before broadcast`);
-        
+
         const broadcastMessage = req.app.get('broadcastMessage');
         console.log(`🔍 DEBUG - broadcastMessage function exists:`, !!broadcastMessage);
         console.log(`🔍 DEBUG - messageDataWithUser.recipientId:`, messageDataWithUser.recipientId);
@@ -15868,7 +15870,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             try {
               // Look up user by name for WebSocket broadcasting
               const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
-              const recipientUser = allUsers.find(user => 
+              const recipientUser = allUsers.find(user =>
                 user.firstName + ' ' + user.lastName === messageDataWithUser.recipientId ||
                 user.email === messageDataWithUser.recipientId
               );
@@ -15886,14 +15888,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           } else if (typeof messageDataWithUser.recipientId === 'number') {
             // Direct user ID broadcast
             broadcastMessage(messageDataWithUser.recipientId, {
-              type: 'new_message', 
+              type: 'new_message',
               message: message,
               conversationId: actualConversationId
             });
             console.log(`📨 Broadcasted message to recipient user ID: ${messageDataWithUser.recipientId}`);
           }
         }
-        
+
         // Also broadcast to any other users who might be viewing the same conversation
         console.log(`🔍 DEBUG CONVERSATION - broadcastMessage exists:`, !!broadcastMessage);
         console.log(`🔍 DEBUG CONVERSATION - conversationId:`, actualConversationId);
@@ -15906,7 +15908,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             const currentConversation = conversations.find(c => c.id === actualConversationId);
             console.log(`🔍 DEBUG - Current conversation found:`, currentConversation ? 'YES' : 'NO');
             console.log(`🔍 DEBUG - Current conversation participants:`, currentConversation?.participants);
-            
+
             if (currentConversation && currentConversation.participants) {
               // Get unique participant IDs from conversation participants
               const participantIds = new Set();
@@ -15916,7 +15918,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 console.log(`🔍 DEBUG - Processing participant:`, participant);
                 console.log(`🔍 DEBUG - Participant ID type:`, typeof participant.id, 'Value:', participant.id);
                 let participantId: number | null = null;
-                
+
                 if (typeof participant.id === 'number') {
                   participantId = participant.id;
                 } else if (typeof participant.id === 'string') {
@@ -15924,15 +15926,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                   const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
                   console.log(`🔍 DEBUG - Looking for participant "${participant.id}" among ${allUsers.length} users`);
                   console.log(`🔍 DEBUG - Available users:`, allUsers.map(u => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email })));
-                  
+
                   const matchedUser = allUsers.find(user => {
                     const fullName = `${user.firstName} ${user.lastName}`.trim();
                     console.log(`🔍 DEBUG - Comparing "${participant.id}" with "${fullName}", "${user.firstName}", "${user.email}"`);
-                    return fullName === participant.id || 
-                           user.firstName === participant.id ||
-                           user.email === participant.id;
+                    return fullName === participant.id ||
+                      user.firstName === participant.id ||
+                      user.email === participant.id;
                   });
-                  
+
                   if (matchedUser) {
                     participantId = matchedUser.id;
                     console.log(`🔧 Mapped participant "${participant.id}" to user ID ${matchedUser.id}`);
@@ -15945,7 +15947,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                     }
                   }
                 }
-                
+
                 // Add all valid numeric IDs including the current sender for real-time UI updates
                 console.log(`🔍 DEBUG - Participant processing result: participantId=${participantId}, sender=${req.user!.id}, shouldAdd=${!!participantId}`);
                 if (participantId) {
@@ -15953,9 +15955,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                   console.log(`🔍 DEBUG - Added participant ${participantId} to broadcast list`);
                 }
               }
-              
+
               console.log(`📨 Broadcasting to ${participantIds.size} conversation participants:`, Array.from(participantIds));
-              
+
               // Broadcast to all conversation participants
               participantIds.forEach(userId => {
                 broadcastMessage(userId, {
@@ -15970,7 +15972,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             console.error('Error broadcasting to conversation participants:', error);
           }
         }
-        
+
         res.json(message);
       }
     } catch (error) {
@@ -15995,9 +15997,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const conversationId = req.params.conversationId;
       console.log(`🗑️ DELETE CONVERSATION REQUEST: ${conversationId}`);
-      
+
       const result = await storage.deleteConversation(conversationId, req.tenant!.id);
-      
+
       if (result) {
         console.log(`🗑️ CONVERSATION DELETED SUCCESSFULLY: ${conversationId}`);
         res.json({ success: true, message: "Conversation deleted successfully" });
@@ -16017,15 +16019,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const conversationId = req.params.conversationId;
       const userId = req.user?.id;
       const organizationId = req.tenant!.id;
-      
+
       if (!userId) {
         return res.status(401).json({ error: "User not authenticated" });
       }
-      
+
       console.log(`⭐ TOGGLE FAVORITE REQUEST: conversation=${conversationId}, user=${userId}`);
-      
+
       const isFavorite = await storage.toggleConversationFavorite(conversationId, userId, organizationId);
-      
+
       console.log(`⭐ FAVORITE TOGGLED: conversation=${conversationId}, isFavorite=${isFavorite}`);
       res.json({ success: true, isFavorite, message: isFavorite ? "Conversation favorited" : "Conversation unfavorited" });
     } catch (error) {
@@ -16107,7 +16109,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const messageId = req.params.messageId;
       const tagId = parseInt(req.params.tagId);
-      
+
       await storage.removeTagFromMessage(messageId, tagId, req.tenant!.id);
       res.json({ success: true, message: "Tag removed from message" });
     } catch (error) {
@@ -16131,14 +16133,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("📧 CREATE CAMPAIGN - Request body:", JSON.stringify(req.body, null, 2));
       console.log("📧 CREATE CAMPAIGN - User ID:", req.user!.id);
       console.log("📧 CREATE CAMPAIGN - Tenant ID:", req.tenant!.id);
-      
+
       const campaignData = {
         ...req.body,
         createdBy: req.user!.id
       };
-      
+
       console.log("📧 CREATE CAMPAIGN - Campaign data to save:", JSON.stringify(campaignData, null, 2));
-      
+
       const campaign = await storage.createMessageCampaign(campaignData, req.tenant!.id);
       console.log("📧 CREATE CAMPAIGN - Success! Created campaign:", campaign.id);
       res.json(campaign);
@@ -16179,10 +16181,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const campaignId = parseInt(req.params.id);
       const organizationId = req.tenant!.id;
-      
+
       const campaigns = await storage.getMessageCampaigns(organizationId);
       const campaign = campaigns.find((c: any) => c.id === campaignId);
-      
+
       if (!campaign) {
         return res.status(404).json({ error: "Campaign not found" });
       }
@@ -16202,9 +16204,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             const personalizedContent = campaign.content
               .replace(/\[FirstName\]/gi, recipient.name?.split(' ')[0] || '')
               .replace(/\[LastName\]/gi, recipient.name?.split(' ').slice(1).join(' ') || '');
-            
+
             const result = await messagingService.sendSMS(recipient.phone, personalizedContent);
-            
+
             if (result.success) {
               deliveryLog.push({ recipient: recipient.name, phone: recipient.phone, status: 'sent', type: 'sms' });
               totalSent++;
@@ -16213,25 +16215,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               totalFailed++;
             }
           }
-          
+
           if ((campaign.type === 'email' || campaign.type === 'both') && recipient.email) {
             try {
               const emailResult = await emailService.sendEmail({
-              to: recipient.email,
-              subject: campaign.subject || 'Campaign Message',
-              text: campaign.content
-                .replace(/\[FirstName\]/gi, recipient.name?.split(' ')[0] || '')
-                .replace(/\[LastName\]/gi, recipient.name?.split(' ').slice(1).join(' ') || ''),
-              html: `<p>${campaign.content
-                .replace(/\[FirstName\]/gi, recipient.name?.split(' ')[0] || '')
-                .replace(/\[LastName\]/gi, recipient.name?.split(' ').slice(1).join(' ') || '')}</p>`
-            });
-            
+                to: recipient.email,
+                subject: campaign.subject || 'Campaign Message',
+                text: campaign.content
+                  .replace(/\[FirstName\]/gi, recipient.name?.split(' ')[0] || '')
+                  .replace(/\[LastName\]/gi, recipient.name?.split(' ').slice(1).join(' ') || ''),
+                html: `<p>${campaign.content
+                  .replace(/\[FirstName\]/gi, recipient.name?.split(' ')[0] || '')
+                  .replace(/\[LastName\]/gi, recipient.name?.split(' ').slice(1).join(' ') || '')}</p>`
+              });
+
               // emailService.sendEmail returns a boolean directly
               if (emailResult === true) {
-              deliveryLog.push({ recipient: recipient.name, email: recipient.email, status: 'sent', type: 'email' });
-              totalSent++;
-            } else {
+                deliveryLog.push({ recipient: recipient.name, email: recipient.email, status: 'sent', type: 'email' });
+                totalSent++;
+              } else {
                 deliveryLog.push({ recipient: recipient.name, email: recipient.email, status: 'failed', error: 'Email sending failed', type: 'email' });
                 totalFailed++;
               }
@@ -16295,7 +16297,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           error = smsResult.error || 'SMS sending failed';
         }
       }
-      
+
       // Handle Email sending
       if ((type === 'email' || type === 'both') && recipient.email) {
         console.log(`📧 SEND-SINGLE: Sending Email to ${recipient.email}`);
@@ -16317,21 +16319,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log(`📤 SEND-SINGLE: Final result - success: ${success}, error: ${error}`);
 
       if (success) {
-        res.json({ 
-          success: true, 
-          recipient: recipient.name, 
+        res.json({
+          success: true,
+          recipient: recipient.name,
           phone: recipient.phone,
           email: recipient.email,
-          status: 'sent' 
+          status: 'sent'
         });
       } else {
-        res.json({ 
-          success: false, 
-          recipient: recipient.name, 
+        res.json({
+          success: false,
+          recipient: recipient.name,
           phone: recipient.phone,
           email: recipient.email,
-          status: 'failed', 
-          error: error 
+          status: 'failed',
+          error: error
         });
       }
     } catch (error: any) {
@@ -16374,11 +16376,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       // Validate request body with Zod schema
       const validationResult = insertMessageTemplateSchema.omit({ createdBy: true, organizationId: true }).safeParse(req.body);
-      
+
       if (!validationResult.success) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: validationResult.error.errors 
+        return res.status(400).json({
+          error: "Validation failed",
+          details: validationResult.error.errors
         });
       }
 
@@ -16397,14 +16399,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.put("/api/messaging/templates/:id", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const templateId = parseInt(req.params.id);
-      
+
       // Validate request body with Zod schema
       const validationResult = insertMessageTemplateSchema.omit({ createdBy: true, organizationId: true }).safeParse(req.body);
-      
+
       if (!validationResult.success) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: validationResult.error.errors 
+        return res.status(400).json({
+          error: "Validation failed",
+          details: validationResult.error.errors
         });
       }
 
@@ -16424,7 +16426,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const templateId = parseInt(req.params.id);
       const deleted = await storage.deleteMessageTemplate(templateId, req.tenant!.id);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "Template not found or failed to delete" });
       }
@@ -16444,37 +16446,37 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
         return res.status(400).json({ error: "Recipients array is required and must not be empty" });
       }
-      
+
       // Get template
       const templates = await storage.getMessageTemplates(req.tenant!.id);
       const template = templates.find(t => t.id === templateId);
-      
+
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
       }
 
       // Get all users in organization
       const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       // Get sender's full user details
       const senderUser = allUsers.find(u => u.id === req.user!.id);
-      const senderName = senderUser 
-        ? `${senderUser.firstName} ${senderUser.lastName}`.trim() || senderUser.email 
+      const senderName = senderUser
+        ? `${senderUser.firstName} ${senderUser.lastName}`.trim() || senderUser.email
         : req.user!.email;
-      
+
       // Filter users based on provided recipient emails
       const selectedUsers = allUsers.filter(user => recipients.includes(user.email));
-      
+
       if (selectedUsers.length === 0) {
         return res.status(400).json({ error: "No valid recipients found" });
       }
-      
+
       // Send email to each selected user
       let successCount = 0;
       let failCount = 0;
-      
+
       console.log(`[TEMPLATE-EMAIL] Sending template "${template.name}" to ${selectedUsers.length} recipients`);
-      
+
       for (const user of selectedUsers) {
         if (user.email) {
           try {
@@ -16495,7 +16497,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 </div>
               `
             });
-            
+
             if (emailSent) {
               successCount++;
               console.log(`[TEMPLATE-EMAIL] ✅ Successfully sent to ${user.email}`);
@@ -16512,7 +16514,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           failCount++;
         }
       }
-      
+
       console.log(`[TEMPLATE-EMAIL] Results: ${successCount} succeeded, ${failCount} failed out of ${selectedUsers.length} total`)
 
       // Update template usage count
@@ -16533,11 +16535,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/templates/:id/send-to-all", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const templateId = parseInt(req.params.id);
-      
+
       // Get template
       const templates = await storage.getMessageTemplates(req.tenant!.id);
       const template = templates.find(t => t.id === templateId);
-      
+
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
       }
@@ -16545,19 +16547,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Get sender's full user details
       const allOrgUsers = await storage.getUsersByOrganization(req.tenant!.id);
       const senderUser = allOrgUsers.find(u => u.id === req.user!.id);
-      const senderName = senderUser 
-        ? `${senderUser.firstName} ${senderUser.lastName}`.trim() || senderUser.email 
+      const senderName = senderUser
+        ? `${senderUser.firstName} ${senderUser.lastName}`.trim() || senderUser.email
         : req.user!.email;
 
       // Get all users in organization
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       // Send email to each user
       let successCount = 0;
       let failCount = 0;
-      
+
       console.log(`[TEMPLATE-EMAIL-ALL] Sending template "${template.name}" to all ${users.length} users`);
-      
+
       for (const user of users) {
         if (user.email) {
           try {
@@ -16578,7 +16580,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 </div>
               `
             });
-            
+
             if (emailSent) {
               successCount++;
               console.log(`[TEMPLATE-EMAIL-ALL] ✅ Successfully sent to ${user.email}`);
@@ -16595,14 +16597,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           failCount++;
         }
       }
-      
+
       console.log(`[TEMPLATE-EMAIL-ALL] Results: ${successCount} succeeded, ${failCount} failed out of ${users.length} total`)
 
       // Update usage count
       await storage.updateMessageTemplate(templateId, { usageCount: template.usageCount + 1 }, req.tenant!.id);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         totalUsers: users.length,
         successCount,
         failCount,
@@ -16618,7 +16620,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/appointment-reminder", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { patientPhone, patientName, appointmentDate, doctorName, clinicName, messageType = 'sms' } = req.body;
-      
+
       const result = await messagingService.sendAppointmentReminder(
         patientPhone,
         patientName,
@@ -16627,7 +16629,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         clinicName,
         messageType
       );
-      
+
       if (result.success) {
         res.json({ success: true, messageId: result.messageId, cost: result.cost });
       } else {
@@ -16642,7 +16644,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/lab-results", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { patientPhone, patientName, clinicName, clinicPhone, messageType = 'sms' } = req.body;
-      
+
       const result = await messagingService.sendLabResultsNotification(
         patientPhone,
         patientName,
@@ -16650,7 +16652,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         clinicPhone,
         messageType
       );
-      
+
       if (result.success) {
         res.json({ success: true, messageId: result.messageId, cost: result.cost });
       } else {
@@ -16665,7 +16667,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/prescription-ready", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { patientPhone, patientName, pharmacyName, pharmacyAddress, messageType = 'sms' } = req.body;
-      
+
       const result = await messagingService.sendPrescriptionReady(
         patientPhone,
         patientName,
@@ -16673,7 +16675,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         pharmacyAddress,
         messageType
       );
-      
+
       if (result.success) {
         res.json({ success: true, messageId: result.messageId, cost: result.cost });
       } else {
@@ -16688,7 +16690,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/emergency", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { patientPhone, patientName, urgentMessage, clinicPhone, messageType = 'sms' } = req.body;
-      
+
       const result = await messagingService.sendEmergencyNotification(
         patientPhone,
         patientName,
@@ -16696,7 +16698,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         clinicPhone,
         messageType
       );
-      
+
       if (result.success) {
         res.json({ success: true, messageId: result.messageId, cost: result.cost });
       } else {
@@ -16711,12 +16713,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/bulk", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const { recipients, message, messageType = 'sms' } = req.body;
-      
+
       const results = await messagingService.sendBulkMessages(recipients, message, messageType);
-      
+
       const successCount = results.filter(r => r.success).length;
       const failureCount = results.filter(r => !r.success).length;
-      
+
       res.json({
         success: true,
         totalSent: successCount,
@@ -16747,9 +16749,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const messageId = req.params.messageId;
       console.log(`🗑️ DELETE MESSAGE REQUEST - ID: ${messageId}, Org: ${req.tenant!.id}`);
-      
+
       const deleted = await storage.deleteMessage(messageId, req.tenant!.id);
-      
+
       if (deleted) {
         console.log(`✅ MESSAGE DELETED - ID: ${messageId}`);
         res.json({ success: true, message: "Message deleted successfully" });
@@ -16767,7 +16769,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/messaging/delivery-diagnostic", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       console.log('🔍 DELIVERY DIAGNOSTIC - Checking Twilio configuration and recent messages');
-      
+
       // 1. Check Twilio credentials configuration
       const twilioConfig = {
         hasAccountSID: !!process.env.TWILIO_ACCOUNT_SID,
@@ -16777,7 +16779,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         phoneNumberFormat: process.env.TWILIO_PHONE_NUMBER || 'missing',
         authenticationFailed: false // Will be checked below
       };
-      
+
       // 2. Get recent SMS/WhatsApp messages from database
       const allMessages = await storage.getRecentMessagesWithExternalIds(req.tenant!.id, 20);
       const recentMessages = allMessages
@@ -16785,16 +16787,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
         .slice(0, 10);
       console.log(`🔍 Found ${recentMessages.length} recent external messages to check`);
-      
+
       const messageStatusChecks = [];
-      
+
       // 3. Check delivery status for recent messages with Twilio Message SIDs
       for (const message of recentMessages.slice(0, 5)) { // Check last 5 messages
         if (message.externalMessageId) {
           try {
             console.log(`🔍 Checking status for Twilio SID: ${message.externalMessageId}`);
             const status = await messagingService.getMessageStatus(message.externalMessageId);
-            
+
             messageStatusChecks.push({
               messageId: message.id,
               twilioSid: message.externalMessageId,
@@ -16838,7 +16840,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           });
         }
       }
-      
+
       // 4. Analyze common issues from the user's list
       const diagnosticSummary = {
         credentialsValid: twilioConfig.hasAccountSID && twilioConfig.hasSIDFormat && twilioConfig.hasAuthToken && twilioConfig.hasPhoneNumber,
@@ -16849,7 +16851,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         unknownCount: messageStatusChecks.filter(m => m.twilioStatus === 'unknown' || m.twilioStatus === 'error').length,
         commonIssues: [] as string[]
       };
-      
+
       // Check for common issues
       const errorCodes = messageStatusChecks.map(m => m.errorCode).filter(Boolean);
       if (errorCodes.includes(21211)) {
@@ -16864,17 +16866,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (errorCodes.includes(20003)) {
         diagnosticSummary.commonIssues.push('Issue #4: Twilio authentication failed (Error 20003)');
       }
-      
+
       // Check for phone number format issues
       const phoneNumbers = messageStatusChecks.map(m => m.phoneNumber).filter(Boolean);
       const invalidFormats = phoneNumbers.filter(phone => !phone.startsWith('+') || phone.replace(/\D/g, '').length < 10);
       if (invalidFormats.length > 0) {
         diagnosticSummary.commonIssues.push(`Issue #1: ${invalidFormats.length} messages with incorrect phone number format`);
       }
-      
+
       // Check for stuck messages (sent but not delivered for >1 hour)
-      const stuckMessages = messageStatusChecks.filter(m => 
-        m.twilioStatus === 'sent' && 
+      const stuckMessages = messageStatusChecks.filter(m =>
+        m.twilioStatus === 'sent' &&
         new Date().getTime() - new Date(m.sentAt).getTime() > 3600000 // 1 hour
       );
       if (stuckMessages.length > 0) {
@@ -16893,7 +16895,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           "5. Monitor delivery status changes over time (some carriers have delays)"
         ]
       });
-      
+
     } catch (error) {
       console.error("Error running delivery diagnostic:", error);
       res.status(500).json({ error: "Failed to run delivery diagnostic" });
@@ -16918,18 +16920,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/test", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { phoneNumber, message, type = 'sms' } = req.body;
-      
+
       if (!phoneNumber || !message) {
         return res.status(400).json({ error: "Phone number and message are required" });
       }
-      
+
       const result = await messagingService.sendMessage({
         to: phoneNumber,
         message: message,
         type: type,
         priority: 'normal'
       });
-      
+
       res.json({
         success: result.success,
         messageId: result.messageId,
@@ -16967,10 +16969,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       console.log('📱 Fetching SMS messages for organization:', organizationId);
-      
+
       // Fetch messages with messageType = 'sms' for this organization (role-based filtered)
       const smsMessages = await storage.getSmsMessages(organizationId, req.user?.id, req.user?.role);
-      
+
       console.log(`📱 Found ${smsMessages.length} SMS messages`);
       res.json(smsMessages);
     } catch (error) {
@@ -17044,12 +17046,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/integrations/stripe/status", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { isStripeConfigured, getStripePublishableKey, testStripeConnection } = await import("./services/stripe-client");
-      
+
       const configured = isStripeConfigured();
       const publishableKey = getStripePublishableKey();
-      
+
       let connectionStatus: { connected: boolean; accountId?: string; error?: string } = { connected: false };
-      
+
       if (configured) {
         const testResult = await testStripeConnection();
         connectionStatus = {
@@ -17058,7 +17060,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           error: testResult.error,
         };
       }
-      
+
       res.json({
         configured,
         publishableKey: publishableKey ? `${publishableKey.substring(0, 20)}...` : null,
@@ -17076,10 +17078,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/integrations/stripe/test", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const { testStripeConnection, resetStripeClient } = await import("./services/stripe-client");
-      
+
       resetStripeClient();
       const result = await testStripeConnection();
-      
+
       res.json({
         success: result.success,
         accountId: result.accountId,
@@ -17088,9 +17090,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       });
     } catch (error: any) {
       console.error("Error testing Stripe connection:", error);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message || "Failed to test Stripe connection" 
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to test Stripe connection"
       });
     }
   });
@@ -17099,7 +17101,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/integrations/quickbooks/config", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const { clientId, clientSecret } = req.body;
-      
+
       if (!clientId || !clientSecret) {
         return res.status(400).json({ error: "Client ID and Client Secret are required" });
       }
@@ -17145,9 +17147,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
       }
 
-      res.json({ 
-        success: true, 
-        message: "QuickBooks configuration saved successfully" 
+      res.json({
+        success: true,
+        message: "QuickBooks configuration saved successfully"
       });
     } catch (error: any) {
       console.error("Error saving QuickBooks config:", error);
@@ -17159,7 +17161,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/integrations/quickbooks/status", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       const existing = await db.select()
         .from(schema.organizationIntegrations)
         .where(and(
@@ -17170,7 +17172,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       if (existing.length > 0) {
         const settings = existing[0].settings as any;
-        
+
         // Also check for active connection in quickbooksConnections table
         const activeConnection = await db.select()
           .from(quickbooksConnections)
@@ -17207,7 +17209,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/webhooks/quickbooks", express.raw({ type: 'application/json' }), async (req, res) => {
     try {
       console.log("[QuickBooks Webhook] Received webhook event");
-      
+
       const signature = req.headers['intuit-signature'] as string;
       const rawBody = req.body;
 
@@ -17217,7 +17219,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Verify signature against all configured orgs
       const verification = await verifySignatureForAnyOrg(rawBody, signature || '');
-      
+
       if (!verification.valid) {
         console.log("[QuickBooks Webhook] Invalid signature or no matching org found");
         // Still return 200 to prevent retries (QuickBooks may be testing)
@@ -17246,11 +17248,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/integrations/stripe/publishable-key", async (req: TenantRequest, res) => {
     try {
       const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
-      
+
       if (!publishableKey) {
         return res.status(404).json({ error: "Stripe publishable key not configured" });
       }
-      
+
       res.json({ publishableKey });
     } catch (error) {
       console.error("Error fetching Stripe publishable key:", error);
@@ -17261,24 +17263,24 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/integrations/stripe/payment-intent", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { createPaymentIntent } = await import("./services/stripe-client");
-      
+
       const schema = z.object({
         amount: z.number().positive(),
         currency: z.string().default('gbp'),
         metadata: z.record(z.string()).optional(),
       });
-      
+
       const { amount, currency, metadata } = schema.parse(req.body);
-      
+
       const result = await createPaymentIntent(amount, currency, {
         ...metadata,
         organizationId: String(req.tenant!.id),
       });
-      
+
       if ('error' in result) {
         return res.status(400).json({ error: result.error });
       }
-      
+
       res.json(result);
     } catch (error: any) {
       console.error("Error creating payment intent:", error);
@@ -17289,20 +17291,20 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/integrations/stripe/refund", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const { createRefund } = await import("./services/stripe-client");
-      
+
       const schema = z.object({
         paymentIntentId: z.string(),
         amount: z.number().positive().optional(),
       });
-      
+
       const { paymentIntentId, amount } = schema.parse(req.body);
-      
+
       const result = await createRefund(paymentIntentId, amount);
-      
+
       if ('error' in result) {
         return res.status(400).json({ error: result.error });
       }
-      
+
       res.json(result);
     } catch (error: any) {
       console.error("Error creating refund:", error);
@@ -17442,13 +17444,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
 
-    const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
-    console.log(
-      `[notifications] mark read request id=${notificationId} org=${organizationId} user=${userId} role=${req.user?.role}`,
-    );
-    const notification = isAdmin
-      ? await storage.markNotificationAsReadByOrganization(notificationId, organizationId)
-      : await storage.markNotificationAsRead(notificationId, userId, organizationId);
+      const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
+      console.log(
+        `[notifications] mark read request id=${notificationId} org=${organizationId} user=${userId} role=${req.user?.role}`,
+      );
+      const notification = isAdmin
+        ? await storage.markNotificationAsReadByOrganization(notificationId, organizationId)
+        : await storage.markNotificationAsRead(notificationId, userId, organizationId);
       if (!notification) {
         return res.status(404).json({ error: "Notification not found" });
       }
@@ -17466,13 +17468,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
 
-    const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
-    console.log(
-      `[notifications] dismiss request id=${notificationId} org=${organizationId} user=${userId} role=${req.user?.role}`,
-    );
-    const notification = isAdmin
-      ? await storage.markNotificationAsDismissedByOrganization(notificationId, organizationId)
-      : await storage.markNotificationAsDismissed(notificationId, userId, organizationId);
+      const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
+      console.log(
+        `[notifications] dismiss request id=${notificationId} org=${organizationId} user=${userId} role=${req.user?.role}`,
+      );
+      const notification = isAdmin
+        ? await storage.markNotificationAsDismissedByOrganization(notificationId, organizationId)
+        : await storage.markNotificationAsDismissed(notificationId, userId, organizationId);
 
       if (!notification) {
         return res.status(404).json({ error: "Notification not found" });
@@ -17490,12 +17492,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
 
-    const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
-    if (isAdmin) {
-      await storage.markAllNotificationsAsReadByOrganization(organizationId);
-    } else {
-      await storage.markAllNotificationsAsRead(userId, organizationId);
-    }
+      const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
+      if (isAdmin) {
+        await storage.markAllNotificationsAsReadByOrganization(organizationId);
+      } else {
+        await storage.markAllNotificationsAsRead(userId, organizationId);
+      }
       res.json({ success: true });
     } catch (error) {
       console.error("Error marking all notifications as read:", error);
@@ -17509,10 +17511,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
 
-    const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
-    const success = isAdmin
-      ? await storage.deleteNotificationByOrganization(notificationId, organizationId)
-      : await storage.deleteNotification(notificationId, userId, organizationId);
+      const isAdmin = req.user?.role?.toString().toLowerCase() === "admin";
+      const success = isAdmin
+        ? await storage.deleteNotificationByOrganization(notificationId, organizationId)
+        : await storage.deleteNotification(notificationId, userId, organizationId);
       if (!success) {
         return res.status(404).json({ error: "Notification not found" });
       }
@@ -17633,7 +17635,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const { message, conversationHistory = [] } = req.body;
-      
+
       if (!message) {
         return res.status(400).json({ error: "Message is required" });
       }
@@ -17666,7 +17668,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           }
         }
       };
-      
+
       // Use OpenAI-powered comprehensive chatbot if available, fallback to local NLP
       let nlpResult;
       try {
@@ -17675,7 +17677,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.log('OpenAI chatbot failed, falling back to local NLP:', error);
         nlpResult = await (aiService as any).processWithLocalNLP(message, conversationContext);
       }
-      
+
       // Convert result to agent response format
       const aiResponse = {
         intent: nlpResult.intent,
@@ -17698,7 +17700,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           actionDescription: `Appointment booking processed`,
           data: { processed: true }
         };
-        responseData = { 
+        responseData = {
           appointmentBooked: true,
           processed: true
         };
@@ -17707,33 +17709,33 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         try {
           let prescriptions: any[] = [];
           const prescriptionData = aiResponse.prescriptionData;
-          
+
           if (prescriptionData.patient_name) {
             // Search by patient name
             const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
-            const matchingPatients = patients.filter(p => 
+            const matchingPatients = patients.filter(p =>
               `${p.firstName} ${p.lastName}`.toLowerCase().includes(prescriptionData.patient_name.toLowerCase()) ||
               p.firstName.toLowerCase().includes(prescriptionData.patient_name.toLowerCase()) ||
               p.lastName.toLowerCase().includes(prescriptionData.patient_name.toLowerCase())
             );
-            
+
             if (matchingPatients.length > 0) {
               const allPrescriptions = await storage.getPrescriptionsByOrganization(req.tenant!.id);
-              prescriptions = allPrescriptions.filter(p => 
+              prescriptions = allPrescriptions.filter(p =>
                 matchingPatients.some(patient => patient.id === p.patientId)
               );
             }
           } else if (prescriptionData.medication_name) {
             // Search by medication name
             const allPrescriptions = await storage.getPrescriptionsByOrganization(req.tenant!.id);
-            prescriptions = allPrescriptions.filter(p => 
+            prescriptions = allPrescriptions.filter(p =>
               p.medications?.some((med: any) => med.name?.toLowerCase().includes(prescriptionData.medication_name.toLowerCase())) ||
               p.interactions?.some((int: any) => int.toLowerCase().includes(prescriptionData.medication_name.toLowerCase()))
             );
           } else {
             // General prescription search based on search query
             const allPrescriptions = await storage.getPrescriptionsByOrganization(req.tenant!.id);
-            prescriptions = allPrescriptions.filter(p => 
+            prescriptions = allPrescriptions.filter(p =>
               p.medications?.some((med: any) => med.name?.toLowerCase().includes(prescriptionData.search_query.toLowerCase())) ||
               p.interactions?.some((int: any) => int.toLowerCase().includes(prescriptionData.search_query.toLowerCase()))
             );
@@ -17749,7 +17751,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             };
           });
 
-          responseData = { 
+          responseData = {
             prescriptions: prescriptionsWithNames,
             searchQuery: prescriptionData.search_query,
             patientName: prescriptionData.patient_name,
@@ -17774,7 +17776,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
     } catch (error) {
       console.error("AI Agent error:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to process AI request",
         message: "I apologize, but I'm having trouble processing your request right now. Please try again."
       });
@@ -17867,7 +17869,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const deviceId = req.params.id;
-      
+
       // Simulate device sync process
       const syncResult = {
         deviceId,
@@ -18083,11 +18085,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       // Get real patients from database and create consent records for them
       const realPatients = await storage.getPatientsByOrganization(req.tenant!.id);
-      
+
       const realPatientConsents = realPatients.map(patient => {
         // Check if we have existing consent data for this patient
         const existingConsent = patientConsents.find(consent => consent.patientId === patient.patientId);
-        
+
         if (existingConsent) {
           // Update with real patient data
           return {
@@ -18117,7 +18119,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           };
         }
       });
-      
+
       res.json(realPatientConsents);
     } catch (error) {
       console.error("Error fetching patient consent data:", error);
@@ -18129,30 +18131,30 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const { patientId } = req.params;
       const consentData = req.body;
-      
+
       console.log(`Updating consent for patient ${patientId}:`, consentData);
       console.log(`Organization ID: ${req.organizationId}`);
-      
+
       // Find and update the consent record
       const consentIndex = patientConsents.findIndex(consent => consent.patientId === patientId);
-      
+
       if (consentIndex === -1) {
         // Patient consent record doesn't exist - create it
         // First get the patient data from storage
         console.log(`Looking up patient ${patientId} for organization ${req.organizationId}`);
-        
+
         try {
           const patient = await storage.getPatientByPatientId(patientId, req.tenant!.id);
           console.log(`Patient lookup result:`, patient ? 'Found' : 'Not found');
           if (patient) {
             console.log(`Patient details: ${patient.firstName} ${patient.lastName}`);
           }
-          
+
           if (!patient) {
             console.log(`Patient ${patientId} not found in organization ${req.organizationId}`);
             return res.status(404).json({ error: "Patient not found" });
           }
-          
+
           const newConsentRecord = {
             id: `consent_${patientId}`,
             patientId: patientId,
@@ -18172,7 +18174,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             lastUpdated: new Date().toISOString(),
             ...consentData
           };
-          
+
           // Handle consent status specific updates for new record
           if (consentData.consentStatus === 'consented') {
             newConsentRecord.deviceAccess = true;
@@ -18185,26 +18187,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               sleep: true
             };
           }
-          
+
           patientConsents.push(newConsentRecord);
           console.log(`Created new consent record for patient ${patientId}`);
-          
+
           res.json({ success: true, consent: newConsentRecord });
           return;
-          
+
         } catch (storageError) {
           console.error(`Storage error when looking up patient ${patientId}:`, storageError);
           return res.status(500).json({ error: "Failed to lookup patient" });
         }
       }
-      
+
       // Update the consent record with new data
       patientConsents[consentIndex] = {
         ...patientConsents[consentIndex],
         ...consentData,
         lastUpdated: new Date().toISOString()
       };
-      
+
       // Handle consent status specific updates
       if (consentData.consentStatus === 'consented') {
         patientConsents[consentIndex].deviceAccess = true;
@@ -18227,7 +18229,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           sleep: false
         };
       }
-      
+
       res.json({
         success: true,
         message: "Patient consent updated successfully",
@@ -18251,9 +18253,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Get voice notes from database storage
       const notes = await storage.getVoiceNotesByOrganization(orgId);
-      
+
       console.log(`[GET-VOICE-NOTES] Found ${notes.length} voice notes for orgId: ${orgId}`);
-      
+
       // Removed sample note creation - it was causing deleted notes to reappear
       // If you need sample data, create it manually or through the UI
 
@@ -18272,15 +18274,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Handle voice note creation with patient data
       const { patientId, type, transcript, duration, confidence } = req.body;
-      
 
-      
+
+
       // Get patient info to associate with the note
       const patientIdNum = parseInt(patientId);
       if (isNaN(patientIdNum)) {
         return res.status(400).json({ error: "Invalid patient ID" });
       }
-      
+
       const patient = await storage.getPatient(patientIdNum, req.tenant!.id);
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
@@ -18316,7 +18318,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       console.log(`🔄 PUT request received for voice note: ${req.params.id}`);
       console.log(`🔄 Request body:`, req.body);
-      
+
       if (!req.user) {
         console.log("❌ User not authenticated");
         return res.status(401).json({ error: "User not authenticated" });
@@ -18350,7 +18352,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       console.log(`✅ Voice note updated successfully: ${id}`);
       console.log(`✅ Updated data:`, updatedNote);
-      
+
       res.setHeader('Content-Type', 'application/json');
       return res.status(200).json(updatedNote);
     } catch (error) {
@@ -18369,7 +18371,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const noteId = req.params.id;
       const orgId = req.tenant!.id;
       console.log(`[DELETE-VOICE-NOTE] DELETE request for noteId: ${noteId}, orgId: ${orgId}`);
-      
+
       // Check if note exists before deletion
       const existingNote = await storage.getVoiceNote(noteId, orgId);
       if (!existingNote) {
@@ -18385,27 +18387,27 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Delete the note from database
       const deleted = await storage.deleteVoiceNote(noteId, orgId);
-      
+
       console.log(`[DELETE-VOICE-NOTE] Deletion result: ${deleted ? 'SUCCESS' : 'FAILED'}`);
-      
+
       if (!deleted) {
         console.error(`[DELETE-VOICE-NOTE] Deletion returned false. Note ID: ${noteId}, Org ID: ${orgId}`);
         return res.status(404).json({ error: "Voice note not found or could not be deleted" });
       }
-      
+
       // Verify deletion by trying to fetch the note again
       const verifyNote = await storage.getVoiceNote(noteId, orgId);
       if (verifyNote) {
         console.error(`[DELETE-VOICE-NOTE] WARNING: Note still exists after deletion! Note ID: ${noteId}`);
         return res.status(500).json({ error: "Note deletion failed - note still exists" });
       }
-      
+
       console.log(`[DELETE-VOICE-NOTE] Successfully deleted and verified note: ${noteId}`);
-      
-      res.status(200).json({ 
+
+      res.status(200).json({
         success: true,
-        message: "Voice note deleted successfully", 
-        deletedNoteId: noteId 
+        message: "Voice note deleted successfully",
+        deletedNoteId: noteId
       });
     } catch (error) {
       console.error("Error deleting voice note:", error);
@@ -18445,13 +18447,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       // Get photos from database with proper tenant filtering
       const photos = await storage.getClinicalPhotosByOrganization(req.tenant!.id);
-      
+
       // Transform database format to frontend format with patient names
       const transformedPhotos = await Promise.all(photos.map(async photo => {
         // Look up patient name using patientId
         const patient = await storage.getPatient(photo.patientId, req.tenant!.id);
         const patientName = patient ? `${patient.firstName} ${patient.lastName}` : 'Unknown Patient';
-        
+
         return {
           id: photo.id.toString(),
           patientId: photo.patientId.toString(),
@@ -18482,7 +18484,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const { patientId, type, description } = req.body;
       const uploadedFile = req.file;
-      
+
       if (!uploadedFile) {
         return res.status(400).json({ error: "No photo file provided" });
       }
@@ -18495,11 +18497,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Create the filename using patient ID and wound.png naming convention
       const filename = `${patientId}wound.png`;
       const filePath = path.join('uploads', 'wound_assessment', filename);
-      
+
       // Ensure the wound_assessment directory exists
       const dir = path.join('uploads', 'wound_assessment');
       await fse.ensureDir(dir);
-      
+
       // Move the uploaded file to the correct location with the proper name
       await fse.move(uploadedFile.path, filePath, { overwrite: true });
 
@@ -18556,7 +18558,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Check and ensure the VoiceNotes directory exists
       const dir = path.join('uploads', 'VoiceNotes');
       await fse.ensureDir(dir);
-      
+
       console.log(`📁 VoiceNotes directory checked/created: ${dir}`);
 
       res.status(200).json({
@@ -18578,7 +18580,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const { patientId, noteId } = req.body;
       const uploadedFile = req.file;
-      
+
       if (!uploadedFile) {
         return res.status(400).json({ error: "No audio file provided" });
       }
@@ -18595,11 +18597,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Create the filename using patient ID and voicenote.mp4 naming convention as requested
       const filename = `${patientId}_voicenote.mp4`;
       const filePath = path.join('uploads', 'VoiceNotes', filename);
-      
+
       // Ensure the VoiceNotes directory exists
       const dir = path.join('uploads', 'VoiceNotes');
       await fse.ensureDir(dir);
-      
+
       // Move the uploaded file to the correct location with the proper name
       await fse.move(uploadedFile.path, filePath, { overwrite: true });
 
@@ -18627,7 +18629,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const photoId = parseInt(req.params.id);
-      
+
       if (isNaN(photoId)) {
         return res.status(400).json({ error: "Invalid photo ID" });
       }
@@ -18635,14 +18637,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Get the photo first to check if it exists and belongs to the organization
       const photos = await storage.getClinicalPhotosByOrganization(req.tenant!.id);
       const photo = photos.find(p => p.id === photoId);
-      
+
       if (!photo) {
         return res.status(404).json({ error: "Photo not found" });
       }
 
       // Delete the photo from database
       const deleted = await storage.deleteClinicalPhoto(photoId, req.tenant!.id);
-      
+
       if (!deleted) {
         return res.status(500).json({ error: "Failed to delete photo from database" });
       }
@@ -18673,14 +18675,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/webhooks/twilio/status", express.raw({ type: 'application/x-www-form-urlencoded' }), async (req, res) => {
     try {
       console.log('📱 Twilio webhook received:', req.body.toString());
-      
+
       // Parse form data from Twilio
       const params = new URLSearchParams(req.body.toString());
       const messageId = params.get('MessageSid');
       const messageStatus = params.get('MessageStatus');
       const errorCode = params.get('ErrorCode');
       const errorMessage = params.get('ErrorMessage');
-      
+
       console.log('📱 Twilio status update:', {
         messageId,
         messageStatus,
@@ -18705,12 +18707,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/webhooks/twilio/inbound", express.urlencoded({ extended: true }), async (req, res) => {
     try {
       console.log('📨 Twilio inbound SMS received:', req.body);
-      
+
       const fromNumber = req.body.From;
       const toNumber = req.body.To;
       const messageBody = req.body.Body;
       const messageSid = req.body.MessageSid;
-      
+
       console.log('📨 Inbound SMS details:', {
         from: fromNumber,
         to: toNumber,
@@ -18732,18 +18734,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         normalizedPhone.replace(/^0/, '44'),
         `+${normalizedPhone.replace(/^0/, '44')}`
       ];
-      
+
       console.log('🔍 Looking up patient with phone variants:', phoneVariants);
-      
+
       // Find patient by phone number across all organizations
       const patient = await storage.findPatientByPhone(phoneVariants);
-      
+
       if (patient) {
         console.log(`✅ Found patient: ${patient.firstName} ${patient.lastName} (ID: ${patient.id}, Org: ${patient.organizationId})`);
-        
+
         // Find a system user or admin for this organization to use as sentBy
         const adminUser = await storage.getOrganizationAdmin(patient.organizationId);
-        
+
         if (adminUser) {
           // Create inbound communication record
           const communication = await storage.createPatientCommunication({
@@ -18761,7 +18763,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               method: 'inbound_sms'
             } as any
           });
-          
+
           console.log(`✅ Inbound SMS saved to communication history (ID: ${communication.id})`);
         } else {
           console.warn('⚠️ No admin user found for organization, cannot save inbound message');
@@ -18783,7 +18785,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/messaging/status/:messageId", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const messageId = req.params.messageId;
-      
+
       // First check database for cached status
       const dbMessage = await storage.getMessageByExternalId(messageId, req.tenant!.id);
       if (dbMessage) {
@@ -18797,7 +18799,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // If not in database, query Twilio directly
       const twilioStatus = await messagingService.getMessageStatus(messageId);
-      
+
       if (twilioStatus) {
         res.json({
           messageId,
@@ -18822,13 +18824,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/messaging/update-delivery-status", authMiddleware, async (req: TenantRequest, res) => {
     try {
       console.log('🔄 Manual delivery status update requested');
-      
+
       // Get all pending messages for this organization
       const pendingMessages = await storage.getPendingMessages(req.tenant!.id);
       console.log(`📱 Found ${pendingMessages.length} pending messages to update`);
-      
+
       const updateResults = [];
-      
+
       for (const message of pendingMessages) {
         try {
           // For messages without external ID, mark as failed to send
@@ -18873,13 +18875,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           });
         }
       }
-      
+
       res.json({
         success: true,
         updatedCount: updateResults.length,
         results: updateResults
       });
-      
+
     } catch (error) {
       console.error("Error updating delivery status:", error);
       res.status(500).json({ error: "Failed to update delivery status" });
@@ -18894,7 +18896,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const messageId = req.params.messageId;
-      
+
       // Get original message from database
       const originalMessage = await storage.getMessage(messageId, req.tenant!.id);
       if (!originalMessage || !originalMessage.phoneNumber) {
@@ -18920,7 +18922,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           externalMessageId: result.messageId,
           updatedAt: new Date()
         });
-        
+
         res.json({
           success: true,
           message: "Message retry initiated",
@@ -18944,7 +18946,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Get recent messages with external IDs that need status updates
       const recentMessages = await storage.getRecentMessagesWithExternalIds(req.tenant!.id, 10);
       const updates = [];
-      
+
       for (const message of recentMessages) {
         if (message.externalMessageId && (message.deliveryStatus === 'sent' || message.deliveryStatus === 'queued')) {
           try {
@@ -18966,7 +18968,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           }
         }
       }
-      
+
       res.json({
         success: true,
         messagesChecked: recentMessages.length,
@@ -18983,7 +18985,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/messaging/twilio/status", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const accountInfo = await messagingService.getAccountInfo();
-      
+
       if (accountInfo) {
         res.json({
           configured: true,
@@ -19000,9 +19002,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
     } catch (error) {
       console.error("Error checking Twilio status:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         configured: false,
-        error: "Failed to verify Twilio configuration" 
+        error: "Failed to verify Twilio configuration"
       });
     }
   });
@@ -19012,7 +19014,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const accountInfo = await messagingService.getAccountInfo();
-      
+
       // Get organization-specific Twilio settings from database
       const [orgSettings] = await db.select()
         .from(organizationIntegrations)
@@ -19020,9 +19022,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'twilio')
         ));
-      
+
       const settings = orgSettings?.settings as { smsEnabled?: boolean; whatsappEnabled?: boolean; whatsappNumber?: string } || {};
-      
+
       if (accountInfo) {
         res.json({
           configured: true,
@@ -19044,11 +19046,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
     } catch (error) {
       console.error("Error checking Twilio integration status:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         configured: false,
         smsEnabled: false,
         whatsappEnabled: false,
-        error: "Failed to verify Twilio configuration" 
+        error: "Failed to verify Twilio configuration"
       });
     }
   });
@@ -19058,7 +19060,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { accountSid, authToken, phoneNumber, whatsappNumber, smsEnabled, whatsappEnabled } = req.body;
-      
+
       // Check if integration record exists
       const [existing] = await db.select()
         .from(organizationIntegrations)
@@ -19066,7 +19068,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'twilio')
         ));
-      
+
       const currentSettings = (existing?.settings as Record<string, any>) || {};
       const newSettings = {
         ...currentSettings,
@@ -19076,7 +19078,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         configuredAt: new Date().toISOString(),
         configuredBy: req.user!.id
       };
-      
+
       if (existing) {
         await db.update(organizationIntegrations)
           .set({
@@ -19094,12 +19096,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           settings: newSettings
         });
       }
-      
+
       // Note: For security, accountSid, authToken, and phoneNumber should be set via environment secrets
       // This endpoint primarily handles WhatsApp-specific settings stored in the database
-      
-      res.json({ 
-        success: true, 
+
+      res.json({
+        success: true,
         message: "Twilio WhatsApp configuration saved. Note: Core credentials (Account SID, Auth Token, Phone Number) should be set via environment secrets for security.",
         whatsappEnabled: newSettings.whatsappEnabled,
         whatsappNumber: newSettings.whatsappNumber
@@ -19114,7 +19116,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/integrations/twilio/test", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const accountInfo = await messagingService.getAccountInfo();
-      
+
       if (accountInfo) {
         res.json({
           success: true,
@@ -19130,9 +19132,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
     } catch (error: any) {
       console.error("Error testing Twilio connection:", error);
-      res.json({ 
+      res.json({
         success: false,
-        error: error.message || "Failed to test Twilio connection" 
+        error: error.message || "Failed to test Twilio connection"
       });
     }
   });
@@ -19142,7 +19144,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { enabled } = req.body;
-      
+
       // Get or create integration record
       const [existing] = await db.select()
         .from(organizationIntegrations)
@@ -19150,7 +19152,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'twilio')
         ));
-      
+
       if (existing) {
         const currentSettings = (existing.settings as Record<string, any>) || {};
         await db.update(organizationIntegrations)
@@ -19168,7 +19170,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           settings: { smsEnabled: enabled }
         });
       }
-      
+
       res.json({ success: true, enabled });
     } catch (error) {
       console.error("Error toggling SMS:", error);
@@ -19181,7 +19183,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { enabled } = req.body;
-      
+
       // Get or create integration record
       const [existing] = await db.select()
         .from(organizationIntegrations)
@@ -19189,7 +19191,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'twilio')
         ));
-      
+
       if (existing) {
         const currentSettings = (existing.settings as Record<string, any>) || {};
         await db.update(organizationIntegrations)
@@ -19207,7 +19209,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           settings: { whatsappEnabled: enabled }
         });
       }
-      
+
       res.json({ success: true, enabled });
     } catch (error) {
       console.error("Error toggling WhatsApp:", error);
@@ -19219,23 +19221,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/integrations/nhs/status", authMiddleware, requireRole(["admin"]), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       const [integration] = await db.select()
         .from(organizationIntegrations)
         .where(and(
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'nhs_digital')
         ));
-      
+
       if (!integration) {
         return res.json({
           configured: false,
           isConfigured: false
         });
       }
-      
+
       const settings = (integration.settings as Record<string, any>) || {};
-      
+
       res.json({
         configured: integration.isConfigured,
         isConfigured: integration.isConfigured,
@@ -19258,16 +19260,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { asid, odsCode, apiKey, privateKey, pdsEnabled, epsEnabled, scrEnabled, nhsLoginEnabled, environment } = req.body;
-      
+
       const [existing] = await db.select()
         .from(organizationIntegrations)
         .where(and(
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'nhs_digital')
         ));
-      
+
       const newSettings: Record<string, any> = existing?.settings as Record<string, any> || {};
-      
+
       if (asid) newSettings.asid = asid;
       if (odsCode) newSettings.odsCode = odsCode;
       if (apiKey) newSettings.apiKey = apiKey;
@@ -19277,9 +19279,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (typeof scrEnabled === 'boolean') newSettings.scrEnabled = scrEnabled;
       if (typeof nhsLoginEnabled === 'boolean') newSettings.nhsLoginEnabled = nhsLoginEnabled;
       if (environment) newSettings.environment = environment;
-      
+
       const isConfigured = !!(newSettings.asid && newSettings.odsCode && newSettings.apiKey);
-      
+
       if (existing) {
         await db.update(organizationIntegrations)
           .set({
@@ -19297,7 +19299,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           settings: newSettings
         });
       }
-      
+
       res.json({ success: true, message: "NHS Digital configuration saved" });
     } catch (error) {
       console.error("Error configuring NHS:", error);
@@ -19308,28 +19310,28 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/integrations/nhs/test", authMiddleware, requireRole(["admin"]), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       const [integration] = await db.select()
         .from(organizationIntegrations)
         .where(and(
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'nhs_digital')
         ));
-      
+
       if (!integration || !integration.isConfigured) {
         return res.json({ success: false, error: "NHS Digital is not configured" });
       }
-      
+
       const settings = (integration.settings as Record<string, any>) || {};
       const testResult = `Connection tested successfully at ${new Date().toISOString()}`;
-      
+
       await db.update(organizationIntegrations)
         .set({
           settings: { ...settings, lastTestResult: testResult },
           updatedAt: new Date()
         })
         .where(eq(organizationIntegrations.id, integration.id));
-      
+
       res.json({ success: true, message: "NHS Digital Spine connection verified" });
     } catch (error) {
       console.error("Error testing NHS connection:", error);
@@ -19341,14 +19343,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { enabled } = req.body;
-      
+
       const [existing] = await db.select()
         .from(organizationIntegrations)
         .where(and(
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'nhs_digital')
         ));
-      
+
       if (existing) {
         const currentSettings = (existing.settings as Record<string, any>) || {};
         await db.update(organizationIntegrations)
@@ -19358,7 +19360,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           })
           .where(eq(organizationIntegrations.id, existing.id));
       }
-      
+
       res.json({ success: true, enabled });
     } catch (error) {
       console.error("Error toggling PDS:", error);
@@ -19370,14 +19372,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { enabled } = req.body;
-      
+
       const [existing] = await db.select()
         .from(organizationIntegrations)
         .where(and(
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'nhs_digital')
         ));
-      
+
       if (existing) {
         const currentSettings = (existing.settings as Record<string, any>) || {};
         await db.update(organizationIntegrations)
@@ -19387,7 +19389,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           })
           .where(eq(organizationIntegrations.id, existing.id));
       }
-      
+
       res.json({ success: true, enabled });
     } catch (error) {
       console.error("Error toggling EPS:", error);
@@ -19399,14 +19401,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const organizationId = req.tenant!.id;
       const { enabled } = req.body;
-      
+
       const [existing] = await db.select()
         .from(organizationIntegrations)
         .where(and(
           eq(organizationIntegrations.organizationId, organizationId),
           eq(organizationIntegrations.integrationType, 'nhs_digital')
         ));
-      
+
       if (existing) {
         const currentSettings = (existing.settings as Record<string, any>) || {};
         await db.update(organizationIntegrations)
@@ -19416,7 +19418,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           })
           .where(eq(organizationIntegrations.id, existing.id));
       }
-      
+
       res.json({ success: true, enabled });
     } catch (error) {
       console.error("Error toggling SCR:", error);
@@ -19655,7 +19657,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const timestamp = Date.now();
       const imageFilename = `${patientId}_${timestamp}.png`;
       const imagePath = path.join(baseDir, imageFilename);
-      
+
       // Convert base64 image data to buffer
       const base64Data = imageUploadData.imageData.replace(/^data:image\/\w+;base64,/, '');
       const imageBuffer = Buffer.from(base64Data, 'base64');
@@ -19663,7 +19665,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Create new image with timestamp
       await fs.promises.writeFile(imagePath, imageBuffer);
       console.log(`💾 Created new anatomical analysis image for patient ${patientId} at: ${imagePath}`);
-      
+
       res.json({
         message: "Anatomical analysis image created successfully",
         path: imagePath,
@@ -19778,7 +19780,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const organizationId = req.tenant!.id;
       const baseDir = await ensureAnatomicalAnalysisFilesDirectory(organizationId, patientId);
-      
+
       console.log(`[ANATOMICAL FILES] Checking directory: ${baseDir}`);
 
       const filenames = await fs.promises.readdir(baseDir);
@@ -19800,7 +19802,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           };
         }),
       );
-      
+
       // Filter out null values (directories)
       const validFiles = fileDetails.filter((file): file is NonNullable<typeof file> => file !== null);
 
@@ -19881,11 +19883,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/create-subscription-payment-intent", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { planId, amount } = req.body;
-      
+
       // Create a properly formatted demo client secret that Stripe will accept
       const timestamp = Date.now().toString();
       const demoClientSecret = `pi_${timestamp.slice(-10)}_secret_demo${planId}${amount}`;
-      
+
       res.json({
         clientSecret: demoClientSecret,
         paymentIntentId: `pi_${timestamp.slice(-10)}`,
@@ -19902,15 +19904,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const { planId, paymentMethod } = req.body;
       const organizationId = req.organizationId || 1;
-      
+
       // Update organization subscription in database
       await storage.updateSubscription(organizationId, {
         plan: planId,
         status: 'active'
       });
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: `Successfully upgraded to ${planId} plan`,
         planId,
         paymentMethod
@@ -20108,10 +20110,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     const existing = await storage.getSaaSSubscriptionByStripeId(stripeSubscription.id);
     if (existing) {
       await storage.updateSaaSSubscription(existing.id, payload);
+      // Ensure organization status is active
+      await storage.updateOrganizationStatus(organizationId, "active");
       return existing;
     }
 
-    return storage.createSaaSSubscription(payload);
+    const created = await storage.createSaaSSubscription(payload);
+    await storage.updateOrganizationStatus(organizationId, "active");
+    return created;
   }
 
   async function handleInvoiceSuccess(invoice: Stripe.Invoice) {
@@ -20164,6 +20170,48 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+
+    // Also create formal SaaS Invoice record
+    try {
+      const lineItems = invoice.lines.data.map(line => ({
+        description: line.description || "Subscription Service",
+        quantity: line.quantity || 1,
+        rate: line.amount / 100,
+        amount: line.amount / 100
+      }));
+
+      const formalInvoice = await storage.createInvoice({
+        organizationId: subscription.organizationId,
+        subscriptionId: subscription.id,
+        invoiceNumber: invoice.number || `INV-${invoice.id}`,
+        amount: ((invoice.total || 0) / 100).toFixed(2),
+        currency: (invoice.currency || "gbp").toUpperCase(),
+        status: "paid",
+        issueDate: new Date(),
+        dueDate: invoice.due_date ? new Date(invoice.due_date * 1000) : new Date(),
+        periodStart,
+        periodEnd,
+        lineItems,
+        notes: "Thank you for your business."
+      });
+
+      // Send Invoice Email
+      const org = await storage.getOrganization(subscription.organizationId);
+      if (org && org.email) {
+        console.log(`[STRIPE] Sending invoice email to ${org.email}`);
+        await emailService.sendSaaSInvoiceEmail(
+          org.email,
+          org.name,
+          formalInvoice.invoiceNumber,
+          formalInvoice.amount,
+          formalInvoice.currency,
+          formalInvoice.dueDate.toLocaleDateString(),
+          lineItems
+        );
+      }
+    } catch (invoiceErr) {
+      console.error("[STRIPE] Failed to create formal invoice or send email:", invoiceErr);
+    }
   }
 
   async function handleInvoiceFailure(invoice: Stripe.Invoice) {
@@ -20349,9 +20397,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/website/book-appointment", async (req, res) => {
     try {
       const { patientName, patientEmail, patientPhone, appointmentType, preferredDate, preferredTime, notes } = req.body;
-      
+
       console.log("Website appointment booking request:", req.body);
-      
+
       // For demo purposes, we'll use the default tenant 'cura'
       const tenant = await storage.getOrganizationBySubdomain('cura');
       if (!tenant) {
@@ -20360,13 +20408,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Check if patient exists by email, if not create a new one
       let patient = await storage.getPatientByEmail(patientEmail, tenant.id);
-      
+
       if (!patient) {
         // Extract first and last name from full name
         const nameParts = patientName.trim().split(' ');
         const firstName = nameParts[0] || patientName;
         const lastName = nameParts.slice(1).join(' ') || '';
-        
+
         // Create new patient
         const patientData = {
           firstName,
@@ -20386,7 +20434,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             medications: []
           }
         };
-        
+
         patient = await storage.createPatient(patientData);
         console.log("Created new patient:", patient);
       }
@@ -20396,13 +20444,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (providers.length === 0) {
         return res.status(400).json({ error: "No doctors available" });
       }
-      
+
       // Use first available doctor
       const provider = providers[0];
-      
+
       // Create appointment
       const scheduledDateTime = new Date(`${preferredDate}T${preferredTime || '09:00'}`);
-      
+
       const appointmentData = {
         patientId: patient.id,
         providerId: provider.id,
@@ -20416,9 +20464,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         location: 'Main Clinic',
         isVirtual: appointmentType === 'virtual' || appointmentType === 'telemedicine'
       };
-      
+
       const appointment = await storage.createAppointment(appointmentData);
-      
+
       // Send confirmation email
       try {
         // TODO: Implement sendAppointmentConfirmation method in EmailService
@@ -20426,7 +20474,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       } catch (emailError) {
         console.error("Failed to send confirmation email:", emailError);
       }
-      
+
       res.status(201).json({
         success: true,
         message: "Appointment booked successfully",
@@ -20439,7 +20487,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           status: 'pending'
         }
       });
-      
+
     } catch (error) {
       console.error("Website appointment booking error:", error);
       res.status(500).json({ error: "Failed to book appointment" });
@@ -20449,9 +20497,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/website/request-prescription", async (req, res) => {
     try {
       const { patientName, patientEmail, patientPhone, medication, dosage, reason, currentMedications, allergies } = req.body;
-      
+
       console.log("Website prescription request:", req.body);
-      
+
       // For demo purposes, we'll use the default tenant 'cura'
       const tenant = await storage.getOrganizationBySubdomain('cura');
       if (!tenant) {
@@ -20460,13 +20508,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Check if patient exists by email, if not create a new one
       let patient = await storage.getPatientByEmail(patientEmail, tenant.id);
-      
+
       if (!patient) {
         // Extract first and last name from full name
         const nameParts = patientName.trim().split(' ');
         const firstName = nameParts[0] || patientName;
         const lastName = nameParts.slice(1).join(' ') || '';
-        
+
         // Create new patient
         const patientData = {
           firstName,
@@ -20501,7 +20549,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           communicationPreferences: null,
           isActive: true
         };
-        
+
         patient = await storage.createPatient(patientData);
         console.log("Created new patient for prescription:", patient);
       }
@@ -20511,10 +20559,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (providers.length === 0) {
         return res.status(400).json({ error: "No doctors available" });
       }
-      
+
       // Use first available doctor
       const provider = providers[0];
-      
+
       // Create prescription request (pending status)
       const prescriptionData = {
         patientId: patient.id,
@@ -20527,9 +20575,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         instructions: `Website prescription request: ${reason}\n\nCurrent medications: ${currentMedications || 'None'}\nAllergies: ${allergies || 'None'}`,
         status: 'pending'
       };
-      
+
       const prescription = await storage.createPrescription(prescriptionData);
-      
+
       // Send confirmation email
       try {
         // TODO: Implement sendPrescriptionRequestConfirmation method in EmailService
@@ -20537,7 +20585,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       } catch (emailError) {
         console.error("Failed to send prescription confirmation email:", emailError);
       }
-      
+
       res.status(201).json({
         success: true,
         message: "Prescription request submitted successfully",
@@ -20549,7 +20597,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           requestDate: new Date().toLocaleDateString()
         }
       });
-      
+
     } catch (error) {
       console.error("Website prescription request error:", error);
       res.status(500).json({ error: "Failed to submit prescription request" });
@@ -20559,15 +20607,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/website/available-slots", async (req, res) => {
     try {
       const { date } = req.query;
-      
+
       // For demo purposes, return available time slots
       const selectedDate = new Date(date as string);
       const today = new Date();
-      
+
       if (selectedDate < today) {
         return res.status(400).json({ error: "Cannot book appointments in the past" });
       }
-      
+
       // Generate available slots (9 AM to 5 PM, excluding lunch 12-1 PM)
       const slots = [];
       for (let hour = 9; hour < 17; hour++) {
@@ -20578,9 +20626,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           }
         }
       }
-      
+
       res.json({ availableSlots: slots });
-      
+
     } catch (error) {
       console.error("Error fetching available slots:", error);
       res.status(500).json({ error: "Failed to fetch available slots" });
@@ -20592,12 +20640,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     if (document.isTemplate && document.content) {
       // Check if content is a filename (new templates) or actual content (legacy templates)
       const isFilename = document.content.endsWith('.json');
-      
+
       if (isFilename) {
         const userId = document.userId;
         const filename = document.content;
         const filePath = path.join(process.cwd(), 'uploads', 'Forms', String(organizationId), String(userId), filename);
-        
+
         if (fs.existsSync(filePath)) {
           try {
             const fileContent = await fs.promises.readFile(filePath, 'utf8');
@@ -20628,7 +20676,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const isTemplatesOnly = req.query.templates === 'true';
       const isDoctor = req.user.role && ['doctor', 'nurse', 'dentist', 'dental_nurse', 'phlebotomist', 'aesthetician', 'optician', 'paramedic', 'physiotherapist', 'sample_taker'].includes(req.user.role.toLowerCase());
-      
+
       if (isTemplatesOnly) {
         // Fetch only templates - doctors see only their own, others see all
         let templates;
@@ -20707,22 +20755,22 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (documentData.isTemplate) {
         const organizationId = req.tenant!.id;
         const userId = req.user.id;
-        
+
         // Create directory structure: uploads/Forms/{organization_id}/{user_id}/
         const formsDir = path.join(process.cwd(), 'uploads', 'Forms', String(organizationId), String(userId));
-        
+
         // Create directory if it doesn't exist
         if (!fs.existsSync(formsDir)) {
           fs.mkdirSync(formsDir, { recursive: true });
           console.log('📁 Created Forms directory:', formsDir);
         }
-        
+
         // Generate unique filename
         const timestamp = Date.now();
         const sanitizedName = documentData.name.replace(/[^a-z0-9_-]/gi, '_');
         const filename = `${sanitizedName}_${timestamp}.json`;
         const filePath = path.join(formsDir, filename);
-        
+
         // Prepare template data for file system
         const templateFileData = {
           name: documentData.name,
@@ -20733,11 +20781,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           organizationId,
           userId,
         };
-        
+
         // Save template to file system
         await fs.promises.writeFile(filePath, JSON.stringify(templateFileData, null, 2), 'utf8');
         console.log('✅ Template saved to file system:', filePath);
-        
+
         // Also save metadata to database for querying/listing
         const document = await storage.createDocument({
           ...documentData,
@@ -20745,7 +20793,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           userId: req.user.id,
           content: filename, // Store filename instead of content
         });
-        
+
         res.status(201).json({
           ...document,
           filePath: `uploads/Forms/${organizationId}/${userId}/${filename}`,
@@ -20757,7 +20805,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           organizationId: req.tenant!.id,
           userId: req.user.id,
         });
-        
+
         res.status(201).json(document);
       }
     } catch (error) {
@@ -20858,7 +20906,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (isNaN(patientId)) {
         return res.status(400).json({ error: "Invalid patient ID" });
       }
-      
+
       const images = await storage.getMedicalImagesByPatient(patientId, req.tenant!.id);
       res.json(images);
     } catch (error) {
@@ -20871,25 +20919,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/medical-images", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const medicalImages = await storage.getMedicalImagesByOrganization(req.tenant!.id);
-      
+
       // Transform the data to include patient information
       const imagesWithPatients = await Promise.all(
         medicalImages.map(async (image) => {
           const patient = await storage.getPatient(image.patientId, req.tenant!.id);
           const uploader = await storage.getUser(Number(image.uploadedBy), req.tenant!.id);
-          
+
           const result = {
             ...image,
             patientName: patient ? `${patient.firstName} ${patient.lastName}` : "Unknown Patient",
             patientIdentifier: patient?.patientId || "Unknown",
             uploadedByName: uploader ? `${uploader.firstName} ${uploader.lastName}` : "Unknown User"
           };
-          
+
           console.log('📷 API: Returning image with fileName:', result.fileName);
           return result;
         })
       );
-      
+
       res.json(imagesWithPatients);
     } catch (error) {
       console.error("Error fetching medical images:", error);
@@ -20951,8 +20999,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error creating medical image:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -21014,94 +21062,94 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           let savedImage: any;
           const timestamp = Date.now() + fileIndex * 1000 + Math.floor(Math.random() * 100);
 
-        if (updateImageId && existingImageForUpdate) {
-          // UPDATE mode: save each file with unique name (IMG{timestamp}I{id}ONC.jpg) under same medical_images row
-          const organizationId = orgId;
-          const patientId = imageData.patientId;
-          const finalImageId = `IMG${timestamp}I${existingImageForUpdate.id}ONC`;
-          const ext = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
-          const finalFileName = `${finalImageId}.${ext}`;
-          resolvedFileNameForResponse = finalFileName;
+          if (updateImageId && existingImageForUpdate) {
+            // UPDATE mode: save each file with unique name (IMG{timestamp}I{id}ONC.jpg) under same medical_images row
+            const organizationId = orgId;
+            const patientId = imageData.patientId;
+            const finalImageId = `IMG${timestamp}I${existingImageForUpdate.id}ONC`;
+            const ext = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
+            const finalFileName = `${finalImageId}.${ext}`;
+            resolvedFileNameForResponse = finalFileName;
 
-          const organizationalDir = path.join('./uploads/Imaging_Images', String(organizationId), 'patients', String(patientId));
-          await fse.ensureDir(organizationalDir);
-          const oldPath = path.join('./uploads/Imaging_Images', file.filename);
-          const newPath = path.join(organizationalDir, finalFileName);
+            const organizationalDir = path.join('./uploads/Imaging_Images', String(organizationId), 'patients', String(patientId));
+            await fse.ensureDir(organizationalDir);
+            const oldPath = path.join('./uploads/Imaging_Images', file.filename);
+            const newPath = path.join(organizationalDir, finalFileName);
 
-          try {
-            await fs.promises.rename(oldPath, newPath);
-            console.log('📷 UPDATE: Moved file', fileIndex + 1, 'to', newPath);
-          } catch (renameError) {
-            console.error('📷 UPDATE: Error moving file:', renameError);
+            try {
+              await fs.promises.rename(oldPath, newPath);
+              console.log('📷 UPDATE: Moved file', fileIndex + 1, 'to', newPath);
+            } catch (renameError) {
+              console.error('📷 UPDATE: Error moving file:', renameError);
+            }
+
+            await storage.updateMedicalImage(existingImageForUpdate.id, orgId, {
+              imageId: finalImageId,
+              fileName: finalFileName,
+              fileSize: file.size,
+              mimeType: file.mimetype,
+              status: 'uploaded',
+              imageData: null,
+            });
+            savedImage = await storage.getMedicalImage(existingImageForUpdate.id, orgId);
+            console.log('📷 UPDATE SUCCESS: File', fileIndex + 1, '->', finalFileName, '(medical_image_id:', existingImageForUpdate.id, ')');
+          } else {
+            // CREATE new row (original behavior)
+            const tempImageId = `IMG${timestamp}ITEMPONC`;
+            const dbImageData = {
+              patientId: imageData.patientId,
+              organizationId: orgId,
+              uploadedBy: req.user.id,
+              imageId: tempImageId, // Use temporary imageId for insert
+              studyType: imageData.studyType || 'Medical Image',
+              modality: imageData.modality || 'X-Ray',
+              bodyPart: imageData.bodyPart || 'Not specified',
+              indication: imageData.indication || imageData.notes || '',
+              priority: imageData.priority || 'routine',
+              fileName: file.filename, // Use the unique filename generated by multer
+              fileSize: file.size,
+              mimeType: file.mimetype,
+              imageData: null, // Don't store imageData for file-based storage
+              status: 'uploaded'
+            };
+
+            console.log('📷 Saving medical image to database with unique filename:', file.filename);
+            console.log('📷 dbImageData being inserted:', JSON.stringify(dbImageData, null, 2));
+
+            savedImage = await storage.createMedicalImage(dbImageData);
           }
 
-          await storage.updateMedicalImage(existingImageForUpdate.id, orgId, {
-            imageId: finalImageId,
-            fileName: finalFileName,
-            fileSize: file.size,
-            mimeType: file.mimetype,
-            status: 'uploaded',
-            imageData: null,
-          });
-          savedImage = await storage.getMedicalImage(existingImageForUpdate.id, orgId);
-          console.log('📷 UPDATE SUCCESS: File', fileIndex + 1, '->', finalFileName, '(medical_image_id:', existingImageForUpdate.id, ')');
-        } else {
-          // CREATE new row (original behavior)
-          const tempImageId = `IMG${timestamp}ITEMPONC`;
-          const dbImageData = {
-            patientId: imageData.patientId,
-            organizationId: orgId,
-            uploadedBy: req.user.id,
-            imageId: tempImageId, // Use temporary imageId for insert
-            studyType: imageData.studyType || 'Medical Image',
-            modality: imageData.modality || 'X-Ray',
-            bodyPart: imageData.bodyPart || 'Not specified',
-            indication: imageData.indication || imageData.notes || '',
-            priority: imageData.priority || 'routine',
-            fileName: file.filename, // Use the unique filename generated by multer
-            fileSize: file.size,
-            mimeType: file.mimetype,
-            imageData: null, // Don't store imageData for file-based storage
-            status: 'uploaded'
-          };
-
-          console.log('📷 Saving medical image to database with unique filename:', file.filename);
-          console.log('📷 dbImageData being inserted:', JSON.stringify(dbImageData, null, 2));
-
-          savedImage = await storage.createMedicalImage(dbImageData);
-        }
-
-        if (!savedImage) {
-          throw new Error('Failed to save image record');
-        }
-        const saved = savedImage;
-
-        if (!updateImageId) {
-          const finalImageId = `IMG${timestamp}I${saved.id}ONC`;
-          const ext = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
-          const finalFileName = `${finalImageId}.${ext}`;
-          resolvedFileNameForResponse = finalFileName;
-
-          const organizationId = orgId;
-          const patientId = imageData.patientId;
-          const organizationalDir = path.join('./uploads/Imaging_Images', String(organizationId), 'patients', String(patientId));
-          await fse.ensureDir(organizationalDir);
-          const oldPath = path.join('./uploads/Imaging_Images', file.filename);
-          const newPath = path.join(organizationalDir, finalFileName);
-
-          try {
-            await fs.promises.rename(oldPath, newPath);
-            console.log(`📷 Moved file from ${file.filename} to organizational path: ${newPath}`);
-          } catch (renameError) {
-            console.error('Error moving file to organizational path:', renameError);
+          if (!savedImage) {
+            throw new Error('Failed to save image record');
           }
+          const saved = savedImage;
 
-          await storage.updateMedicalImage(saved.id, orgId, {
-            imageId: finalImageId,
-            fileName: finalFileName
-          });
-          savedImage = await storage.getMedicalImage(saved.id, orgId);
-        }
+          if (!updateImageId) {
+            const finalImageId = `IMG${timestamp}I${saved.id}ONC`;
+            const ext = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
+            const finalFileName = `${finalImageId}.${ext}`;
+            resolvedFileNameForResponse = finalFileName;
+
+            const organizationId = orgId;
+            const patientId = imageData.patientId;
+            const organizationalDir = path.join('./uploads/Imaging_Images', String(organizationId), 'patients', String(patientId));
+            await fse.ensureDir(organizationalDir);
+            const oldPath = path.join('./uploads/Imaging_Images', file.filename);
+            const newPath = path.join(organizationalDir, finalFileName);
+
+            try {
+              await fs.promises.rename(oldPath, newPath);
+              console.log(`📷 Moved file from ${file.filename} to organizational path: ${newPath}`);
+            } catch (renameError) {
+              console.error('Error moving file to organizational path:', renameError);
+            }
+
+            await storage.updateMedicalImage(saved.id, orgId, {
+              imageId: finalImageId,
+              fileName: finalFileName
+            });
+            savedImage = await storage.getMedicalImage(saved.id, orgId);
+          }
 
           const resolvedFileName = typeof resolvedFileNameForResponse === 'string'
             ? resolvedFileNameForResponse
@@ -21137,8 +21185,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error uploading medical images:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -21306,18 +21354,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // FIRST PRIORITY: Check if the image has base64 data in database
       if (image.imageData) {
         console.log("📷 SERVER: Serving radiology image from database base64 data (FIRST PRIORITY)");
-        
+
         // Extract base64 data (remove data:image/xxx;base64, prefix if present)
-        const base64Data = image.imageData.includes(',') 
-          ? image.imageData.split(',')[1] 
+        const base64Data = image.imageData.includes(',')
+          ? image.imageData.split(',')[1]
           : image.imageData;
-        
+
         // Set appropriate headers
         const mimeType = image.mimeType || 'image/jpeg';
         res.setHeader('Content-Type', mimeType);
         res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
         res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
-        
+
         // Convert base64 to buffer and send
         const imageBuffer = Buffer.from(base64Data, 'base64');
         res.send(imageBuffer);
@@ -21333,14 +21381,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] File name: "${image.fileName}"`);
           console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Organization ID: ${image.organizationId}, Patient ID: ${image.patientId}`);
           console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Process CWD: "${process.cwd()}"`);
-          
+
           // Check if it's a Windows absolute path (starts with drive letter like C:\)
           const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(rawPath);
           console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Is Windows absolute path: ${isWindowsAbsolute}`);
-          
+
           let imagePath: string = '';
           let fileExists = false;
-          
+
           // DIRECT CHECK: Try the exact path as stored in DB (after cleaning double backslashes)
           const directPath = rawPath.replace(/\\\\/g, '\\');
           console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Direct path (cleaned): "${directPath}"`);
@@ -21350,7 +21398,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             imagePath = directPath;
             const imageBuffer = await readFile(imagePath);
             const mimeType = image.mimeType || 'image/jpeg';
-            
+
             res.setHeader('Content-Type', mimeType);
             res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
             res.setHeader('Cache-Control', 'public, max-age=31536000');
@@ -21366,7 +21414,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               if (dirExists) {
                 const filesInDir = await readdir(dirPath);
                 console.log(`📁 SERVER: [Image ID: ${radiologyImageId}] Files in directory: ${filesInDir.slice(0, 20).join(', ')}`);
-                
+
                 // Try to find file by matching the beginning of the filename (before the extension)
                 // This handles cases where the filename in DB doesn't exactly match the file on disk
                 // Extract the timestamp part from the filename (e.g., "IMG1770014277449" from "IMG177001427744911570NC.webp")
@@ -21382,10 +21430,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                     return fWithoutExt.startsWith(`IMG${timestamp}`);
                   }
                   // Fallback: match if the first 15 characters match
-                  return fWithoutExt.startsWith(fileNameWithoutExt.substring(0, 15)) || 
-                         fileNameWithoutExt.startsWith(fWithoutExt.substring(0, 15));
+                  return fWithoutExt.startsWith(fileNameWithoutExt.substring(0, 15)) ||
+                    fileNameWithoutExt.startsWith(fWithoutExt.substring(0, 15));
                 });
-                
+
                 if (matchingFile) {
                   const foundPath = path.join(dirPath, matchingFile);
                   console.log(`🔍 SERVER: [Image ID: ${radiologyImageId}] Found matching file: "${matchingFile}"`);
@@ -21396,7 +21444,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                     imagePath = foundPath;
                     const imageBuffer = await readFile(imagePath);
                     const mimeType = image.mimeType || 'image/jpeg';
-                    
+
                     res.setHeader('Content-Type', mimeType);
                     res.setHeader('Content-Disposition', `inline; filename="${matchingFile}"`);
                     res.setHeader('Cache-Control', 'public, max-age=31536000');
@@ -21410,7 +21458,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               console.error(`📷 SERVER: [Image ID: ${radiologyImageId}] Error checking directory for matching file:`, dirError);
             }
           }
-          
+
           // Strategy 1: Try absolute path as-is (for Windows paths like C:\Users\...)
           if (isWindowsAbsolute || path.isAbsolute(rawPath)) {
             // Handle double backslashes that might be in the database string
@@ -21419,10 +21467,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             // For absolute paths, normalize directly (preserves Windows backslashes)
             imagePath = path.normalize(cleanedPath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Absolute path normalized: "${imagePath}"`);
-            
+
             fileExists = await fse.pathExists(imagePath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
-            
+
             // If file doesn't exist, try to list the directory to see what files are there
             if (!fileExists) {
               try {
@@ -21440,11 +21488,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 console.error(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 1 - Error checking directory:`, dirError);
               }
             }
-            
+
             if (fileExists) {
               const imageBuffer = await readFile(imagePath);
               const mimeType = image.mimeType || 'image/jpeg';
-              
+
               res.setHeader('Content-Type', mimeType);
               res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
               res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
@@ -21453,7 +21501,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               return;
             }
           }
-          
+
           // Strategy 2: Extract relative path from "uploads" if absolute path failed
           if (!fileExists && rawPath.includes('uploads')) {
             const uploadsIndex = rawPath.indexOf('uploads');
@@ -21462,15 +21510,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             relativePath = relativePath.replace(/\\\\/g, '/').replace(/\\/g, '/');
             imagePath = path.resolve(process.cwd(), relativePath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 2 - Relative path from uploads: "${imagePath}"`);
-            
+
             fileExists = await fse.pathExists(imagePath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 2 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
-            
+
             if (fileExists) {
               console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Strategy 2`);
               const imageBuffer = await readFile(imagePath);
               const mimeType = image.mimeType || 'image/jpeg';
-              
+
               res.setHeader('Content-Type', mimeType);
               res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
               res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
@@ -21479,21 +21527,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               return;
             }
           }
-          
+
           // Strategy 3: Construct path from expected location using organizationId and patientId
           if (!fileExists && image.organizationId && image.patientId) {
             const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(image.organizationId), 'patients', String(image.patientId));
             imagePath = path.join(imagesDir, image.fileName);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 3 - Constructed path: "${imagePath}"`);
-            
+
             fileExists = await fse.pathExists(imagePath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 3 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
-            
+
             if (fileExists) {
               console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Strategy 3`);
               const imageBuffer = await readFile(imagePath);
               const mimeType = image.mimeType || 'image/jpeg';
-              
+
               res.setHeader('Content-Type', mimeType);
               res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
               res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
@@ -21502,20 +21550,20 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               return;
             }
           }
-          
+
           // Strategy 4: Try relative path resolution (if not already tried)
           if (!fileExists && !isWindowsAbsolute && !path.isAbsolute(rawPath)) {
             imagePath = path.resolve(process.cwd(), rawPath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 4 - Relative path resolved: "${imagePath}"`);
-            
+
             fileExists = await fse.pathExists(imagePath);
             console.log(`📷 SERVER: [Image ID: ${radiologyImageId}] Strategy 4 - File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
-            
+
             if (fileExists) {
               console.log(`✅ SERVER: [Image ID: ${radiologyImageId}] image exist - Strategy 4`);
               const imageBuffer = await readFile(imagePath);
               const mimeType = image.mimeType || 'image/jpeg';
-              
+
               res.setHeader('Content-Type', mimeType);
               res.setHeader('Content-Disposition', `inline; filename="${image.fileName}"`);
               res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
@@ -21524,12 +21572,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               return;
             }
           }
-          
+
           console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] All strategies failed. Last tried path: ${imagePath || 'N/A'}`);
           console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Raw path from DB: "${rawPath}"`);
           console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] File name: "${image.fileName}"`);
           console.error(`❌ SERVER: [Image ID: ${radiologyImageId}] Organization ID: ${image.organizationId}, Patient ID: ${image.patientId}`);
-          
+
           // Try to list directory to see what files are actually there
           try {
             const expectedDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(image.organizationId), 'patients', String(image.patientId));
@@ -21657,7 +21705,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Failed to delete medical image record" });
       }
 
-      res.json({ 
+      res.json({
         success: true,
         message: "Medical image and associated files deleted successfully"
       });
@@ -21717,11 +21765,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const success = await storage.updateMedicalImage(imageId, req.tenant!.id, updateData);
-      
+
       if (success && validatedData.signatureData) {
         console.log("✅ SIGNATURE UPDATE: Signature saved successfully!");
       }
-      
+
       if (!success) {
         return res.status(404).json({ error: "Medical image not found" });
       }
@@ -21730,8 +21778,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error updating medical image:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -21807,11 +21855,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Keep the same filename as the existing image
       const keepFilename = existingImage.fileName;
-      
+
       // Create organizational directory structure: uploads/Imaging_Images/{organizationId}/patients/{patientId}/
       const imagingImagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
       await fse.ensureDir(imagingImagesDir);
-      
+
       const tempUploadDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images');
       const tempFilePath = path.join(tempUploadDir, req.file.filename);
       const finalFilePath = path.join(imagingImagesDir, keepFilename);
@@ -21864,7 +21912,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       };
 
       const success = await storage.updateMedicalImage(imageId, req.tenant!.id, updateData);
-      
+
       if (!success) {
         return res.status(500).json({ error: "Failed to update medical image record" });
       }
@@ -21873,8 +21921,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Return the updated image information
       const updatedImage = await storage.getMedicalImage(imageId, req.tenant!.id);
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         image: updatedImage,
         originalName: req.file.originalname,
         keptFilename: keepFilename,
@@ -21999,8 +22047,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (medicalImage.imageData) {
         try {
           console.log("📷 SERVER: Serving image from database base64 data (FIRST PRIORITY)");
-          const base64Data = medicalImage.imageData.includes(',') 
-            ? medicalImage.imageData.split(',')[1] 
+          const base64Data = medicalImage.imageData.includes(',')
+            ? medicalImage.imageData.split(',')[1]
             : medicalImage.imageData;
           const mimeType = (medicalImage.mimeType as string) || 'image/jpeg';
           res.setHeader('Content-Type', mimeType);
@@ -22411,12 +22459,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Generate checksum for create API call
       const createQuery = `create${createParams.toString()}${BBB_SECRET}`;
       const createChecksum = crypto.createHash('sha1').update(createQuery).digest('hex');
-      
+
       // Create the meeting
       const createUrl = `${BBB_URL}api/create?${createParams.toString()}&checksum=${createChecksum}`;
-      
+
       console.log(`[BBB] Creating meeting: ${meetingID}, URL: ${createUrl.replace(BBB_SECRET, 'SECRET_HIDDEN')}`);
-      
+
       let createResponse;
       let createXML;
       try {
@@ -22430,19 +22478,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Parse XML response to check if meeting was created successfully
       const isSuccess = createXML.includes('<returncode>SUCCESS</returncode>');
-      
+
       if (!isSuccess) {
         // Try to extract error message from XML
         let errorMessage = 'Failed to create BigBlueButton meeting';
         const messageMatch = createXML.match(/<message>(.*?)<\/message>/i);
         const returnCodeMatch = createXML.match(/<returncode>(.*?)<\/returncode>/i);
-        
+
         if (messageMatch) {
           errorMessage = `BigBlueButton error: ${messageMatch[1]}`;
         } else if (returnCodeMatch && returnCodeMatch[1] !== 'SUCCESS') {
           errorMessage = `BigBlueButton returned: ${returnCodeMatch[1]}`;
         }
-        
+
         console.error(`[BBB] Meeting creation failed. XML response:`, createXML);
         throw new Error(errorMessage);
       }
@@ -22487,15 +22535,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error: any) {
       console.error("Error creating BigBlueButton meeting:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
       // Return the actual error message if available
       const errorMessage = error?.message || "Failed to create video conference";
       const statusCode = error?.status || 500;
-      res.status(statusCode).json({ 
+      res.status(statusCode).json({
         error: errorMessage,
         details: error?.stack || undefined
       });
@@ -22664,8 +22712,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error: any) {
       console.error("Error scheduling video call:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -22707,7 +22755,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const waitingRoom = [
         {
           patientId: "1",
-          patientName: "Sarah Johnson", 
+          patientName: "Sarah Johnson",
           appointmentTime: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 minutes ago
           waitTime: 5,
           priority: "normal"
@@ -22720,7 +22768,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           priority: "urgent"
         }
       ];
-      
+
       res.json(waitingRoom);
     } catch (error) {
       console.error("Error fetching waiting room:", error);
@@ -22731,7 +22779,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/telemedicine/consultations/:id/start", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { id } = req.params;
-      
+
       // In production, this would update the consultation status in database
       res.json({
         success: true,
@@ -22749,7 +22797,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const { id } = req.params;
       const { notes, duration } = req.body;
-      
+
       // In production, this would update the consultation in database
       res.json({
         success: true,
@@ -22896,10 +22944,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const userRole = req.user!.role;
       const organizationId = req.tenant!.id;
-      
+
       // Fetch all users from the organization
       const allUsers = await storage.getUsersByOrganization(organizationId);
-      
+
       // If admin, return all users
       if (userRole === 'admin') {
         res.json(allUsers);
@@ -23004,8 +23052,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error sending appointment reminder:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23039,8 +23087,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error sending prescription notification:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23072,8 +23120,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error sending test results notification:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23100,8 +23148,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error sending custom email:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23159,12 +23207,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             organizationId: req.tenant!.id,
             userId: req.user!.id,
           });
-          
-          res.json({ 
-            success: false, 
-            savedAsDraft: true, 
+
+          res.json({
+            success: false,
+            savedAsDraft: true,
             draftId: draft.id,
-            message: "Email delivery failed but letter saved as draft. You can retry sending from your drafts." 
+            message: "Email delivery failed but letter saved as draft. You can retry sending from your drafts."
           });
         } catch (draftError) {
           console.error("Error saving draft:", draftError);
@@ -23174,8 +23222,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error sending letter:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23195,10 +23243,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             organizationId: req.tenant!.id,
             userId: req.user!.id,
           });
-          
-          res.status(500).json({ 
-            error: "Failed to send letter", 
-            savedAsDraft: true, 
+
+          res.status(500).json({
+            error: "Failed to send letter",
+            savedAsDraft: true,
             draftId: draft.id,
             message: "Error occurred but letter saved as draft. You can retry sending from your drafts."
           });
@@ -23245,8 +23293,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error creating letter draft:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23258,7 +23306,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const id = parseInt(req.params.id);
       const draft = await storage.getLetterDraft(id, req.tenant!.id);
-      
+
       if (!draft) {
         return res.status(404).json({ error: "Draft not found" });
       }
@@ -23302,8 +23350,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error updating letter draft:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23314,7 +23362,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/letter-drafts/:id", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const id = parseInt(req.params.id);
-      
+
       // Check if the draft exists and user owns it
       const existingDraft = await storage.getLetterDraft(id, req.tenant!.id);
       if (!existingDraft) {
@@ -23337,7 +23385,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Financial Forecasting endpoints
-  app.get("/api/financial-forecasting", authMiddleware, requireRole(["admin", "doctor","nurse","patient"]), async (req: TenantRequest, res) => {
+  app.get("/api/financial-forecasting", authMiddleware, requireRole(["admin", "doctor", "nurse", "patient"]), async (req: TenantRequest, res) => {
     try {
       const forecasts = await storage.getFinancialForecasts(req.tenant!.id);
       res.json(forecasts);
@@ -23347,7 +23395,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  app.get("/api/financial-forecasting/:id", authMiddleware, requireRole(["admin", "doctor","nurse","patient"]), async (req: TenantRequest, res) => {
+  app.get("/api/financial-forecasting/:id", authMiddleware, requireRole(["admin", "doctor", "nurse", "patient"]), async (req: TenantRequest, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
@@ -23366,7 +23414,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  app.post("/api/financial-forecasting/generate", authMiddleware, requireRole(["admin", "doctor","nurse","patient"]), async (req: TenantRequest, res) => {
+  app.post("/api/financial-forecasting/generate", authMiddleware, requireRole(["admin", "doctor", "nurse", "patient"]), async (req: TenantRequest, res) => {
     try {
       const forecasts = await storage.generateFinancialForecasts(req.tenant!.id);
       res.json(forecasts);
@@ -23376,7 +23424,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  app.put("/api/financial-forecasting/:id", authMiddleware, requireRole(["admin", "doctor","nurse","patient"]), async (req: TenantRequest, res) => {
+  app.put("/api/financial-forecasting/:id", authMiddleware, requireRole(["admin", "doctor", "nurse", "patient"]), async (req: TenantRequest, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
@@ -23411,8 +23459,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error updating financial forecast:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23420,7 +23468,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  app.delete("/api/financial-forecasting/:id", authMiddleware, requireRole(["admin", "doctor","nurse","patient"]), async (req: TenantRequest, res) => {
+  app.delete("/api/financial-forecasting/:id", authMiddleware, requireRole(["admin", "doctor", "nurse", "patient"]), async (req: TenantRequest, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
@@ -23490,8 +23538,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error creating forecast model:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23525,8 +23573,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error updating forecast model:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -23558,7 +23606,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       console.log('[PRESCRIPTION-EMAIL] ===== STARTING EMAIL SEND PROCESS =====');
       const prescriptionId = parseInt(req.params.id);
-      
+
       // Parse form data fields
       const pharmacyEmail = req.body.pharmacyEmail;
       const pharmacyName = req.body.pharmacyName || 'Pharmacy Team';
@@ -23599,12 +23647,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Get organization info for logo and branding
       const organization = await storage.getOrganization(req.tenant!.id);
       const organizationName = organization?.brandName || organization?.name;
-      
+
       // Get clinic header and footer data from database
       let clinicHeader: any = undefined;
       let clinicFooter: any = undefined;
       let clinicLogoUrl: string | undefined;
-      
+
       try {
         clinicHeader = await storage.getActiveClinicHeader(req.tenant!.id);
         if (clinicHeader) {
@@ -23615,7 +23663,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             phone: clinicHeader.phone,
             email: clinicHeader.email
           });
-          
+
           // Convert base64 logo to data URL if it exists
           if (clinicHeader.logoBase64) {
             // Check if it's already a data URL
@@ -23711,12 +23759,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       if (emailSent) {
-        const attachmentInfo = attachments.length > 0 
+        const attachmentInfo = attachments.length > 0
           ? ` with ${attachments.length} attachment(s)`
           : '';
         console.log('[PRESCRIPTION-EMAIL] ✅ Email sent successfully to:', pharmacyEmail);
-        res.json({ 
-          success: true, 
+        res.json({
+          success: true,
           message: `Prescription email sent successfully to ${pharmacyEmail}${attachmentInfo}`,
           attachmentsCount: attachments.length
         });
@@ -23817,7 +23865,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Format date for header
       const now = new Date();
       const headerDate = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear().toString().slice(-2)}, ${now.getHours() % 12 || 12}:${now.getMinutes().toString().padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`;
-      
+
       // Patient name for header
       const patientName = `${patient.firstName || ""} ${patient.lastName || ""}`.trim();
 
@@ -23834,10 +23882,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           if (imageData.includes(',')) {
             imageData = imageData.split(',')[1];
           }
-          
+
           // Convert base64 to Uint8Array
           const logoBytes = Uint8Array.from(Buffer.from(imageData, 'base64'));
-          
+
           // Try to embed as PNG first, then JPG if that fails
           let logoImage;
           try {
@@ -23849,7 +23897,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               console.log('[SAVE-PRESCRIPTION-PDF] Could not embed logo as PNG or JPG:', jpgErr);
             }
           }
-          
+
           if (logoImage) {
             // Scale logo to fit
             const logoDims = logoImage.scaleToFit(logoSize, logoSize);
@@ -23954,10 +24002,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Provider Section (Centered, below header)
       yPosition -= 30;
-      const providerName = doctorInfo 
+      const providerName = doctorInfo
         ? `${doctorInfo.firstName || ""} ${doctorInfo.lastName || ""}`.trim() || "Provider undefined"
         : "Provider undefined";
-      
+
       const providerNameWidth = helveticaFont.widthOfTextAtSize(providerName, normalFontSize);
       page.drawText(providerName, {
         x: (width - providerNameWidth) / 2,
@@ -24124,7 +24172,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         color: rgb(0, 0, 0),
       });
 
-      const prescriptionDate = prescription.issuedDate 
+      const prescriptionDate = prescription.issuedDate
         ? new Date(prescription.issuedDate)
         : new Date();
       const day = prescriptionDate.getDate();
@@ -24299,7 +24347,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const boxY = signatureBoxY - 60;
       const boxWidth = 160;
       const boxHeight = 60;
-      
+
       // Draw border using lines (pdf-lib doesn't support borderColor/borderWidth in drawRectangle)
       const borderColor = rgb(0.7, 0.7, 0.7);
       // Top line
@@ -24340,10 +24388,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           if (signatureImage.includes(',')) {
             imageData = signatureImage.split(',')[1];
           }
-          
+
           // Convert base64 to Uint8Array
           const signatureImageBytes = Uint8Array.from(Buffer.from(imageData, 'base64'));
-          
+
           // Try to embed as PNG first, then JPG if that fails
           let signatureImageEmbed;
           try {
@@ -24356,7 +24404,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               throw jpgErr;
             }
           }
-          
+
           // Scale image to fit in signature box (160x60)
           const maxWidth = 156; // 160 - 4 (2px padding on each side)
           const maxHeight = 56; // 60 - 4 (2px padding on top/bottom)
@@ -24364,11 +24412,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           const scaleX = Math.min(maxWidth / dims.width, maxHeight / dims.height, 1);
           const finalWidth = dims.width * scaleX;
           const finalHeight = dims.height * scaleX;
-          
+
           // Center the image in the box
           const imageX = boxX + (boxWidth - finalWidth) / 2;
           const imageY = boxY + (boxHeight - finalHeight) / 2;
-          
+
           page.drawImage(signatureImageEmbed, {
             x: imageX,
             y: imageY,
@@ -24394,7 +24442,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
         // Use "(check)" instead of checkmark symbol to avoid encoding issues
         const eSignText = `(check) E-Signed by - ${formattedDate} ${formattedTime}`;
-        
+
         page.drawText(eSignText, {
           x: margin,
           y: signatureBoxY - 85,
@@ -24444,7 +24492,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Footer - Clinic footer and page number
       const lastPage = pdfDoc.getPages()[pdfDoc.getPageCount() - 1];
       const footerY = 30;
-      
+
       // Draw footer background if clinic footer has background color
       if (clinicFooter?.backgroundColor) {
         const footerBgColor = clinicFooter.backgroundColor;
@@ -24453,7 +24501,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const r = parseInt(hex.substring(0, 2), 16) / 255;
         const g = parseInt(hex.substring(2, 4), 16) / 255;
         const b = parseInt(hex.substring(4, 6), 16) / 255;
-        
+
         lastPage.drawRectangle({
           x: 0,
           y: 0,
@@ -24462,7 +24510,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           color: rgb(r, g, b),
         });
       }
-      
+
       // Footer text from clinic_footers table
       const footerText = clinicFooter?.footerText || `Pharmacy: ${prescription.pharmacy?.name || "Halo Health"} - ${prescription.pharmacy?.phone || "+44(0)121 827 5531"}`;
       const footerTextColor = clinicFooter?.textColor || '#000000';
@@ -24470,7 +24518,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const textR = parseInt(hex.substring(0, 2), 16) / 255;
       const textG = parseInt(hex.substring(2, 4), 16) / 255;
       const textB = parseInt(hex.substring(4, 6), 16) / 255;
-      
+
       const footerTextWidth = helveticaFont.widthOfTextAtSize(footerText, smallFontSize);
       lastPage.drawText(footerText, {
         x: (width - footerTextWidth) / 2,
@@ -24513,7 +24561,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Save file path to database
       const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${prescription.patientId}/${userId}/All_docs_prescriptions/${sanitizedFileName}`;
-      
+
       // Update prescription record with saved PDF path
       try {
         await db
@@ -24619,7 +24667,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               if (filterByUserId && pathUserId !== userId) {
                 continue;
               }
-              
+
               // Check if file exists
               const fullPath = path.resolve(process.cwd(), prescription.savedPdfPath.replace(/^\//, ''));
               if (await fse.pathExists(fullPath)) {
@@ -24673,24 +24721,24 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.log(`[LIST-PRESCRIPTION-PDFS] Checking patient-specific dir: ${patientDir}`);
         const dirExists = await fse.pathExists(patientDir);
         console.log(`[LIST-PRESCRIPTION-PDFS] Patient dir exists: ${dirExists}`);
-        
+
         if (dirExists) {
           try {
             const files = await readdir(patientDir);
             console.log(`[LIST-PRESCRIPTION-PDFS] Found ${files.length} files in patient dir`);
-            
+
             for (const file of files) {
               if (file.endsWith('.pdf')) {
                 // Check if this PDF is already in our list from database
-                const alreadyExists = pdfs.some(p => 
-                  p.fileName === file && 
-                  p.patientId === patientId && 
+                const alreadyExists = pdfs.some(p =>
+                  p.fileName === file &&
+                  p.patientId === patientId &&
                   p.userId === userId
                 );
                 if (alreadyExists) {
                   continue; // Skip if already added from database
                 }
-                
+
                 const filePath = path.join(patientDir, file);
                 const stats = await fse.stat(filePath);
                 // Extract prescription ID from filename - could be prescription-{id}.pdf or {prescriptionNumber}.pdf
@@ -24712,10 +24760,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                     console.error(`[LIST-PRESCRIPTION-PDFS] Error looking up prescription for ${prescriptionNumber}:`, error);
                   }
                 }
-                
+
                 if (prescriptionId) {
                   const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${patientId}/${userId}/All_docs_prescriptions/${file}`;
-                  
+
                   pdfs.push({
                     fileName: file,
                     filePath: relativePath,
@@ -24739,11 +24787,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         console.log(`[LIST-PRESCRIPTION-PDFS] Checking baseDir: ${baseDir}`);
         const baseDirExists = await fse.pathExists(baseDir);
         console.log(`[LIST-PRESCRIPTION-PDFS] Base directory exists: ${baseDirExists}`);
-        
+
         if (baseDirExists) {
           const patientDirs = await readdir(baseDir);
           console.log(`[LIST-PRESCRIPTION-PDFS] Found ${patientDirs.length} patient directories`);
-          
+
           for (const patientDirName of patientDirs) {
             // Skip if not a directory (like .DS_Store or other files)
             const patientDirPath = path.join(baseDir, patientDirName);
@@ -24751,31 +24799,31 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             if (!patientDirStat.isDirectory()) {
               continue;
             }
-            
+
             // Use directory structure: {user_id}/All_docs_prescriptions
             const userPrescriptionDir = path.join(baseDir, patientDirName, String(userId), 'All_docs_prescriptions');
 
             console.log(`[LIST-PRESCRIPTION-PDFS] Checking: ${userPrescriptionDir}`);
             const userDirExists = await fse.pathExists(userPrescriptionDir);
             console.log(`[LIST-PRESCRIPTION-PDFS] User prescription dir exists: ${userDirExists}`);
-            
+
             if (userDirExists) {
               try {
                 const files = await readdir(userPrescriptionDir);
                 console.log(`[LIST-PRESCRIPTION-PDFS] Found ${files.length} files in ${userPrescriptionDir}`);
-                
+
                 for (const file of files) {
                   if (file.endsWith('.pdf')) {
                     // Check if this PDF is already in our list from database
-                    const alreadyExists = pdfs.some(p => 
-                      p.fileName === file && 
-                      p.patientId === parseInt(patientDirName) && 
+                    const alreadyExists = pdfs.some(p =>
+                      p.fileName === file &&
+                      p.patientId === parseInt(patientDirName) &&
                       p.userId === userId
                     );
                     if (alreadyExists) {
                       continue; // Skip if already added from database
                     }
-                    
+
                     const filePath = path.join(userPrescriptionDir, file);
                     const stats = await fse.stat(filePath);
                     // Extract prescription ID from filename - could be prescription-{id}.pdf or {prescriptionNumber}.pdf
@@ -24797,10 +24845,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                         console.error(`[LIST-PRESCRIPTION-PDFS] Error looking up prescription for ${prescriptionNumber}:`, error);
                       }
                     }
-                    
+
                     if (prescriptionId) {
                       const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${patientDirName}/${userId}/All_docs_prescriptions/${file}`;
-                      
+
                       pdfs.push({
                         fileName: file,
                         filePath: relativePath,
@@ -24824,7 +24872,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.log(`[LIST-PRESCRIPTION-PDFS] Base directory does not exist: ${baseDir}`);
         }
       }
-      
+
       console.log(`[LIST-PRESCRIPTION-PDFS] Total PDFs found: ${pdfs.length}`);
 
       // Sort by prescription number/name (alphabetically), then by creation date (newest first)
@@ -24873,8 +24921,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       // Verify user can access (must be the owner or admin/doctor/nurse)
-      const canAccess = req.user.id === parseInt(userId) || 
-                       ['admin', 'doctor', 'nurse'].includes(req.user.role || '');
+      const canAccess = req.user.id === parseInt(userId) ||
+        ['admin', 'doctor', 'nurse'].includes(req.user.role || '');
 
       if (!canAccess) {
         console.error(`[VIEW-PRESCRIPTION-PDF-LEGACY] Access denied - user: ${req.user.id}, userId: ${userId}, role: ${req.user.role}`);
@@ -24895,7 +24943,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       );
 
       console.log(`[VIEW-PRESCRIPTION-PDF-LEGACY] Checking path: ${filePath}`);
-      
+
       if (!await fse.pathExists(filePath)) {
         console.error(`[VIEW-PRESCRIPTION-PDF-LEGACY] File not found at: ${filePath}`);
         return res.status(404).json({ error: "PDF not found" });
@@ -24920,14 +24968,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/shifts", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { date } = req.query as { date?: string };
-      
+
       // Server-side enforcement: Doctors can only see their own shifts
       let createdByFilter: number | undefined = undefined;
       if (req.user && isDoctorLike(req.user.role)) {
         createdByFilter = req.user.id;
         console.log("GET /api/shifts - Doctor role detected, enforcing created_by filter:", createdByFilter);
       }
-      
+
       console.log("GET /api/shifts - Fetching shifts for organization:", req.tenant!.id, "date filter:", date, "createdBy filter:", createdByFilter);
       const shifts = await storage.getStaffShiftsByOrganization(req.tenant!.id, date, createdByFilter);
       console.log("GET /api/shifts - Found shifts count:", shifts.length);
@@ -24943,11 +24991,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const shiftId = parseInt(req.params.id);
       const shift = await storage.getStaffShift(shiftId, req.tenant!.id);
-      
+
       if (!shift) {
         return res.status(404).json({ error: "Shift not found" });
       }
-      
+
       res.json(shift);
     } catch (error) {
       console.error("Error fetching shift:", error);
@@ -24978,8 +25026,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error creating shift:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -25007,17 +25055,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const shift = await storage.updateStaffShift(shiftId, req.tenant!.id, processedData);
-      
+
       if (!shift) {
         return res.status(404).json({ error: "Shift not found" });
       }
-      
+
       res.json(shift);
     } catch (error) {
       console.error("Error updating shift:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -25029,11 +25077,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const shiftId = parseInt(req.params.id);
       const deleted = await storage.deleteStaffShift(shiftId, req.tenant!.id);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "Shift not found" });
       }
-      
+
       res.status(204).send();
     } catch (error) {
       console.error("Error deleting shift:", error);
@@ -25062,7 +25110,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const forBooking = req.query.forBooking === 'true';
 
       let defaultShifts;
-      
+
       // Allow all users to fetch all default shifts when booking appointments
       if (isAdmin || forBooking) {
         defaultShifts = await storage.getDefaultShiftsByOrganization(organizationId);
@@ -25090,7 +25138,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const defaultShift = await storage.getDefaultShiftByUser(userId, organizationId);
-      
+
       if (!defaultShift) {
         return res.status(404).json({ error: "Default shift not found" });
       }
@@ -25129,8 +25177,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error updating default shift:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
+        return res.status(400).json({
+          error: "Validation failed",
           details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
         });
       }
@@ -25141,7 +25189,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/default-shifts/initialize", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       const result = await storage.initializeDefaultShifts(organizationId);
 
       res.json({
@@ -25159,7 +25207,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/default-shifts/all", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
-      
+
       const result = await storage.deleteAllDefaultShifts(organizationId);
 
       res.json({
@@ -25197,7 +25245,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Mobile API endpoints for Doctor and Patient apps
-  
+
   // Doctor Mobile API endpoints
   app.get("/api/mobile/doctor/dashboard", authMiddleware, async (req: TenantRequest, res) => {
     try {
@@ -25208,7 +25256,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const todayAppointments = await storage.getAppointmentsByProvider(userId, req.tenant!.id);
       const patientUsers = await storage.getUsersByRole("patient", req.tenant!.id);
       const pendingPrescriptions = await storage.getPrescriptionsByProvider(userId, req.tenant!.id);
-      
+
       res.json({
         todayAppointments: todayAppointments.filter(apt => {
           const aptDate = new Date(apt.scheduledAt);
@@ -25234,7 +25282,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/mobile/doctor/patients", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const patients = await storage.getPatientsByOrganization(req.tenant!.id);
-      
+
       const mobilePatients = patients.map(patient => ({
         id: patient.id,
         patientId: patient.patientId,
@@ -25247,7 +25295,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         lastVisit: patient.updatedAt,
         riskLevel: patient.riskLevel || 'low'
       }));
-      
+
       res.json(mobilePatients);
     } catch (error) {
       console.error("Error fetching patients for mobile:", error);
@@ -25262,18 +25310,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(401).json({ error: "User authentication required" });
       }
       const { date } = req.query as { date?: string };
-      
+
       let appointments = await storage.getAppointmentsByProvider(userId, req.tenant!.id);
-      
+
       if (date) {
         appointments = appointments.filter(apt => {
           const aptDate = new Date(apt.scheduledAt);
           return aptDate.toDateString() === new Date(date).toDateString();
         });
       }
-      
+
       const patients = await storage.getPatientsByOrganization(req.tenant!.id);
-      
+
       const mobileAppointments = appointments.map(apt => {
         const patient = patients.find(p => p.id === apt.patientId);
         return {
@@ -25291,7 +25339,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           isVirtual: apt.isVirtual
         };
       });
-      
+
       res.json(mobileAppointments);
     } catch (error) {
       console.error("Error fetching appointments for mobile:", error);
@@ -25305,11 +25353,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const appointment = await storage.updateAppointment(appointmentId, req.tenant!.id, {
         status: 'confirmed'
       });
-      
+
       if (!appointment) {
         return res.status(404).json({ error: "Appointment not found" });
       }
-      
+
       res.json({ message: "Appointment accepted successfully", appointment });
     } catch (error) {
       console.error("Error accepting appointment:", error);
@@ -25321,16 +25369,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const appointmentId = parseInt(req.params.id);
       const { reason } = req.body;
-      
+
       const appointment = await storage.updateAppointment(appointmentId, req.tenant!.id, {
         status: 'cancelled',
         description: reason ? `Cancelled: ${reason}` : 'Cancelled by doctor'
       });
-      
+
       if (!appointment) {
         return res.status(404).json({ error: "Appointment not found" });
       }
-      
+
       res.json({ message: "Appointment rejected successfully", appointment });
     } catch (error) {
       console.error("Error rejecting appointment:", error);
@@ -25346,7 +25394,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
       const prescriptions = await storage.getPrescriptionsByProvider(userId, req.tenant!.id);
       const patients = await storage.getPatientsByOrganization(req.tenant!.id);
-      
+
       const mobilePrescriptions = prescriptions.map(prescription => {
         const patient = patients.find(p => p.id === prescription.patientId);
         return {
@@ -25362,7 +25410,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           createdAt: prescription.createdAt
         };
       });
-      
+
       res.json(mobilePrescriptions);
     } catch (error) {
       console.error("Error fetching prescriptions for mobile:", error);
@@ -25382,7 +25430,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         organizationId: req.tenant!.id,
         status: 'active'
       };
-      
+
       const prescription = await storage.createPrescription(prescriptionData);
       res.status(201).json(prescription);
     } catch (error) {
@@ -25403,7 +25451,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const appointments = await storage.getAppointmentsByPatient(patient.id, req.tenant!.id);
       const prescriptions = await storage.getPrescriptionsByPatient(patient.id, req.tenant!.id);
       const medicalRecords = await storage.getMedicalRecordsByPatient(patient.id, req.tenant!.id);
-      
+
       const todayAppointments = appointments.filter(apt => {
         const aptDate = new Date(apt.scheduledAt);
         const today = new Date();
@@ -25445,7 +25493,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const appointments = await storage.getAppointmentsByPatient(patient.id, req.tenant!.id);
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       const mobileAppointments = appointments.map(apt => {
         const provider = users.find(u => u.id === apt.providerId);
         return {
@@ -25461,7 +25509,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           providerName: provider ? `Dr. ${provider.firstName} ${provider.lastName}` : 'Unknown Provider'
         };
       });
-      
+
       res.json(mobileAppointments);
     } catch (error) {
       console.error("Error fetching patient appointments:", error);
@@ -25484,7 +25532,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         organizationId: req.tenant!.id,
         status: 'scheduled'
       };
-      
+
       const appointment = await storage.createAppointment(appointmentData);
       res.status(201).json(appointment);
     } catch (error) {
@@ -25504,7 +25552,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const prescriptions = await storage.getPrescriptionsByPatient(patient.id, req.tenant!.id);
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       const mobilePrescriptions = prescriptions.map(prescription => {
         const provider = users.find(u => u.id === prescription.doctorId);
         return {
@@ -25519,7 +25567,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           providerName: provider ? `Dr. ${provider.firstName} ${provider.lastName}` : 'Unknown Provider'
         };
       });
-      
+
       res.json(mobilePrescriptions);
     } catch (error) {
       console.error("Error fetching patient prescriptions:", error);
@@ -25538,7 +25586,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const records = await storage.getMedicalRecordsByPatient(patient.id, req.tenant!.id);
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       const mobileRecords = records.map(record => {
         const provider = users.find(u => u.id === record.providerId);
         return {
@@ -25552,7 +25600,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           providerName: provider ? `Dr. ${provider.firstName} ${provider.lastName}` : 'Unknown Provider'
         };
       });
-      
+
       res.json(mobileRecords);
     } catch (error) {
       console.error("Error fetching patient medical records:", error);
@@ -25589,7 +25637,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         createdAt: patient.createdAt,
         updatedAt: patient.updatedAt
       };
-      
+
       res.json(profileData);
     } catch (error) {
       console.error("Error fetching patient profile:", error);
@@ -25600,7 +25648,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/mobile/doctors", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const users = await storage.getUsersByOrganization(req.tenant!.id);
-      
+
       const doctors = users
         .filter(user => isDoctorLike(user.role) && user.isActive)
         .map(doctor => ({
@@ -25612,7 +25660,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           workingHours: doctor.workingHours || { start: '09:00', end: '17:00' },
           workingDays: doctor.workingDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
         }));
-      
+
       res.json(doctors);
     } catch (error) {
       console.error("Error fetching doctors:", error);
@@ -25624,10 +25672,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/mobile/video/start-consultation", authMiddleware, async (req: TenantRequest, res) => {
     try {
       const { appointmentId } = req.body;
-      
+
       // Generate a unique room ID for the consultation
       const roomId = `consultation_${appointmentId}_${Date.now()}`;
-      
+
       res.json({
         roomId,
         message: "Video consultation started",
@@ -25640,14 +25688,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Mobile API Endpoints for Flutter Apps
-  
+
   // Doctor Mobile App Endpoints
   app.get("/api/mobile/doctor/dashboard", authMiddleware, requireRole(["doctor"]), async (req: TenantRequest, res) => {
     try {
       const todayAppointments = await storage.getAppointmentsByOrganization(req.tenant!.id, new Date());
       const patientUsers = await storage.getUsersByRole("patient", req.tenant!.id);
       const pendingPrescriptions = await storage.getPrescriptionsByOrganization(req.tenant!.id);
-      
+
       const dashboardData = {
         todayAppointments: todayAppointments.length,
         totalPatients: patientUsers.length,
@@ -25663,7 +25711,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             status: apt.status
           }))
       };
-      
+
       res.json(dashboardData);
     } catch (error) {
       console.error("Error fetching doctor dashboard:", error);
@@ -25685,7 +25733,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // lastVisit: not available in current schema
         riskLevel: patient.riskLevel || 'low'
       }));
-      
+
       res.json(formattedPatients);
     } catch (error) {
       console.error("Error fetching patients for doctor mobile:", error);
@@ -25697,7 +25745,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const date = req.query.date ? new Date(req.query.date as string) : new Date();
       const appointments = await storage.getAppointmentsByOrganization(req.tenant!.id, date);
-      
+
       res.json(appointments);
     } catch (error) {
       console.error("Error fetching doctor appointments:", error);
@@ -25709,11 +25757,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const appointmentId = parseInt(req.params.id);
       const updatedAppointment = await storage.updateAppointment(appointmentId, req.tenant!.id, { status: 'confirmed' });
-      
+
       if (!updatedAppointment) {
         return res.status(404).json({ error: "Appointment not found" });
       }
-      
+
       res.json(updatedAppointment);
     } catch (error) {
       console.error("Error accepting appointment:", error);
@@ -25725,16 +25773,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const appointmentId = parseInt(req.params.id);
       const { reason } = req.body;
-      
-      const updatedAppointment = await storage.updateAppointment(appointmentId, req.tenant!.id, { 
+
+      const updatedAppointment = await storage.updateAppointment(appointmentId, req.tenant!.id, {
         status: 'cancelled',
         description: `Cancelled: ${reason}`
       });
-      
+
       if (!updatedAppointment) {
         return res.status(404).json({ error: "Appointment not found" });
       }
-      
+
       res.json(updatedAppointment);
     } catch (error) {
       console.error("Error rejecting appointment:", error);
@@ -25761,7 +25809,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         prescriptionNumber: `RX-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         status: 'active'
       };
-      
+
       const newPrescription = await storage.createPrescription(prescriptionData);
       res.status(201).json(newPrescription);
     } catch (error) {
@@ -25777,9 +25825,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const appointments = await storage.getAppointmentsByPatient(patientId, req.tenant!.id);
       const prescriptions = await storage.getPrescriptionsByPatient(patientId, req.tenant!.id);
       const medicalRecords = await storage.getMedicalRecordsByPatient(patientId, req.tenant!.id);
-      
+
       const dashboardData = {
-        upcomingAppointments: appointments.filter(apt => 
+        upcomingAppointments: appointments.filter(apt =>
           new Date(apt.scheduledAt) > new Date() && apt.status !== 'cancelled'
         ).length,
         activePrescriptions: prescriptions.filter(p => p.status === 'active').length,
@@ -25788,7 +25836,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           .filter(apt => new Date(apt.scheduledAt) > new Date() && apt.status !== 'cancelled')
           .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0] || null
       };
-      
+
       res.json(dashboardData);
     } catch (error) {
       console.error("Error fetching patient dashboard:", error);
@@ -25801,11 +25849,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       const patient = patients.find(p => p.email === req.user!.email);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       const appointments = await storage.getAppointmentsByPatient(patient.id, req.tenant!.id);
       res.json(appointments);
     } catch (error) {
@@ -25819,18 +25867,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       const patient = patients.find(p => p.email === req.user!.email);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       const appointmentData = {
         ...req.body,
         patientId: patient.id, // Use the patient's database ID, not the user ID
         organizationId: req.tenant!.id,
         status: 'scheduled'
       };
-      
+
       const newAppointment = await storage.createAppointment(appointmentData);
       res.status(201).json(newAppointment);
     } catch (error) {
@@ -25842,25 +25890,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/mobile/patient/appointments/:id", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
       const appointmentId = parseInt(req.params.id);
-      
+
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       const patient = patients.find(p => p.email === req.user!.email);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       // Verify the appointment belongs to the patient
       const appointment = await storage.getAppointment(appointmentId, req.tenant!.id);
       if (!appointment || appointment.patientId !== patient.id) {
         return res.status(404).json({ error: "Appointment not found" });
       }
-      
-      const updatedAppointment = await storage.updateAppointment(appointmentId, req.tenant!.id, { 
+
+      const updatedAppointment = await storage.updateAppointment(appointmentId, req.tenant!.id, {
         status: 'cancelled'
       });
-      
+
       res.json(updatedAppointment);
     } catch (error) {
       console.error("Error cancelling appointment:", error);
@@ -25885,19 +25933,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       const patient = patients.find(p => p.email === req.user!.email);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       const appointments = await storage.getAppointmentsByPatient(patient.id, req.tenant!.id);
-      
+
       // Filter to future appointments and sort by date
       const now = new Date();
       const futureAppointments = appointments
         .filter(apt => new Date(apt.scheduledAt) > now)
         .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
-      
+
       // Get provider information for appointments
       const users = await storage.getUsersByOrganization(req.tenant!.id);
       const appointmentsWithProviders = futureAppointments.map(apt => {
@@ -25907,7 +25955,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           provider: provider ? `Dr. ${provider.firstName} ${provider.lastName}` : 'Unknown Provider'
         };
       });
-      
+
       res.json({
         appointments: appointmentsWithProviders,
         nextAppointment: appointmentsWithProviders[0] || null,
@@ -25922,23 +25970,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/patients/my-prescriptions", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Starting request for user:", req.user?.email);
-      
+
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Found patients count:", patients.length);
-      
+
       const patient = patients.find(p => p.email === req.user!.email);
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Found matching patient:", patient ? { id: patient.id, email: patient.email } : null);
-      
+
       if (!patient) {
         console.log("🏥 MY-PRESCRIPTIONS DEBUG: No patient found for email:", req.user!.email);
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Getting prescriptions for patient ID:", patient.id);
       const prescriptions = await storage.getPrescriptionsByPatient(patient.id, req.tenant!.id);
       console.log("🏥 MY-PRESCRIPTIONS DEBUG: Found prescriptions count:", prescriptions.length);
-      
+
       res.json({
         prescriptions,
         totalCount: prescriptions.length,
@@ -25972,7 +26020,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         email: doctor.email,
         workingHours: doctor.workingHours || 'Monday-Friday, 09:00-17:00'
       }));
-      
+
       res.json(formattedDoctors);
     } catch (error) {
       console.error("Error fetching doctors:", error);
@@ -25983,7 +26031,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/mobile/patient/available-slots", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
       const { doctorId, date } = req.query;
-      
+
       // Generate sample available slots (in a real app, this would check actual availability)
       const slots = [
         { time: '09:00', available: true },
@@ -25999,7 +26047,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         { time: '16:00', available: true },
         { time: '16:30', available: true }
       ].filter(slot => slot.available);
-      
+
       res.json(slots);
     } catch (error) {
       console.error("Error fetching available slots:", error);
@@ -26011,11 +26059,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = req.user!.id;
       const patient = await storage.getPatient(patientId, req.tenant!.id);
-      
+
       if (!patient) {
         return res.status(404).json({ error: "Patient profile not found" });
       }
-      
+
       res.json(patient);
     } catch (error) {
       console.error("Error fetching patient profile:", error);
@@ -26027,11 +26075,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const patientId = req.user!.id;
       const updatedPatient = await storage.updatePatient(patientId, req.tenant!.id, req.body);
-      
+
       if (!updatedPatient) {
         return res.status(404).json({ error: "Patient not found" });
       }
-      
+
       res.json(updatedPatient);
     } catch (error) {
       console.error("Error updating patient profile:", error);
@@ -26042,23 +26090,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/mobile/patient/lab-results", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
       console.log("🏥 MOBILE LAB RESULTS DEBUG: Starting request for user:", req.user?.email);
-      
+
       // Find the patient record by the authenticated user's email
       const patients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
       console.log("🏥 MOBILE LAB RESULTS DEBUG: Found patients count:", patients.length);
-      
+
       const patient = patients.find(p => p.email === req.user!.email);
       console.log("🏥 MOBILE LAB RESULTS DEBUG: Found matching patient:", patient ? { id: patient.id, email: patient.email } : null);
-      
+
       if (!patient) {
         console.log("🏥 MOBILE LAB RESULTS DEBUG: No patient found for email:", req.user!.email);
         return res.status(404).json({ error: "Patient record not found for authenticated user" });
       }
-      
+
       console.log("🏥 MOBILE LAB RESULTS DEBUG: Getting lab results for patient ID:", patient.id);
       const labResults = await storage.getLabResultsByPatient(patient.id, req.tenant!.id);
       console.log("🏥 MOBILE LAB RESULTS DEBUG: Found lab results count:", labResults.length);
-      
+
       res.json(labResults);
     } catch (error) {
       console.error("Error fetching patient lab results:", error);
@@ -26070,7 +26118,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/mobile/video/start-consultation", authMiddleware, requireRole(["doctor"]), async (req: TenantRequest, res) => {
     try {
       const { appointmentId } = req.body;
-      
+
       // Generate BigBlueButton meeting URL (simplified)
       const meetingData = {
         meetingId: `consultation-${appointmentId}-${Date.now()}`,
@@ -26078,7 +26126,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         moderatorPassword: `mod-${appointmentId}`,
         attendeePassword: `att-${appointmentId}`
       };
-      
+
       res.json(meetingData);
     } catch (error) {
       console.error("Error starting video consultation:", error);
@@ -26089,13 +26137,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/mobile/video/join-consultation", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
       const { appointmentId } = req.body;
-      
+
       // Generate BigBlueButton join URL for patient
       const joinData = {
         meetingUrl: `https://vid2.averox.com/join?meeting=consultation-${appointmentId}&role=attendee`,
         patientPassword: `att-${appointmentId}`
       };
-      
+
       res.json(joinData);
     } catch (error) {
       console.error("Error joining video consultation:", error);
@@ -26111,7 +26159,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const { messages } = req.body;
-      
+
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
       }
@@ -26135,7 +26183,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           const date = new Date(now);
           date.setDate(date.getDate() + dayOffset + 1);
           const dateStr = date.toISOString().split('T')[0];
-          
+
           return availableDoctors.flatMap(doctor => [
             { date: dateStr, time: '09:00', doctorId: doctor.id },
             { date: dateStr, time: '10:00', doctorId: doctor.id },
@@ -26178,10 +26226,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Use local NLP processing directly
       const lastMessage = messages[messages.length - 1];
-      
+
       // Process with local NLP fallback (call private method through a workaround)
       const nlpResult = await (aiService as any).processWithLocalNLP(lastMessage.content, conversationContext);
-      
+
       // Use the response from local NLP directly
       let finalResponse = nlpResult.response;
 
@@ -26225,7 +26273,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Get full user data for patient info
       const fullUser = await storage.getUser(req.user.id, req.tenant!.id);
-      
+
       res.json({
         availableDoctors,
         patientInfo: {
@@ -26253,7 +26301,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Find or create patient by email
       let patient = await storage.getPatientByEmail(email, organization.id);
-      
+
       if (!patient) {
         // Create new patient
         const patientData = {
@@ -26327,7 +26375,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Find or create patient by email
       let patient = await storage.getPatientByEmail(email, organization.id);
-      
+
       if (!patient) {
         // Create new patient
         const patientData = {
@@ -26395,7 +26443,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // ====== INVENTORY MANAGEMENT ROUTES ======
-  
+
   // Categories
   app.get("/api/inventory/categories", authMiddleware, requireRole(["admin", "doctor", "nurse", "receptionist", "pharmacist"]), async (req: TenantRequest, res) => {
     try {
@@ -26449,7 +26497,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const itemId = parseInt(req.params.id);
       const item = await inventoryService.getItem(itemId, req.tenant!.id);
-      
+
       if (!item) {
         return res.status(404).json({ error: "Item not found" });
       }
@@ -26517,7 +26565,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const updates = req.body;
 
       const item = await inventoryService.updateItem(itemId, req.tenant!.id, updates);
-      
+
       if (!item) {
         return res.status(404).json({ error: "Item not found" });
       }
@@ -26540,17 +26588,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const deleted = await inventoryService.deleteItem(itemId, req.tenant!.id);
-      
+
       if (!deleted) {
         console.log(`Item ${itemId} not found or already deleted`);
         return res.status(404).json({ error: "Item not found" });
       }
 
       console.log(`Item ${itemId} deleted successfully`);
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: "Item deleted successfully",
-        id: itemId 
+        id: itemId
       });
     } catch (error) {
       console.error("Error deleting inventory item:", error);
@@ -26569,11 +26617,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }).parse(req.body);
 
       const result = await inventoryService.updateStock(
-        itemId, 
-        req.tenant!.id, 
-        quantity, 
-        movementType, 
-        notes, 
+        itemId,
+        req.tenant!.id,
+        quantity,
+        movementType,
+        notes,
         req.user!.id
       );
 
@@ -26627,13 +26675,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (!req.tenant?.id) {
         return res.status(400).json({ error: "Organization ID is required" });
       }
-      
+
       const itemNames = await inventoryService.getItemNames(req.tenant.id);
       res.json(itemNames);
     } catch (error: any) {
       console.error("[INVENTORY] Error fetching item names:", error);
-      res.status(500).json({ 
-        error: error.message || "Failed to fetch item names" 
+      res.status(500).json({
+        error: error.message || "Failed to fetch item names"
       });
     }
   });
@@ -26643,7 +26691,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       console.log("[INVENTORY] Creating item name, body:", req.body);
       console.log("[INVENTORY] Tenant ID:", req.tenant?.id);
-      
+
       if (!req.tenant?.id) {
         return res.status(400).json({ error: "Organization ID is required" });
       }
@@ -26662,17 +26710,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       res.status(201).json(itemName);
     } catch (error: any) {
       console.error("[INVENTORY] Error creating item name:", error);
-      
+
       // Handle Zod validation errors
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation error", 
-          details: error.errors 
+        return res.status(400).json({
+          error: "Validation error",
+          details: error.errors
         });
       }
-      
-      res.status(500).json({ 
-        error: error.message || "Failed to create item name" 
+
+      res.status(500).json({
+        error: error.message || "Failed to create item name"
       });
     }
   });
@@ -26681,13 +26729,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.patch("/api/inventory/item-names/:id", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const { id } = req.params;
-      
+
       // Validate ID parameter
       const itemNameId = parseInt(id);
       if (isNaN(itemNameId)) {
         return res.status(400).json({ error: "Invalid item name ID" });
       }
-      
+
       if (!req.tenant?.id) {
         return res.status(400).json({ error: "Organization ID is required" });
       }
@@ -26702,9 +26750,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }).parse(req.body);
       } catch (parseError) {
         if (parseError instanceof z.ZodError) {
-          return res.status(400).json({ 
-            error: "Validation error", 
-            details: parseError.errors 
+          return res.status(400).json({
+            error: "Validation error",
+            details: parseError.errors
           });
         }
         throw parseError;
@@ -26724,22 +26772,22 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       return res.json(itemName);
     } catch (error: any) {
       console.error("[INVENTORY] Error updating item name:", error);
-      
+
       // Ensure we always return JSON, even on errors
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: "Validation error", 
-          details: error.errors 
+        return res.status(400).json({
+          error: "Validation error",
+          details: error.errors
         });
       }
-      
+
       // Check if response was already sent
       if (res.headersSent) {
         return;
       }
-      
-      return res.status(500).json({ 
-        error: error.message || "Failed to update item name" 
+
+      return res.status(500).json({
+        error: error.message || "Failed to update item name"
       });
     }
   });
@@ -26764,8 +26812,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       res.json({ message: "Item name deleted successfully", itemName });
     } catch (error: any) {
       console.error("[INVENTORY] Error deleting item name:", error);
-      res.status(500).json({ 
-        error: error.message || "Failed to delete item name" 
+      res.status(500).json({
+        error: error.message || "Failed to delete item name"
       });
     }
   });
@@ -26839,15 +26887,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const purchaseOrderId = parseInt(req.params.id);
       const { email } = req.body;
-      
+
       // Email is optional - if not provided, will use supplier email from database
       const emailToUse = email && email.trim() ? email.trim() : undefined;
-      
+
       await inventoryService.sendPurchaseOrderEmail(purchaseOrderId, req.tenant!.id, emailToUse);
-      
-      res.json({ 
-        success: true, 
-        message: "Purchase order sent successfully" 
+
+      res.json({
+        success: true,
+        message: "Purchase order sent successfully"
       });
     } catch (error: any) {
       console.error("Error sending purchase order email:", error);
@@ -26859,16 +26907,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.delete("/api/inventory/purchase-orders/:id", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const purchaseOrderId = parseInt(req.params.id);
-      
+
       if (isNaN(purchaseOrderId)) {
         return res.status(400).json({ error: "Invalid purchase order ID" });
       }
 
       await inventoryService.deletePurchaseOrder(purchaseOrderId, req.tenant!.id);
-      
-      res.json({ 
-        success: true, 
-        message: "Purchase order deleted successfully" 
+
+      res.json({
+        success: true,
+        message: "Purchase order deleted successfully"
       });
     } catch (error) {
       console.error("Error deleting purchase order:", error);
@@ -26913,7 +26961,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const itemId = req.query.itemId ? parseInt(req.query.itemId as string) : undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      
+
       const movements = await inventoryService.getStockMovements(req.tenant!.id, itemId, limit);
       res.json(movements);
     } catch (error) {
@@ -26939,21 +26987,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (isNaN(receiptId)) {
         return res.status(400).json({ error: "Invalid receipt ID" });
       }
-      
+
       console.log(`[INVENTORY API] Fetching goods receipt ${receiptId} for organization ${req.tenant!.id}`);
       const receipt = await inventoryService.getGoodsReceiptById(receiptId, req.tenant!.id);
-      
+
       if (!receipt) {
         console.log(`[INVENTORY API] Goods receipt ${receiptId} not found`);
         return res.status(404).json({ error: "Goods receipt not found" });
       }
-      
+
       console.log(`[INVENTORY API] Successfully fetched goods receipt ${receiptId} with ${receipt.items?.length || 0} items`);
       res.json(receipt);
     } catch (error: any) {
       console.error("[INVENTORY API] Error fetching goods receipt detail:", error);
       console.error("[INVENTORY API] Error stack:", error?.stack);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to fetch goods receipt detail",
         message: error?.message || "Unknown error"
       });
@@ -27014,7 +27062,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       try {
         clinicHeader = await storage.getActiveClinicHeader(organizationId);
         clinicFooter = await storage.getActiveClinicFooter(organizationId);
-    } catch (error) {
+      } catch (error) {
         console.log('[GOODS-RECEIPT-PDF] Could not fetch clinic header/footer:', error);
       }
 
@@ -27211,10 +27259,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Right Column
       const receivedDate = new Date(receipt.receivedDate);
-      const formattedDate = receivedDate.toLocaleDateString('en-GB', { 
-        day: '2-digit', 
-        month: 'short', 
-        year: 'numeric' 
+      const formattedDate = receivedDate.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
       });
 
       page.drawText('Received Date:', {
@@ -27241,10 +27289,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           color: rgb(0, 0, 0),
         });
         const orderDate = new Date(receipt.purchaseOrder.createdAt);
-        const formattedOrderDate = orderDate.toLocaleDateString('en-GB', { 
-          day: '2-digit', 
-          month: 'short', 
-          year: 'numeric' 
+        const formattedOrderDate = orderDate.toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric'
         });
         page.drawText(formattedOrderDate, {
           x: rightColumnX + 100,
@@ -27264,10 +27312,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             color: rgb(0, 0, 0),
           });
           const expectedDeliveryDate = new Date(receipt.purchaseOrder.expectedDeliveryDate);
-          const formattedExpectedDate = expectedDeliveryDate.toLocaleDateString('en-GB', { 
-            day: '2-digit', 
-            month: 'short', 
-            year: 'numeric' 
+          const formattedExpectedDate = expectedDeliveryDate.toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
           });
           page.drawText(formattedExpectedDate, {
             x: rightColumnX + 100,
@@ -27283,11 +27331,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Account for supplier email and expected delivery date if they exist
       const hasSupplierEmail = supplierEmail ? true : false;
       const receiptDetailsBottom = yPosition - (hasSupplierEmail ? 60 : 40) - (hasExpectedDelivery ? 20 : 0);
-      
+
       // Purchase Order Details Section - Place it right after receipt details
       if (receipt.purchaseOrder) {
         yPosition = receiptDetailsBottom - 25; // Position right after receipt details
-        
+
         page.drawText('Purchase Order Details:', {
           x: margin,
           y: yPosition,
@@ -27295,9 +27343,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           font: helveticaBoldFont,
           color: rgb(0, 0, 0),
         });
-        
+
         yPosition -= 20;
-        
+
         // PO Status
         page.drawText('PO Status:', {
           x: leftColumnX,
@@ -27316,8 +27364,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
 
         // PO Total Amount
-        const poTotalAmount = typeof receipt.purchaseOrder.totalAmount === 'number' 
-          ? receipt.purchaseOrder.totalAmount 
+        const poTotalAmount = typeof receipt.purchaseOrder.totalAmount === 'number'
+          ? receipt.purchaseOrder.totalAmount
           : parseFloat(String(receipt.purchaseOrder.totalAmount || '0')) || 0;
         page.drawText('PO Total Amount:', {
           x: rightColumnX,
@@ -27337,13 +27385,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         yPosition -= 20;
 
         // Tax / Discount
-        const poTaxAmount = typeof receipt.purchaseOrder.taxAmount === 'number' 
-          ? receipt.purchaseOrder.taxAmount 
+        const poTaxAmount = typeof receipt.purchaseOrder.taxAmount === 'number'
+          ? receipt.purchaseOrder.taxAmount
           : parseFloat(String(receipt.purchaseOrder.taxAmount || '0')) || 0;
-        const poDiscountAmount = typeof receipt.purchaseOrder.discountAmount === 'number' 
-          ? receipt.purchaseOrder.discountAmount 
+        const poDiscountAmount = typeof receipt.purchaseOrder.discountAmount === 'number'
+          ? receipt.purchaseOrder.discountAmount
           : parseFloat(String(receipt.purchaseOrder.discountAmount || '0')) || 0;
-        
+
         page.drawText('Tax / Discount:', {
           x: leftColumnX,
           y: yPosition,
@@ -27393,10 +27441,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       } else {
         yPosition = receiptDetailsBottom - 25;
       }
-      
+
       // Ensure minimum spacing between Purchase Order Details and items table
       yPosition -= 25; // Add spacing before items table
-      
+
       // Ensure table doesn't start too high (minimum top margin check)
       const minTableTopY = headerBottomY - 260;
       if (yPosition > minTableTopY) {
@@ -27456,8 +27504,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       for (const item of displayItems) {
         const quantity = item.quantity || item.quantityReceived || item.receivedQuantity || 0;
         const unitPrice = typeof item.unitPrice === 'number' ? item.unitPrice : parseFloat(String(item.unitPrice || '0')) || 0;
-        const itemTotal = typeof item.totalPrice === 'number' && item.totalPrice > 0 
-          ? item.totalPrice 
+        const itemTotal = typeof item.totalPrice === 'number' && item.totalPrice > 0
+          ? item.totalPrice
           : unitPrice * quantity;
         calculatedTotal += itemTotal;
       }
@@ -27548,8 +27596,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
         // Calculate total price: unitPrice * quantity
         const itemTotalPrice = unitPrice * quantity;
-        const totalPrice = typeof item.totalPrice === 'number' && item.totalPrice > 0 
-          ? item.totalPrice 
+        const totalPrice = typeof item.totalPrice === 'number' && item.totalPrice > 0
+          ? item.totalPrice
           : itemTotalPrice;
         page.drawText(`£${totalPrice.toFixed(2)}`, {
           x: currentX,
@@ -27567,7 +27615,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const receiptTotalAmount = typeof receipt.totalAmount === 'number' ? receipt.totalAmount : parseFloat(String(receipt.totalAmount || '0')) || 0;
       // Use calculated total if receipt total is 0 or invalid, otherwise use receipt total
       const finalTotalAmount = (receiptTotalAmount > 0) ? receiptTotalAmount : calculatedTotal;
-      
+
       page.drawText('Total Amount:', {
         x: width - margin - 150,
         y: yPosition,
@@ -27667,7 +27715,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Check if goods receipt already exists for this purchase order
       const exists = await inventoryService.checkGoodsReceiptExists(receiptData.purchaseOrderId, req.tenant!.id);
       if (exists) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Purchase Order already exists",
           message: "This Purchase Order already exists in database. Please select another purchase order."
         });
@@ -27693,7 +27741,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error: any) {
       console.error("Error creating goods receipt:", error);
       if (error.message && error.message.includes("already exists")) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Purchase Order already exists",
           message: error.message
         });
@@ -27879,11 +27927,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const saleId = parseInt(req.params.id);
       const sale = await inventoryService.getSaleById(saleId, req.tenant!.id);
-      
+
       if (!sale) {
         return res.status(404).json({ error: "Sale not found" });
       }
-      
+
       res.json(sale);
     } catch (error) {
       console.error("Error fetching sale:", error);
@@ -28039,11 +28087,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const returnId = parseInt(req.params.id);
       const returnRecord = await inventoryService.getReturnById(returnId, req.tenant!.id);
-      
+
       if (!returnRecord) {
         return res.status(404).json({ error: "Return not found" });
       }
-      
+
       res.json(returnRecord);
     } catch (error) {
       console.error("Error fetching return:", error);
@@ -28148,12 +28196,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const payload = z.object({
         itemId: z.number(),
         movementType: z.enum([
-          "purchase", 
-          "sale", 
-          "return", 
-          "waste", 
-          "damaged", 
-          "adjustment_in", 
+          "purchase",
+          "sale",
+          "return",
+          "waste",
+          "damaged",
+          "adjustment_in",
           "adjustment_out",
           "transfer_in",
           "transfer_out"
@@ -28164,7 +28212,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }).parse(req.body);
 
       const organizationId = req.tenant!.id;
-      
+
       // Movement Type Master List - Source of Truth
       const MOVEMENT_DIRECTIONS: Record<string, "IN" | "OUT"> = {
         purchase: "IN",
@@ -28192,8 +28240,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Validate stock for OUT movements
       if (direction === "OUT" && payload.quantity > item.currentStock) {
-        return res.status(400).json({ 
-          error: `Insufficient stock. Cannot remove ${payload.quantity} units. Only ${item.currentStock} units available.` 
+        return res.status(400).json({
+          error: `Insufficient stock. Cannot remove ${payload.quantity} units. Only ${item.currentStock} units available.`
         });
       }
 
@@ -28216,8 +28264,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const backendMovementType = MOVEMENT_TYPE_MAP[payload.movementType] || payload.movementType;
 
       // Combine reason and notes for comprehensive audit trail
-      const notes = payload.notes 
-        ? `Reason: ${payload.reason}. Notes: ${payload.notes}` 
+      const notes = payload.notes
+        ? `Reason: ${payload.reason}. Notes: ${payload.notes}`
         : `Reason: ${payload.reason}`;
 
       // Update stock using the service
@@ -28277,7 +28325,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.post("/api/chatbot/config", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const existingConfig = await storage.getChatbotConfig(req.tenant!.id);
-      
+
       if (existingConfig) {
         // Update existing config
         const updated = await storage.updateChatbotConfig(req.tenant!.id, req.body);
@@ -28343,7 +28391,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Process message with AI
       const { chatbotAIService } = await import('./services/chatbot-ai.js');
       const aiResponse = await chatbotAIService.processMessage(message, sessionHistory);
-      
+
       // Update session with extracted data
       if (aiResponse.intent.extractedData) {
         const updateData: any = {};
@@ -28357,12 +28405,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           updateData.extractedEmail = aiResponse.intent.extractedData.email;
         }
         updateData.currentIntent = aiResponse.intent.intent;
-        
+
         if (Object.keys(updateData).length > 0) {
           await storage.updateChatbotSession(session.id, organizationId, updateData);
         }
       }
-      
+
       // Save bot message with AI processing data
       const botMessage = {
         organizationId,
@@ -28445,20 +28493,20 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   app.get("/api/billing/invoices", requireRole(["admin", "doctor", "nurse", "receptionist", "patient"]), async (req: TenantRequest, res) => {
     try {
       const { status } = req.query;
-      
+
       console.log("📋 Fetching invoices for organization:", req.tenant!.id, "Status filter:", status);
-      
+
       let invoices = await storage.getInvoicesByOrganization(
         req.tenant!.id,
         status as string | undefined
       );
-      
+
       // Filter invoices for patient users - only show their own invoices
       if (req.user?.role === "patient") {
         // Find the patient record for this user to get their patientId string
         const patients = await storage.getPatientsByOrganization(req.tenant!.id);
         const userPatient = patients.find(p => p.email?.toLowerCase() === req.user!.email.toLowerCase());
-        
+
         if (userPatient) {
           // Filter by patient's text patientId field (e.g., "P000007")
           invoices = invoices.filter(invoice => invoice.patientId === userPatient.patientId);
@@ -28468,163 +28516,163 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.log(`⚠️ No patient record found for user ${req.user!.email}`);
         }
       }
-      
+
       // Enrich invoices with provider/doctor information
       const enrichedInvoices = await Promise.all(invoices.map(async (invoice: any) => {
         // Get provider info from invoice items or invoice-level fields
         let providerName = null;
         let providerRole = null;
-        
+
         // Get serviceType and serviceId from invoice level or first item
         const serviceType = invoice.serviceType || invoice.items?.[0]?.serviceType;
         const serviceId = invoice.serviceId || invoice.items?.[0]?.serviceId || invoice.serviceIds?.[0];
-        
+
         if (serviceType && serviceId) {
-            try {
-              const serviceIdNum = Number(serviceId);
-              const isNumericId = !isNaN(serviceIdNum);
-              
-              if (serviceType === 'appointments') {
-                let appointment: any[] = [];
-                
-                // Try matching by numeric ID first
-                if (isNumericId) {
-                  appointment = await db
-                    .select({ providerId: schema.appointments.providerId })
-                    .from(schema.appointments)
-                    .where(eq(schema.appointments.id, serviceIdNum))
-                    .limit(1);
+          try {
+            const serviceIdNum = Number(serviceId);
+            const isNumericId = !isNaN(serviceIdNum);
+
+            if (serviceType === 'appointments') {
+              let appointment: any[] = [];
+
+              // Try matching by numeric ID first
+              if (isNumericId) {
+                appointment = await db
+                  .select({ providerId: schema.appointments.providerId })
+                  .from(schema.appointments)
+                  .where(eq(schema.appointments.id, serviceIdNum))
+                  .limit(1);
+              }
+
+              // If not found, try matching by appointmentId string
+              if (appointment.length === 0 && typeof serviceId === 'string') {
+                appointment = await db
+                  .select({ providerId: schema.appointments.providerId })
+                  .from(schema.appointments)
+                  .where(eq(schema.appointments.appointmentId, serviceId))
+                  .limit(1);
+              }
+
+              if (appointment[0]?.providerId) {
+                const provider = await db
+                  .select({ firstName: schema.users.firstName, lastName: schema.users.lastName, role: schema.users.role })
+                  .from(schema.users)
+                  .where(eq(schema.users.id, appointment[0].providerId))
+                  .limit(1);
+
+                if (provider[0]) {
+                  providerName = `${provider[0].firstName} ${provider[0].lastName}`;
+                  providerRole = provider[0].role;
                 }
-                
-                // If not found, try matching by appointmentId string
-                if (appointment.length === 0 && typeof serviceId === 'string') {
-                  appointment = await db
-                    .select({ providerId: schema.appointments.providerId })
-                    .from(schema.appointments)
-                    .where(eq(schema.appointments.appointmentId, serviceId))
-                    .limit(1);
-                }
-                
-                if (appointment[0]?.providerId) {
+              }
+            } else if (serviceType === 'labResults') {
+              let labResult: any[] = [];
+
+              // Try matching by numeric ID first
+              if (isNumericId) {
+                labResult = await db
+                  .select({
+                    doctorName: schema.labResults.doctorName,
+                    orderedBy: schema.labResults.orderedBy
+                  })
+                  .from(schema.labResults)
+                  .where(eq(schema.labResults.id, serviceIdNum))
+                  .limit(1);
+              }
+
+              // If not found, try matching by testId string
+              if (labResult.length === 0 && typeof serviceId === 'string') {
+                labResult = await db
+                  .select({
+                    doctorName: schema.labResults.doctorName,
+                    orderedBy: schema.labResults.orderedBy
+                  })
+                  .from(schema.labResults)
+                  .where(eq(schema.labResults.testId, serviceId))
+                  .limit(1);
+              }
+
+              if (labResult[0]) {
+                // First try to use doctorName if available
+                if (labResult[0].doctorName) {
+                  providerName = labResult[0].doctorName;
+                  providerRole = null; // doctorName doesn't include role info
+                } else if (labResult[0].orderedBy) {
+                  // Fallback to orderedBy to get provider from users table
                   const provider = await db
                     .select({ firstName: schema.users.firstName, lastName: schema.users.lastName, role: schema.users.role })
                     .from(schema.users)
-                    .where(eq(schema.users.id, appointment[0].providerId))
+                    .where(eq(schema.users.id, labResult[0].orderedBy))
                     .limit(1);
-                  
+
                   if (provider[0]) {
                     providerName = `${provider[0].firstName} ${provider[0].lastName}`;
                     providerRole = provider[0].role;
                   }
                 }
-              } else if (serviceType === 'labResults') {
-                let labResult: any[] = [];
-                
-                // Try matching by numeric ID first
-                if (isNumericId) {
-                  labResult = await db
-                    .select({ 
-                      doctorName: schema.labResults.doctorName,
-                      orderedBy: schema.labResults.orderedBy 
-                    })
-                    .from(schema.labResults)
-                    .where(eq(schema.labResults.id, serviceIdNum))
+              }
+            } else if (serviceType === 'imaging') {
+              let imagingRecord: any[] = [];
+
+              // Try matching by numeric ID first
+              if (isNumericId) {
+                imagingRecord = await db
+                  .select({
+                    selectedUserId: schema.medicalImages.selectedUserId,
+                    uploadedBy: schema.medicalImages.uploadedBy,
+                    radiologist: schema.medicalImages.radiologist
+                  })
+                  .from(schema.medicalImages)
+                  .where(eq(schema.medicalImages.id, serviceIdNum))
+                  .limit(1);
+              }
+
+              // If not found, try matching by imageId string
+              if (imagingRecord.length === 0 && typeof serviceId === 'string') {
+                imagingRecord = await db
+                  .select({
+                    selectedUserId: schema.medicalImages.selectedUserId,
+                    uploadedBy: schema.medicalImages.uploadedBy,
+                    radiologist: schema.medicalImages.radiologist
+                  })
+                  .from(schema.medicalImages)
+                  .where(eq(schema.medicalImages.imageId, serviceId))
+                  .limit(1);
+              }
+
+              if (imagingRecord[0]) {
+                // First try to use selectedUserId if available
+                const providerId = imagingRecord[0].selectedUserId || imagingRecord[0].uploadedBy;
+                if (providerId) {
+                  const provider = await db
+                    .select({ firstName: schema.users.firstName, lastName: schema.users.lastName, role: schema.users.role })
+                    .from(schema.users)
+                    .where(eq(schema.users.id, providerId))
                     .limit(1);
-                }
-                
-                // If not found, try matching by testId string
-                if (labResult.length === 0 && typeof serviceId === 'string') {
-                  labResult = await db
-                    .select({ 
-                      doctorName: schema.labResults.doctorName,
-                      orderedBy: schema.labResults.orderedBy 
-                    })
-                    .from(schema.labResults)
-                    .where(eq(schema.labResults.testId, serviceId))
-                    .limit(1);
-                }
-                
-                if (labResult[0]) {
-                  // First try to use doctorName if available
-                  if (labResult[0].doctorName) {
-                    providerName = labResult[0].doctorName;
-                    providerRole = null; // doctorName doesn't include role info
-                  } else if (labResult[0].orderedBy) {
-                    // Fallback to orderedBy to get provider from users table
-                    const provider = await db
-                      .select({ firstName: schema.users.firstName, lastName: schema.users.lastName, role: schema.users.role })
-                      .from(schema.users)
-                      .where(eq(schema.users.id, labResult[0].orderedBy))
-                      .limit(1);
-                    
-                    if (provider[0]) {
-                      providerName = `${provider[0].firstName} ${provider[0].lastName}`;
-                      providerRole = provider[0].role;
-                    }
+
+                  if (provider[0]) {
+                    providerName = `${provider[0].firstName} ${provider[0].lastName}`;
+                    providerRole = provider[0].role;
                   }
-                }
-              } else if (serviceType === 'imaging') {
-                let imagingRecord: any[] = [];
-                
-                // Try matching by numeric ID first
-                if (isNumericId) {
-                  imagingRecord = await db
-                    .select({ 
-                      selectedUserId: schema.medicalImages.selectedUserId,
-                      uploadedBy: schema.medicalImages.uploadedBy, 
-                      radiologist: schema.medicalImages.radiologist 
-                    })
-                    .from(schema.medicalImages)
-                    .where(eq(schema.medicalImages.id, serviceIdNum))
-                    .limit(1);
-                }
-                
-                // If not found, try matching by imageId string
-                if (imagingRecord.length === 0 && typeof serviceId === 'string') {
-                  imagingRecord = await db
-                    .select({ 
-                      selectedUserId: schema.medicalImages.selectedUserId,
-                      uploadedBy: schema.medicalImages.uploadedBy, 
-                      radiologist: schema.medicalImages.radiologist 
-                    })
-                    .from(schema.medicalImages)
-                    .where(eq(schema.medicalImages.imageId, serviceId))
-                    .limit(1);
-                }
-                
-                if (imagingRecord[0]) {
-                  // First try to use selectedUserId if available
-                  const providerId = imagingRecord[0].selectedUserId || imagingRecord[0].uploadedBy;
-                  if (providerId) {
-                    const provider = await db
-                      .select({ firstName: schema.users.firstName, lastName: schema.users.lastName, role: schema.users.role })
-                      .from(schema.users)
-                      .where(eq(schema.users.id, providerId))
-                      .limit(1);
-                    
-                    if (provider[0]) {
-                      providerName = `${provider[0].firstName} ${provider[0].lastName}`;
-                      providerRole = provider[0].role;
-                    }
-                  } else if (imagingRecord[0].radiologist) {
-                    // Fallback to radiologist name if available
-                    providerName = imagingRecord[0].radiologist;
-                    providerRole = 'radiologist';
-                  }
+                } else if (imagingRecord[0].radiologist) {
+                  // Fallback to radiologist name if available
+                  providerName = imagingRecord[0].radiologist;
+                  providerRole = 'radiologist';
                 }
               }
-            } catch (error) {
-              console.error(`Error fetching provider info for invoice ${invoice.id}:`, error);
             }
+          } catch (error) {
+            console.error(`Error fetching provider info for invoice ${invoice.id}:`, error);
+          }
         }
-        
+
         return {
           ...invoice,
           providerName,
           providerRole
         };
       }));
-      
+
       console.log(`✅ Found ${enrichedInvoices.length} invoices`);
       res.json(enrichedInvoices);
     } catch (error) {
@@ -28638,18 +28686,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const doctorUserId = req.user!.id;
       const organizationId = req.tenant!.id;
-      
+
       console.log(`🩺 Fetching doctor/nurse-specific invoices for user ID: ${doctorUserId}, organization: ${organizationId}`);
-      
+
       // Get the doctor's full name
       const doctor = await db
         .select()
         .from(schema.users)
         .where(eq(schema.users.id, doctorUserId))
         .limit(1);
-      
+
       const doctorFullName = doctor[0] ? `${doctor[0].firstName} ${doctor[0].lastName}` : '';
-      
+
       // Fetch all lab results for this doctor
       const doctorLabResults = await db
         .select()
@@ -28660,17 +28708,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             eq(schema.labResults.orderedBy, doctorUserId)
           )
         );
-      
+
       // Fetch all medical images for this doctor (uploaded by OR radiologist)
       const allOrgImages = await db
         .select()
         .from(schema.medicalImages)
         .where(eq(schema.medicalImages.organizationId, organizationId));
-      
-      const doctorImages = allOrgImages.filter(img => 
+
+      const doctorImages = allOrgImages.filter(img =>
         img.uploadedBy === doctorUserId || img.radiologist === doctorFullName
       );
-      
+
       // Fetch all appointments for this doctor
       const doctorAppointments = await db
         .select()
@@ -28681,15 +28729,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             eq(schema.appointments.providerId, doctorUserId)
           )
         );
-      
+
       // Get all invoices for the organization
       const allInvoices = await storage.getInvoicesByOrganization(organizationId);
-      
+
       // Match invoices by service_id with the respective tables
-      const labInvoices = allInvoices.filter(invoice => 
+      const labInvoices = allInvoices.filter(invoice =>
         invoice.serviceId && doctorLabResults.some(lr => lr.testId === invoice.serviceId)
       );
-      
+
       const imagingInvoices = allInvoices.filter(invoice => {
         // Match by serviceId with image IDs
         const matchesImageId = invoice.serviceId && doctorImages.some(img => img.imageId === invoice.serviceId);
@@ -28697,18 +28745,18 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const isImagingInvoice = invoice.serviceType === 'medical_images' && doctorImages.length > 0;
         return matchesImageId || isImagingInvoice;
       });
-      
-      const appointmentInvoices = allInvoices.filter(invoice => 
+
+      const appointmentInvoices = allInvoices.filter(invoice =>
         invoice.serviceId && doctorAppointments.some(apt => apt.appointmentId === invoice.serviceId)
       );
-      
+
       // Invoices created by or attributed to this user (doctor_id on invoice)
       const invDoctorId = (inv: { id: number; doctorId?: number | null; doctor_id?: number | null }) =>
         inv.doctorId ?? (inv as any).doctor_id ?? null;
       const invoicesByDoctorId = allInvoices.filter(invoice =>
         invDoctorId(invoice) === doctorUserId
       );
-      
+
       // Overall: All unique invoices that match this doctor/nurse (by service or by doctor_id)
       const allMatchingIds = new Set([
         ...labInvoices.map(i => i.id),
@@ -28716,11 +28764,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         ...appointmentInvoices.map(i => i.id),
         ...invoicesByDoctorId.map(i => i.id)
       ]);
-      
+
       const overallInvoices = allInvoices.filter(invoice => allMatchingIds.has(invoice.id));
-      
+
       console.log(`✅ Doctor invoices found - Overall: ${overallInvoices.length}, Appointments: ${appointmentInvoices.length}, Lab: ${labInvoices.length}, Imaging: ${imagingInvoices.length}`);
-      
+
       res.json({
         overall: overallInvoices,
         appointments: appointmentInvoices,
@@ -28934,11 +28982,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const deleted = await storage.deleteInvoice(invoiceId, req.tenant!.id);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "Invoice not found" });
       }
-      
+
       res.json({ success: true });
     } catch (error) {
       console.error("Failed to delete invoice:", error);
@@ -29024,7 +29072,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       console.log("💰 Creating payment record:", paymentData);
       const createdPayment = await storage.createPayment(paymentData);
       console.log("✅ Payment record created successfully:", createdPayment.id);
-      
+
       res.status(201).json(createdPayment);
     } catch (error) {
       console.error("❌ Payment creation error:", error);
@@ -29049,7 +29097,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Generate unique invoice number
       const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
       console.log('[CASH PAYMENT] Generated invoice number:', invoiceNumber);
-      
+
       // Create invoice
       const invoiceData: any = {
         organizationId,
@@ -29083,7 +29131,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         notes: insuranceProvider ? `Insurance Provider: ${insuranceProvider}` : undefined,
         createdBy: req.user?.id
       };
-      
+
       // Add polymorphic association fields if provided
       if (serviceType && serviceId) {
         invoiceData.serviceType = serviceType;
@@ -29117,8 +29165,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const payment = await storage.createPayment(paymentData);
       console.log('[CASH PAYMENT] Payment created:', payment.id);
 
-      const responseData = { 
-        success: true, 
+      const responseData = {
+        success: true,
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber
@@ -29128,7 +29176,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           transactionId: payment.transactionId
         }
       };
-      
+
       console.log('[CASH PAYMENT] Sending response:', JSON.stringify(responseData, null, 2));
       res.setHeader('Content-Type', 'application/json');
       res.json(responseData);
@@ -29173,7 +29221,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
       });
 
-      res.json({ 
+      res.json({
         clientSecret: paymentIntent.client_secret,
         paymentIntentId: paymentIntent.id
       });
@@ -29195,7 +29243,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Retrieve payment intent to get metadata
       const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-      
+
       if (paymentIntent.status !== 'succeeded') {
         return res.status(400).json({ error: "Payment not successful" });
       }
@@ -29206,7 +29254,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Generate unique invoice number
       const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
-      
+
       // Create invoice
       const invoiceData: any = {
         organizationId,
@@ -29242,7 +29290,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         notes: metadata.insuranceProvider ? `Insurance Provider: ${metadata.insuranceProvider}` : undefined,
         createdBy: req.user?.id
       };
-      
+
       // Add polymorphic association fields if provided in metadata
       if (metadata.serviceType && metadata.serviceId) {
         invoiceData.serviceType = metadata.serviceType;
@@ -29254,7 +29302,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Send invoice creation notification to patient
       if (metadata.patientId) {
         const patient = await storage.getPatient(metadata.patientId, req.tenant!.id);
-        
+
         if (patient && patient.userId) {
           await createNotification({
             organizationId: req.tenant!.id,
@@ -29296,8 +29344,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       const payment = await storage.createPayment(paymentData);
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         invoice: {
           id: invoice.id,
           invoiceNumber: invoice.invoiceNumber
@@ -29361,7 +29409,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         description: `Payment for Invoice ${invoice.invoiceNumber} - ${invoice.patientName}`,
       });
 
-      res.json({ 
+      res.json({
         clientSecret: paymentIntent.client_secret,
         amount: amountToPay,
         invoiceNumber: invoice.invoiceNumber,
@@ -29369,23 +29417,23 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       });
     } catch (error: any) {
       console.error("Payment intent creation error:", error);
-      
+
       // Handle Stripe-specific errors with user-friendly messages
       if (error.type === 'StripeAuthenticationError') {
-        return res.status(500).json({ 
-          error: "Payment system configuration error. Please contact support." 
+        return res.status(500).json({
+          error: "Payment system configuration error. Please contact support."
         });
       }
-      
+
       if (error.type === 'StripeInvalidRequestError') {
-        return res.status(400).json({ 
-          error: "Invalid payment request. Please try again." 
+        return res.status(400).json({
+          error: "Invalid payment request. Please try again."
         });
       }
-      
+
       // Generic error for other cases
-      res.status(500).json({ 
-        error: "Unable to process payment. Please try again or contact support." 
+      res.status(500).json({
+        error: "Unable to process payment. Please try again or contact support."
       });
     }
   });
@@ -29454,8 +29502,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         updatedAt: new Date(),
       });
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: "Payment processed successfully",
         receiptUrl: paymentIntent.charges?.data[0]?.receipt_url
       });
@@ -29499,8 +29547,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         };
 
         // Parse total amount
-        const totalAmount = typeof invoice.totalAmount === 'string' 
-          ? parseFloat(invoice.totalAmount) 
+        const totalAmount = typeof invoice.totalAmount === 'string'
+          ? parseFloat(invoice.totalAmount)
           : invoice.totalAmount;
 
         // Build services table HTML
@@ -29515,7 +29563,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         `).join('');
 
         // Build payment history HTML
-        const paymentHistoryRows = invoice.payments && invoice.payments.length > 0 
+        const paymentHistoryRows = invoice.payments && invoice.payments.length > 0
           ? invoice.payments.map((payment: any) => `
             <div style="padding: 12px; background-color: #f0fdf4; border-left: 4px solid #4ade80; margin-bottom: 10px; border-radius: 4px;">
               Payment of £${parseFloat(payment.amount || 0).toFixed(2)} received on ${formatDate(payment.date)}
@@ -29647,20 +29695,20 @@ Cura EMR Team
         // Check if PDF file exists for this invoice
         const fileName = `${invoice.invoiceNumber}.pdf`;
         const filePath = path.join(process.cwd(), 'uploads', 'Invoices', req.tenant!.id.toString(), invoice.patientId, fileName);
-        
+
         console.log(`📎 Checking for PDF file at: ${filePath}`);
         console.log(`📋 Invoice details - Number: ${invoice.invoiceNumber}, Patient: ${invoice.patientId}, Org: ${req.tenant!.id}`);
-        
+
         let attachments: any[] = [];
         try {
           // Check if file exists using fs.promises.access
           await access(filePath, fs.constants.F_OK);
           console.log('✅ PDF file found! Reading file...');
-          
+
           // Read the PDF file using fs/promises as a raw buffer
           const pdfBuffer = await readFile(filePath);
           console.log(`📄 PDF file size: ${pdfBuffer.length} bytes`);
-          
+
           // Attach the PDF using the raw buffer (nodemailer will handle encoding)
           attachments.push({
             filename: `invoice-${invoice.invoiceNumber}.pdf`,
@@ -29673,7 +29721,7 @@ Cura EMR Team
           console.log('❌ No saved PDF found for invoice, sending email without attachment');
           console.log(`Error details: ${error.message}`);
         }
-        
+
         // Send email using the email service
         const emailSent = await emailService.sendEmail({
           to: recipientEmail,
@@ -29702,23 +29750,23 @@ Cura EMR Team
   app.post("/api/billing/save-invoice-pdf", requireRole(["admin", "doctor", "nurse", "receptionist", "patient"]), async (req: TenantRequest, res) => {
     try {
       const { invoiceNumber, patientId, pdfData } = req.body;
-      
+
       if (!invoiceNumber || !patientId || !pdfData) {
         return res.status(400).json({ error: "Invoice number, patient ID, and PDF data are required" });
       }
 
       const organizationId = req.tenant!.id;
-      
+
       // Create file path: uploads/Invoices/{organization_id}/{patient_id}/{invoice_number}.pdf
       const fileName = `${invoiceNumber}.pdf`;
       const filePath = path.join(process.cwd(), 'uploads', 'Invoices', organizationId.toString(), patientId, fileName);
-      
+
       // Convert base64 to buffer and save (outputFile creates directories automatically)
       const buffer = Buffer.from(pdfData, 'base64');
       await fse.outputFile(filePath, buffer);
-      
-      res.json({ 
-        success: true, 
+
+      res.json({
+        success: true,
         message: "Invoice saved successfully",
         filePath: `uploads/Invoices/${organizationId}/${patientId}/${fileName}`
       });
@@ -29731,7 +29779,7 @@ Cura EMR Team
   // SaaS routes already registered above before tenant middleware
 
   const httpServer = createServer(app);
-  
+
   console.log('[Socket.IO] Initializing Socket.IO server...');
   // Initialize Socket.IO server for real-time communication
   const io = new SocketIOServer(httpServer, {
@@ -29756,17 +29804,17 @@ Cura EMR Team
     socket.on('add_user', (data: { userId: string; deviceId?: string }) => {
       const { userId, deviceId } = data;
       console.log('[Socket.IO] User registered:', userId, 'Socket:', socket.id);
-      
+
       // Add user to online users map
       if (!onlineUsers.has(userId)) {
         onlineUsers.set(userId, new Set());
       }
       onlineUsers.get(userId)!.add(socket.id);
-      
+
       // Store userId on socket for easy lookup
       socket.data.userId = userId;
       socket.data.deviceId = deviceId;
-      
+
       // Broadcast updated online users list
       const onlineUserIds = Array.from(onlineUsers.keys());
       io.emit('online_users_update', { onlineUsers: onlineUserIds });
@@ -29802,16 +29850,16 @@ Cura EMR Team
     socket.on('register-user', (data: { userId: string; userName: string }) => {
       const { userId, userName } = data;
       console.log('[Socket.IO] User registered (Averox-style):', userId, userName);
-      
+
       socket.data.userId = userId;
       socket.data.userName = userName;
-      
+
       // Add to online users
       if (!onlineUsers.has(userId)) {
         onlineUsers.set(userId, new Set());
       }
       onlineUsers.get(userId)!.add(socket.id);
-      
+
       // Broadcast updated online users
       const onlineUserIds = Array.from(onlineUsers.keys());
       io.emit('online_users_update', { onlineUsers: onlineUserIds });
@@ -29821,13 +29869,13 @@ Cura EMR Team
     socket.on('disconnect', () => {
       const userId = socket.data.userId;
       console.log('[Socket.IO] Client disconnected:', socket.id, 'User:', userId);
-      
+
       if (userId && onlineUsers.has(userId)) {
         onlineUsers.get(userId)!.delete(socket.id);
         if (onlineUsers.get(userId)!.size === 0) {
           onlineUsers.delete(userId);
         }
-        
+
         // Broadcast updated online users list
         const onlineUserIds = Array.from(onlineUsers.keys());
         io.emit('online_users_update', { onlineUsers: onlineUserIds });
@@ -29837,16 +29885,16 @@ Cura EMR Team
 
   // Store Socket.IO instance on app for use in routes
   app.set('io', io);
-  
+
   // Start appointment reminder scheduler
   startAppointmentReminderScheduler();
   startVideoCallScheduler();
-  
+
   // HTML Generator for PDF Reports
   function generateReportHTML(study: any, reportFormData: any = {}) {
     const currentDate = new Date().toLocaleDateString('en-GB');
     const currentDateTime = new Date().toLocaleString('en-GB');
-    
+
     return `
 <!DOCTYPE html>
 <html>
@@ -30026,7 +30074,7 @@ Cura EMR Team
       }
 
       const { study, reportFormData, imageData, uploadedImageFileNames, radiologyImagePaths, previewImageDataUrls, replaceExistingReport } = req.body;
-      
+
       if (!study || !study.patientName) {
         return res.status(400).json({ error: "Study data is required" });
       }
@@ -30034,156 +30082,156 @@ Cura EMR Team
       // Get the actual medical image from database to ensure we use the correct image_id and patient_id.
       // Edit Generated Report flow: study.id = medical_images.id (image_id) → query radiology_images by medical_image_id → get file_path for each row → load all image files from server path → embed in regenerated PDF.
       const imageId = parseInt(study.id);
-      
+
       // Initialize embeddedCount at the very beginning to ensure it's always in scope
       let embeddedCount = 0;
-      
+
       const medicalImage = await storage.getMedicalImage(imageId, req.tenant!.id);
       if (!medicalImage) {
         console.error(`❌ PDF GENERATION: Medical image not found for id=${imageId}`);
         return res.status(404).json({ error: "Medical image not found" });
       }
-      
+
       // Use the medical image's organizationId for radiology_images query and image paths so we always match the org the images were saved under (avoids 0 rows when req.organizationId differs from tenant).
       const organizationId = Number((medicalImage as any).organizationId ?? (medicalImage as any).organization_id ?? req.organizationId ?? req.tenant!.id);
       const patientId = medicalImage.patientId; // Use numeric database patient ID
-      
+
       console.log(`\n🔍 PDF GENERATION START: study.id=${study.id} (medical_image_id), parsed imageId=${imageId}`);
       console.log(`🔍 PDF GENERATION: organizationId=${organizationId} (from medical image), tenant.id=${req.tenant!.id}`);
       console.log(`✅ PDF GENERATION: Found medical image - id=${medicalImage.id}, imageId=${medicalImage.imageId}, patientId=${patientId}`);
       console.log(`✅ PDF GENERATION: Will query radiology_images WHERE medical_image_id=${imageId} AND organization_id=${organizationId}`);
-      
+
       // Use image_id from database as PDF filename (e.g., IMG1760647135I10NC.pdf)
       const reportId = medicalImage.imageId;
-      
+
       console.log(`🔍 PDF GENERATION: Querying radiology_images for medical_image_id=${imageId}`);
-      
+
       // Save PDF in organizational structure: uploads/Imaging_Reports/organization_id/patients/patient_id/
       const reportsDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Reports', String(organizationId), 'patients', String(patientId));
       await fse.ensureDir(reportsDir);
-      
+
       // Fetch clinic headers and footers from database
       const clinicHeader = await storage.getActiveClinicHeader(organizationId);
       const clinicFooter = await storage.getActiveClinicFooter(organizationId);
-      
+
       // Import pdf-lib dynamically
       const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
-      
+
       // Create a new PDF document
       const pdfDoc = await PDFDocument.create();
       let page = pdfDoc.addPage([595, 842]); // A4 size in points
       const { width, height } = page.getSize();
-      
+
       // Load fonts
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      
+
       // Colors
       const primaryBlue = rgb(0.12, 0.23, 0.54); // #1e3a8a
       const lightGray = rgb(0.95, 0.95, 0.95); // Light background
       const darkGray = rgb(0.3, 0.3, 0.3);
       const blackColor = rgb(0, 0, 0);
-      
+
       // Helper function to add header to any page
       const addHeaderToPage = async (pageToAddHeader: typeof page) => {
-      const headerHeight = 100;
-      const logoX = 40;
-      const logoWidth = 80;
-      const logoHeight = 80;
+        const headerHeight = 100;
+        const logoX = 40;
+        const logoWidth = 80;
+        const logoHeight = 80;
         let headerY = height - 40;
-      
-      // Embed logo from clinic_headers if available
-      if (clinicHeader?.logoBase64) {
-        try {
-          // Remove data URL prefix if present
-          const base64Data = clinicHeader.logoBase64.includes(',') 
-            ? clinicHeader.logoBase64.split(',')[1] 
-            : clinicHeader.logoBase64;
-          const logoBuffer = Buffer.from(base64Data, 'base64');
-          
-          // Try to embed logo as PNG or JPEG
-          let logoImage;
+
+        // Embed logo from clinic_headers if available
+        if (clinicHeader?.logoBase64) {
           try {
-            logoImage = await pdfDoc.embedPng(logoBuffer);
-          } catch {
+            // Remove data URL prefix if present
+            const base64Data = clinicHeader.logoBase64.includes(',')
+              ? clinicHeader.logoBase64.split(',')[1]
+              : clinicHeader.logoBase64;
+            const logoBuffer = Buffer.from(base64Data, 'base64');
+
+            // Try to embed logo as PNG or JPEG
+            let logoImage;
             try {
-              logoImage = await pdfDoc.embedJpg(logoBuffer);
-            } catch (error) {
-              console.error('Failed to embed logo:', error);
+              logoImage = await pdfDoc.embedPng(logoBuffer);
+            } catch {
+              try {
+                logoImage = await pdfDoc.embedJpg(logoBuffer);
+              } catch (error) {
+                console.error('Failed to embed logo:', error);
+              }
             }
-          }
-          
-          if (logoImage) {
-            // Draw logo with equal height to header info
+
+            if (logoImage) {
+              // Draw logo with equal height to header info
               pageToAddHeader.drawImage(logoImage, {
-              x: logoX,
+                x: logoX,
                 y: headerY - logoHeight - 10,
-              width: logoWidth,
-              height: logoHeight
-            });
+                width: logoWidth,
+                height: logoHeight
+              });
+            }
+          } catch (error) {
+            console.error('Error processing logo:', error);
           }
-        } catch (error) {
-          console.error('Error processing logo:', error);
-        }
-      } else {
-        // Fallback: Medical cross symbol if no logo
+        } else {
+          // Fallback: Medical cross symbol if no logo
           pageToAddHeader.drawText('+', {
-          x: logoX + 20,
+            x: logoX + 20,
             y: headerY - 55,
-          size: 32,
+            size: 32,
+            font: boldFont,
+            color: primaryBlue
+          });
+        }
+
+        // Header information (clinic name, address, phone) - to the right of logo
+        const headerInfoX = logoX + logoWidth + 20;
+        let headerTextY = headerY - 20;
+
+        // Clinic name
+        const clinicName = clinicHeader?.clinicName || 'CURA MEDICAL CENTER';
+        pageToAddHeader.drawText(clinicName, {
+          x: headerInfoX,
+          y: headerTextY,
+          size: 16,
           font: boldFont,
           color: primaryBlue
         });
-      }
-      
-      // Header information (clinic name, address, phone) - to the right of logo
-      const headerInfoX = logoX + logoWidth + 20;
-        let headerTextY = headerY - 20;
-      
-      // Clinic name
-      const clinicName = clinicHeader?.clinicName || 'CURA MEDICAL CENTER';
-        pageToAddHeader.drawText(clinicName, {
-        x: headerInfoX,
-          y: headerTextY,
-        size: 16,
-        font: boldFont,
-        color: primaryBlue
-      });
         headerTextY -= 18;
-      
-      // Department
+
+        // Department
         pageToAddHeader.drawText('DEPARTMENT OF DIAGNOSTIC RADIOLOGY', {
-        x: headerInfoX,
+          x: headerInfoX,
           y: headerTextY,
-        size: 11,
-        font,
-        color: darkGray
-      });
+          size: 11,
+          font,
+          color: darkGray
+        });
         headerTextY -= 14;
-      
-      // Address
-      const address = clinicHeader?.address || 'Ground Floor Unit 2, Drayton Court, Drayton Road, Solihull, England B90 4NG';
+
+        // Address
+        const address = clinicHeader?.address || 'Ground Floor Unit 2, Drayton Court, Drayton Road, Solihull, England B90 4NG';
         pageToAddHeader.drawText(address, {
-        x: headerInfoX,
+          x: headerInfoX,
           y: headerTextY,
-        size: 8,
-        font,
-        color: darkGray
-      });
+          size: 8,
+          font,
+          color: darkGray
+        });
         headerTextY -= 13;
-      
-      // Phone and email
-      const phone = clinicHeader?.phone || '+44-123-456-7890';
-      const email = clinicHeader?.email || 'info@curamedical.com';
+
+        // Phone and email
+        const phone = clinicHeader?.phone || '+44-123-456-7890';
+        const email = clinicHeader?.email || 'info@curamedical.com';
         pageToAddHeader.drawText(`Tel: ${phone} | Fax: ${phone}`, {
-        x: headerInfoX,
+          x: headerInfoX,
           y: headerTextY,
-        size: 8,
-        font,
-        color: darkGray
-      });
+          size: 8,
+          font,
+          color: darkGray
+        });
       };
-      
+
       // Helper function to add footer to any page
       const addFooterToPage = (pageToAddFooter: typeof page) => {
         if (clinicFooter && clinicFooter.footerText) {
@@ -30198,19 +30246,19 @@ Cura EMR Team
           });
         }
       };
-      
+
       // Helper function to draw a section box (borders and background removed)
       const drawSectionBox = (x: number, y: number, width: number, height: number) => {
         // No borders or background - content only
       };
-      
+
       // Add header and footer to the first page
       await addHeaderToPage(page);
       addFooterToPage(page);
-      
+
       // Position tracker (account for header height)
       let yPosition = height - 140;
-      
+
       // Report title in separate row (centered)
       yPosition -= 10;
       page.drawText('DIAGNOSTIC RADIOLOGY REPORT', {
@@ -30220,12 +30268,12 @@ Cura EMR Team
         font: boldFont,
         color: primaryBlue
       });
-      
+
       yPosition -= 30;
-      
+
       // Save starting position for both sections (equal alignment)
       const sectionsStartY = yPosition;
-      
+
       // Patient Information Section (Left side)
       drawSectionBox(30, sectionsStartY + 5, (width - 80) / 2, 100);
       page.drawText('PATIENT INFORMATION', {
@@ -30235,14 +30283,14 @@ Cura EMR Team
         font: boldFont,
         color: primaryBlue
       });
-      
+
       let leftColumnY = sectionsStartY - 25;
       page.drawText(`Name: ${study.patientName}`, { x: 50, y: leftColumnY, size: 9, font });
       leftColumnY -= 12;
       page.drawText(`DOB: ${study.patientDOB || 'N/A'}`, { x: 50, y: leftColumnY, size: 9, font });
       leftColumnY -= 12;
       page.drawText(`Study Date: ${new Date().toLocaleDateString()}`, { x: 50, y: leftColumnY, size: 9, font });
-      
+
       // Study Information Section (Right side) - SAME Y POSITION for equal alignment
       const rightColumnX = width / 2 + 10;
       drawSectionBox(rightColumnX, sectionsStartY + 5, (width - 80) / 2, 100);
@@ -30253,7 +30301,7 @@ Cura EMR Team
         font: boldFont,
         color: primaryBlue
       });
-      
+
       let rightColumnY = sectionsStartY - 25;
       page.drawText(`Study Type: ${study.studyType}`, { x: rightColumnX + 20, y: rightColumnY, size: 9, font });
       rightColumnY -= 12;
@@ -30263,36 +30311,36 @@ Cura EMR Team
       rightColumnY -= 12;
       page.drawText(`Status: ${study.status || 'Complete'}`, { x: rightColumnX + 20, y: rightColumnY, size: 9, font });
       rightColumnY -= 12;
-      
+
       // Add Ordered, Scheduled, and Performed dates
       const orderedDate = study.orderedAt ? new Date(study.orderedAt).toLocaleDateString() : 'N/A';
       page.drawText(`Ordered: ${orderedDate}`, { x: rightColumnX + 20, y: rightColumnY, size: 9, font });
       rightColumnY -= 12;
-      
+
       if (reportFormData?.scheduledAt) {
         const scheduledDate = new Date(reportFormData.scheduledAt).toLocaleDateString();
         page.drawText(`Scheduled: ${scheduledDate}`, { x: rightColumnX + 20, y: rightColumnY, size: 9, font });
         rightColumnY -= 12;
       }
-      
+
       if (reportFormData?.performedAt) {
         const performedDate = new Date(reportFormData.performedAt).toLocaleDateString();
         page.drawText(`Performed: ${performedDate}`, { x: rightColumnX + 20, y: rightColumnY, size: 9, font });
         rightColumnY -= 12;
       }
-      
+
       // Move yPosition down after both sections
       yPosition = sectionsStartY - 120; // Increased spacing to prevent overlap
-      
+
       // DOCTOR DETAILS section - placed right after PATIENT INFORMATION
       yPosition -= 20; // Increased spacing before DOCTOR DETAILS
-      
+
       // Fetch doctor details from database using selectedUserId
       let doctorName = 'N/A';
       let doctorSpecialization = 'N/A';
       let doctorEmail = 'N/A';
       let doctorDepartment = 'N/A';
-      
+
       try {
         const doctorUserId = medicalImage.selectedUserId;
         if (doctorUserId) {
@@ -30307,11 +30355,11 @@ Cura EMR Team
       } catch (error) {
         console.error('Error fetching doctor details:', error);
       }
-      
+
       // Calculate DOCTOR DETAILS section height with proper spacing
       const doctorDetailsHeight = 70; // Increased height to prevent overlap
       drawSectionBox(30, yPosition + 5, width - 60, doctorDetailsHeight);
-      
+
       page.drawText('DOCTOR DETAILS', {
         x: 40,
         y: yPosition - 3,
@@ -30319,172 +30367,172 @@ Cura EMR Team
         font: boldFont,
         color: primaryBlue
       });
-      
+
       let doctorY = yPosition - 18; // Increased spacing
-      page.drawText(`Name: ${doctorName}`, { 
-        x: 50, 
-        y: doctorY, 
+      page.drawText(`Name: ${doctorName}`, {
+        x: 50,
+        y: doctorY,
         size: 9,
         font,
         color: darkGray
       });
       doctorY -= 12; // Increased line spacing
-      
-      page.drawText(`Specialization: ${doctorSpecialization}`, { 
-        x: 50, 
-        y: doctorY, 
+
+      page.drawText(`Specialization: ${doctorSpecialization}`, {
+        x: 50,
+        y: doctorY,
         size: 9,
         font,
         color: darkGray
       });
       doctorY -= 12; // Increased line spacing
-      
-      page.drawText(`Email: ${doctorEmail}`, { 
-        x: 50, 
-        y: doctorY, 
+
+      page.drawText(`Email: ${doctorEmail}`, {
+        x: 50,
+        y: doctorY,
         size: 9,
         font,
         color: darkGray
       });
       doctorY -= 12; // Increased line spacing
-      
+
       // Only show Department if it's not "N/A"
       if (doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '') {
-        page.drawText(`Department: ${doctorDepartment}`, { 
-          x: 50, 
-          y: doctorY, 
+        page.drawText(`Department: ${doctorDepartment}`, {
+          x: 50,
+          y: doctorY,
           size: 9,
           font,
           color: darkGray
         });
         doctorY -= 12; // Increased line spacing
       }
-      
+
       // Adjust yPosition after DOCTOR DETAILS with extra spacing
       yPosition -= doctorDetailsHeight + 10; // Added extra spacing
-      
+
       if (reportFormData) {
         yPosition -= 20;
-        
+
         // Helper function to draw a clinical section
         const drawClinicalSection = (title: string, content: string) => {
           if (!content) return;
-          
+
           // Calculate section height for text wrapping with reduced spacing
-            const maxLineLength = 70;
+          const maxLineLength = 70;
           const lines = content.match(new RegExp(`.{1,${maxLineLength}}(\\s|$)`, 'g')) || [content];
           const lineSpacing = 9; // Reduced from 11 to 9
           const sectionHeight = Math.max(40, lines.length * lineSpacing + 25); // Reduced from 45 and 30
-            
-            // Draw section background
+
+          // Draw section background
           drawSectionBox(30, yPosition + 5, width - 60, sectionHeight);
-            
+
           page.drawText(title, {
-              x: 40,
+            x: 40,
             y: yPosition - 3,
             size: 9, // Reduced from 10 to 9
-              font: boldFont,
-              color: primaryBlue
-            });
-            
-            // Draw content with text wrapping
+            font: boldFont,
+            color: primaryBlue
+          });
+
+          // Draw content with text wrapping
           let textY = yPosition - 16; // Reduced from 18 to 16
-            lines.forEach((line: string) => {
-              page.drawText(line.trim(), { 
-                x: 50, 
-                y: textY, 
+          lines.forEach((line: string) => {
+            page.drawText(line.trim(), {
+              x: 50,
+              y: textY,
               size: 8, // Reduced from 9 to 8
-                font,
-                maxWidth: width - 100
-              });
+              font,
+              maxWidth: width - 100
+            });
             textY -= lineSpacing; // Use reduced line spacing
           });
-          
+
           yPosition -= sectionHeight + 3; // Reduced spacing from 5 to 3
         };
-        
+
         // Draw CLINICAL INDICATION
         if (reportFormData.clinicalIndication) {
           drawClinicalSection('CLINICAL INDICATION', reportFormData.clinicalIndication);
         }
-        
+
         // Draw TECHNIQUE
         if (reportFormData.technique) {
           drawClinicalSection('TECHNIQUE', reportFormData.technique);
         }
-        
+
         // Draw FINDINGS (DOCTOR DETAILS already placed after PATIENT INFORMATION above)
         if (reportFormData.findings) {
           drawClinicalSection('FINDINGS', reportFormData.findings);
         }
-        
+
         // Draw IMPRESSION after FINDINGS (reordered)
         if (reportFormData.impression) {
           drawClinicalSection('IMPRESSION', reportFormData.impression);
         }
-        
+
         // Draw RADIOLOGIST REPORT after IMPRESSION
         yPosition -= 10; // Reduced from 20 to 10
         const signatureHeight = 100; // Reduced from 120 to 100
-      drawSectionBox(30, yPosition + 10, width - 60, signatureHeight);
-      
-      page.drawText('RADIOLOGIST REPORT', {
-        x: 40,
-        y: yPosition - 5,
+        drawSectionBox(30, yPosition + 10, width - 60, signatureHeight);
+
+        page.drawText('RADIOLOGIST REPORT', {
+          x: 40,
+          y: yPosition - 5,
           size: 10, // Reduced from 12 to 10
-        font: boldFont,
-        color: primaryBlue
-      });
-      
-      // Radiologist information
-      const radiologistName = reportFormData?.radiologist || study.radiologist || "Dr. Sarah Johnson, MD";
-      
-      page.drawText(`Reported by: ${radiologistName}`, { 
-        x: 50, 
+          font: boldFont,
+          color: primaryBlue
+        });
+
+        // Radiologist information
+        const radiologistName = reportFormData?.radiologist || study.radiologist || "Dr. Sarah Johnson, MD";
+
+        page.drawText(`Reported by: ${radiologistName}`, {
+          x: 50,
           y: yPosition - 25, // Reduced from 30 to 25
           size: 9, // Reduced from 11 to 9
-        font: boldFont,
-        color: blackColor
-      });
-      
-      page.drawText('Medical License: MD-RAD-2024', { 
-        x: 50, 
+          font: boldFont,
+          color: blackColor
+        });
+
+        page.drawText('Medical License: MD-RAD-2024', {
+          x: 50,
           y: yPosition - 38, // Reduced from 45 to 38
           size: 8, // Reduced from 10 to 8
-        font,
-        color: darkGray
-      });
-      
-      // Report completion info
-      const reportDate = new Date().toLocaleDateString('en-GB', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-      page.drawText(`Report Date: ${reportDate}`, { 
-        x: width - 250, 
+          font,
+          color: darkGray
+        });
+
+        // Report completion info
+        const reportDate = new Date().toLocaleDateString('en-GB', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        page.drawText(`Report Date: ${reportDate}`, {
+          x: width - 250,
           y: yPosition - 25, // Reduced from 30 to 25
           size: 8, // Reduced from 10 to 8
-        font,
-        color: darkGray
-      });
-      
-      page.drawText(`Report ID: ${reportId}`, { 
-        x: width - 250, 
+          font,
+          color: darkGray
+        });
+
+        page.drawText(`Report ID: ${reportId}`, {
+          x: width - 250,
           y: yPosition - 38, // Reduced from 45 to 38
           size: 7, // Reduced from 9 to 7
-        font,
-        color: rgb(0.6, 0.6, 0.6)
-      });
-      
+          font,
+          color: rgb(0.6, 0.6, 0.6)
+        });
+
         // Adjust yPosition for RADIOLOGIST REPORT section
         yPosition -= 50; // Reduced from 60 to 50
       } else {
         // Add indication and findings from study data if no form data
         yPosition -= 10; // Reduced from 20 to 10
-        
+
         if (study.indication) {
           drawSectionBox(30, yPosition + 10, width - 60, 45); // Reduced from 50 to 45
           page.drawText('CLINICAL INDICATION', {
@@ -30497,41 +30545,41 @@ Cura EMR Team
           page.drawText(study.indication, { x: 50, y: yPosition - 20, size: 8, font }); // Reduced from 25/10 to 20/8
           yPosition -= 55; // Reduced from 70 to 55
         }
-        
+
         // Draw DOCTOR DETAILS before FINDINGS
         yPosition -= 10; // Reduced from 20 to 10
         const doctorDetailsHeight = 90; // Reduced from 100 to 90
         drawSectionBox(30, yPosition + 10, width - 60, doctorDetailsHeight);
-      
-      page.drawText('DOCTOR DETAILS', {
-        x: 40,
-        y: yPosition - 5,
+
+        page.drawText('DOCTOR DETAILS', {
+          x: 40,
+          y: yPosition - 5,
           size: 10, // Reduced from 12 to 10
-        font: boldFont,
-        color: primaryBlue
-      });
-      
-      // Fetch doctor details from database using selectedUserId
-      let doctorName = 'N/A';
-      let doctorSpecialization = 'N/A';
-      let doctorEmail = 'N/A';
-      let doctorDepartment = 'N/A';
-      
-      try {
-        const doctorUserId = medicalImage.selectedUserId;
-        if (doctorUserId) {
-          const doctorUser = await storage.getUser(doctorUserId, organizationId);
-          if (doctorUser) {
-            doctorName = `${doctorUser.firstName || ''} ${doctorUser.lastName || ''}`.trim() || 'N/A';
-            doctorSpecialization = doctorUser.medicalSpecialtyCategory || doctorUser.subSpecialty || 'N/A';
-            doctorEmail = doctorUser.email || 'N/A';
-            doctorDepartment = doctorUser.department || 'N/A';
+          font: boldFont,
+          color: primaryBlue
+        });
+
+        // Fetch doctor details from database using selectedUserId
+        let doctorName = 'N/A';
+        let doctorSpecialization = 'N/A';
+        let doctorEmail = 'N/A';
+        let doctorDepartment = 'N/A';
+
+        try {
+          const doctorUserId = medicalImage.selectedUserId;
+          if (doctorUserId) {
+            const doctorUser = await storage.getUser(doctorUserId, organizationId);
+            if (doctorUser) {
+              doctorName = `${doctorUser.firstName || ''} ${doctorUser.lastName || ''}`.trim() || 'N/A';
+              doctorSpecialization = doctorUser.medicalSpecialtyCategory || doctorUser.subSpecialty || 'N/A';
+              doctorEmail = doctorUser.email || 'N/A';
+              doctorDepartment = doctorUser.department || 'N/A';
+            }
           }
+        } catch (error) {
+          console.error('Error fetching doctor details:', error);
         }
-      } catch (error) {
-        console.error('Error fetching doctor details:', error);
-        }
-        
+
         let doctorY = yPosition - 18; // Reduced from 30 to 18
         page.drawText(`Name: ${doctorName}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
         doctorY -= 10; // Reduced from 15 to 10
@@ -30539,15 +30587,15 @@ Cura EMR Team
         doctorY -= 10; // Reduced from 15 to 10
         page.drawText(`Email: ${doctorEmail}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
         doctorY -= 10; // Reduced from 15 to 10
-        
+
         if (doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '') {
           page.drawText(`Department: ${doctorDepartment}`, { x: 50, y: doctorY, size: 8, font, color: darkGray }); // Reduced from 10 to 8
           doctorY -= 10; // Reduced from 15 to 10
         }
-        
+
         const actualDoctorDetailsHeight = doctorDepartment && doctorDepartment !== 'N/A' && doctorDepartment.trim() !== '' ? 50 : 42; // Reduced from 75/60 to 50/42
         yPosition -= actualDoctorDetailsHeight;
-        
+
         // Draw FINDINGS
         if (study.findings) {
           drawSectionBox(30, yPosition + 10, width - 60, 45); // Reduced from 50 to 45
@@ -30561,7 +30609,7 @@ Cura EMR Team
           page.drawText(study.findings, { x: 50, y: yPosition - 20, size: 8, font }); // Reduced from 25/10 to 20/8
           yPosition -= 55; // Reduced from 70 to 55
         }
-        
+
         // Draw IMPRESSION after FINDINGS (reordered)
         if (study.impression) {
           drawSectionBox(30, yPosition + 10, width - 60, 45); // Reduced from 50 to 45
@@ -30575,12 +30623,12 @@ Cura EMR Team
           page.drawText(study.impression, { x: 50, y: yPosition - 20, size: 8, font }); // Reduced from 25/10 to 20/8
           yPosition -= 55; // Reduced from 70 to 55
         }
-        
+
         // Draw RADIOLOGIST REPORT after IMPRESSION
         yPosition -= 10; // Reduced from 20 to 10
         const signatureHeight = 100; // Reduced from 120 to 100
         drawSectionBox(30, yPosition + 10, width - 60, signatureHeight);
-        
+
         page.drawText('RADIOLOGIST REPORT', {
           x: 40,
           y: yPosition - 5,
@@ -30588,55 +30636,55 @@ Cura EMR Team
           font: boldFont,
           color: primaryBlue
         });
-        
+
         const radiologistName = study.radiologist || "Dr. Sarah Johnson, MD";
-        page.drawText(`Reported by: ${radiologistName}`, { 
-        x: 50, 
+        page.drawText(`Reported by: ${radiologistName}`, {
+          x: 50,
           y: yPosition - 25, // Reduced from 30 to 25
           size: 9, // Reduced from 11 to 9
           font: boldFont,
           color: blackColor
         });
-        
-        page.drawText('Medical License: MD-RAD-2024', { 
-        x: 50, 
+
+        page.drawText('Medical License: MD-RAD-2024', {
+          x: 50,
           y: yPosition - 38, // Reduced from 45 to 38
           size: 8, // Reduced from 10 to 8
-        font,
-        color: darkGray
-      });
-        
-        const reportDate = new Date().toLocaleDateString('en-GB', { 
-          year: 'numeric', 
-          month: 'long', 
+          font,
+          color: darkGray
+        });
+
+        const reportDate = new Date().toLocaleDateString('en-GB', {
+          year: 'numeric',
+          month: 'long',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit'
         });
-        page.drawText(`Report Date: ${reportDate}`, { 
-          x: width - 250, 
+        page.drawText(`Report Date: ${reportDate}`, {
+          x: width - 250,
           y: yPosition - 25, // Reduced from 30 to 25
           size: 8, // Reduced from 10 to 8
-        font,
-        color: darkGray
-      });
-        
-        page.drawText(`Report ID: ${reportId}`, { 
-          x: width - 250, 
+          font,
+          color: darkGray
+        });
+
+        page.drawText(`Report ID: ${reportId}`, {
+          x: width - 250,
           y: yPosition - 38, // Reduced from 45 to 38
           size: 7, // Reduced from 9 to 7
           font,
           color: rgb(0.6, 0.6, 0.6)
         });
-        
+
         yPosition -= 50; // Reduced from 60 to 50
       }
-      
+
       // E-Signature Section (if signature data provided)
       const { signatureData, signatureDate } = req.body;
       if (signatureData) {
         yPosition -= 20;
-        
+
         // Signature section title
         page.drawText('Resident Physician (Signature)', {
           x: 40,
@@ -30645,16 +30693,16 @@ Cura EMR Team
           font: boldFont,
           color: blackColor
         });
-        
+
         yPosition -= 10;
-        
+
         try {
           // Remove data URL prefix if present
-          const base64Data = signatureData.includes(',') 
-            ? signatureData.split(',')[1] 
+          const base64Data = signatureData.includes(',')
+            ? signatureData.split(',')[1]
             : signatureData;
           const signatureBuffer = Buffer.from(base64Data, 'base64');
-          
+
           // Try to embed signature as PNG first, then JPEG
           let signatureImage;
           try {
@@ -30666,12 +30714,12 @@ Cura EMR Team
               console.error('Failed to embed signature:', error);
             }
           }
-          
+
           if (signatureImage) {
             // Draw signature box (120×50 pixels = smaller compact size)
             const signatureBoxWidth = 120 * 0.75; // Convert px to points (72 DPI = 0.75 factor)
             const signatureBoxHeight = 50 * 0.75;
-            
+
             // Draw border
             page.drawRectangle({
               x: 40,
@@ -30681,7 +30729,7 @@ Cura EMR Team
               borderColor: rgb(0.7, 0.7, 0.7),
               borderWidth: 1,
             });
-            
+
             // Draw signature image inside the box
             page.drawImage(signatureImage, {
               x: 42,
@@ -30689,29 +30737,29 @@ Cura EMR Team
               width: signatureBoxWidth - 4,
               height: signatureBoxHeight - 4,
             });
-            
+
             // Move yPosition down past the signature box (box height + spacing)
             yPosition -= signatureBoxHeight + 15; // Increased spacing from 10 to 15
-            
+
             // Add green timestamp - positioned below the signature box with proper spacing
-            const signatureDateStr = signatureDate 
-              ? new Date(signatureDate).toLocaleDateString('en-US', { 
-                  month: 'short',
-                  day: 'numeric', 
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-                })
-              : new Date().toLocaleDateString('en-US', { 
-                  month: 'short',
-                  day: 'numeric', 
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-                });
-            
+            const signatureDateStr = signatureDate
+              ? new Date(signatureDate).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+              })
+              : new Date().toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+              });
+
             // Draw E-Signed text below the signature box (text height is ~9 points, so we need space)
             page.drawText(`[E-Signed] ${signatureDateStr}`, {
               x: 40,
@@ -30720,7 +30768,7 @@ Cura EMR Team
               font,
               color: rgb(0, 0.6, 0) // Green color
             });
-            
+
             // Move yPosition down further to account for the text
             yPosition -= 20; // Space for the E-Signed text plus margin
           }
@@ -30728,18 +30776,18 @@ Cura EMR Team
           console.error('Error processing signature:', error);
         }
       }
-      
+
       // Medical Image Section (moved after radiologist report)
       let imageHeight = 0;
-      
+
       // Check for image data from uploaded image filenames or database fileName and filesystem
       let imageBuffers: Array<{ buffer: Buffer; mimeType: string; fileName: string }> = [];
-      
+
       // HIGHEST PRIORITY: Process previewImageDataUrls from frontend (direct embedding from uploaded images)
       // This ensures newly uploaded images are embedded immediately without waiting for database/filesystem
       if (previewImageDataUrls && Array.isArray(previewImageDataUrls) && previewImageDataUrls.length > 0) {
         console.log(`📷 HIGHEST PRIORITY: Processing ${previewImageDataUrls.length} preview image data URL(s) from frontend`);
-        
+
         for (let idx = 0; idx < previewImageDataUrls.length; idx++) {
           const dataUrl = previewImageDataUrls[idx];
           try {
@@ -30747,19 +30795,19 @@ Cura EMR Team
               console.warn(`📷 [${idx + 1}] Skipping invalid data URL (not a string)`);
               continue;
             }
-            
+
             console.log(`📷 [${idx + 1}] Processing preview data URL (length: ${dataUrl.length} chars)`);
-            
+
             // Extract base64 data from data URL
             let base64Data: string;
             let mimeType = 'image/jpeg'; // Default
-            
+
             if (dataUrl.includes(',')) {
               // Data URL format: data:image/png;base64,<base64data>
               const parts = dataUrl.split(',');
               const header = parts[0];
               base64Data = parts.slice(1).join(','); // In case base64 contains commas
-              
+
               // Extract MIME type from header
               const mimeMatch = header.match(/data:([^;]+)/);
               if (mimeMatch) {
@@ -30772,7 +30820,7 @@ Cura EMR Team
               if (base64Index !== -1) {
                 const header = dataUrl.substring(0, base64Index);
                 base64Data = dataUrl.substring(base64Index + 7); // Skip "base64,"
-                
+
                 const mimeMatch = header.match(/data:([^;]+)/);
                 if (mimeMatch) {
                   mimeType = mimeMatch[1];
@@ -30784,33 +30832,33 @@ Cura EMR Team
               // Pure base64 string
               base64Data = dataUrl;
             }
-            
+
             // Validate base64 string
             if (!base64Data || base64Data.trim().length === 0) {
               throw new Error('Base64 data is empty after extraction');
             }
-            
+
             // Decode base64 to buffer
             const imageBuffer = Buffer.from(base64Data, 'base64');
-            
+
             // Validate buffer
             if (!imageBuffer || imageBuffer.length === 0) {
               throw new Error('Image buffer is empty after base64 decoding');
             }
-            
+
             // Ensure MIME type is supported (PNG or JPEG)
             if (mimeType !== 'image/png' && mimeType !== 'image/jpeg' && mimeType !== 'image/jpg') {
               console.warn(`📷 [${idx + 1}] Unsupported MIME type: ${mimeType}, converting to JPEG`);
               mimeType = 'image/jpeg';
             }
-            
+
             // Add to imageBuffers
             imageBuffers.push({
               buffer: imageBuffer,
               mimeType: mimeType,
               fileName: `uploaded_image_${idx + 1}.${mimeType === 'image/png' ? 'png' : 'jpg'}`
             });
-            
+
             console.log(`📷 [${idx + 1}] ✅ SUCCESS: Loaded ${imageBuffer.length} bytes from preview data URL`);
             console.log(`📷 [${idx + 1}]    MIME type: ${mimeType}, Buffer size: ${imageBuffer.length} bytes`);
           } catch (error) {
@@ -30821,7 +30869,7 @@ Cura EMR Team
             // Continue with next image
           }
         }
-        
+
         console.log(`📷 HIGHEST PRIORITY SUMMARY: Successfully processed ${imageBuffers.length} out of ${previewImageDataUrls.length} preview image(s)`);
       }
 
@@ -30830,574 +30878,574 @@ Cura EMR Team
       if (usedPreviewImages) {
         console.log(`📷 SKIP PRIMARY/SECONDARY: Using ${imageBuffers.length} image(s) from preview only (avoid duplicate embedding)`);
       }
-      
+
       // PRIMARY: Get all images from radiology_images by medical_image_id (= study.id / image_id).
       // Skip when we already have images from previewImageDataUrls to prevent same images appearing twice in PDF.
       let radiologyImagesCount = 0;
       if (!usedPreviewImages) {
-      try {
-        console.log(`📷 PRIMARY SOURCE: Querying radiology_images for medical_image_id=${imageId} (image_id) to get file_path for each image`);
-        
-        const radiologyImages = await db
-          .select()
-          .from(schema.radiologyImages)
-          .where(
-            and(
-              eq(schema.radiologyImages.medicalImageId, imageId),
-              eq(schema.radiologyImages.organizationId, organizationId)
+        try {
+          console.log(`📷 PRIMARY SOURCE: Querying radiology_images for medical_image_id=${imageId} (image_id) to get file_path for each image`);
+
+          const radiologyImages = await db
+            .select()
+            .from(schema.radiologyImages)
+            .where(
+              and(
+                eq(schema.radiologyImages.medicalImageId, imageId),
+                eq(schema.radiologyImages.organizationId, organizationId)
+              )
             )
-          )
-          .orderBy(schema.radiologyImages.displayOrder);
+            .orderBy(schema.radiologyImages.displayOrder);
 
-        radiologyImagesCount = radiologyImages.length;
-        console.log(`📷 PRIMARY SOURCE: Found ${radiologyImagesCount} image(s) in radiology_images table for medical_image_id: ${imageId}`);
-        
-        // Log all rows found to confirm we're fetching ALL rows
-        if (radiologyImages.length > 0) {
-          console.log(`📷 PRIMARY SOURCE: ALL ROWS FOUND for medical_image_id ${imageId}:`);
-          radiologyImages.forEach((img, idx) => {
-            console.log(`📷   Row ${idx + 1}: id=${img.id}, fileName="${img.fileName}", filePath="${img.filePath || 'N/A'}", displayOrder=${img.displayOrder || 0}`);
-          });
-        } else {
-          console.log(`📷 PRIMARY SOURCE: ⚠️ No rows found in radiology_images table for medical_image_id=${imageId}, organization_id=${organizationId}`);
-          console.log(`📷 PRIMARY SOURCE: Ensure radiology_images rows were inserted with the same organization_id as medical_images (${organizationId}).`);
-        }
+          radiologyImagesCount = radiologyImages.length;
+          console.log(`📷 PRIMARY SOURCE: Found ${radiologyImagesCount} image(s) in radiology_images table for medical_image_id: ${imageId}`);
 
-        if (radiologyImages.length > 0) {
-          console.log(`📷 PROCESSING: Starting to process ${radiologyImages.length} image(s) from radiology_images table`);
-          let successfullyLoaded = 0;
-          let failedToLoad = 0;
-          
-          for (let idx = 0; idx < radiologyImages.length; idx++) {
-            const radiologyImage = radiologyImages[idx];
-            const rowFileName = (radiologyImage as any).fileName ?? (radiologyImage as any).file_name ?? '';
-            const rowFilePath = (radiologyImage as any).filePath ?? (radiologyImage as any).file_path ?? '';
-            const rowOrg = (radiologyImage as any).organizationId ?? (radiologyImage as any).organization_id;
-            const rowPat = (radiologyImage as any).patientId ?? (radiologyImage as any).patient_id;
-            console.log(`\n📷 [${idx + 1}/${radiologyImages.length}] Processing image: ID=${radiologyImage.id}, fileName=${rowFileName}, filePath=${rowFilePath ? rowFilePath.substring(0, 80) + (rowFilePath.length > 80 ? '...' : '') : 'N/A'}, rowOrg=${rowOrg}, rowPat=${rowPat}`);
-            
-            try {
-              let imageBuffer: Buffer | null = null;
-              let imageMimeType = radiologyImage.mimeType || 'image/jpeg';
-              let imageFileName = rowFileName;
-              
-              // PRIORITY 1: Use base64 imageData if available (fastest, no file I/O needed)
-              if (radiologyImage.imageData) {
-                try {
-                  console.log(`📷 [${idx + 1}] PRIORITY 1: Using base64 imageData from database`);
-                  console.log(`📷 [${idx + 1}]    imageData length: ${radiologyImage.imageData.length} characters`);
-                  
-                  // Extract base64 data (remove data URL prefix if present)
-                  let base64Data: string;
-                  if (radiologyImage.imageData.includes(',')) {
-                    // Data URL format: data:image/png;base64,<base64data>
-                    base64Data = radiologyImage.imageData.split(',')[1];
-                    console.log(`📷 [${idx + 1}]    Extracted base64 data (after comma): ${base64Data.length} characters`);
-                  } else if (radiologyImage.imageData.startsWith('data:')) {
-                    // Data URL without comma (unlikely but handle it)
-                    const base64Index = radiologyImage.imageData.indexOf('base64');
-                    if (base64Index !== -1) {
-                      base64Data = radiologyImage.imageData.substring(base64Index + 7); // Skip "base64,"
+          // Log all rows found to confirm we're fetching ALL rows
+          if (radiologyImages.length > 0) {
+            console.log(`📷 PRIMARY SOURCE: ALL ROWS FOUND for medical_image_id ${imageId}:`);
+            radiologyImages.forEach((img, idx) => {
+              console.log(`📷   Row ${idx + 1}: id=${img.id}, fileName="${img.fileName}", filePath="${img.filePath || 'N/A'}", displayOrder=${img.displayOrder || 0}`);
+            });
+          } else {
+            console.log(`📷 PRIMARY SOURCE: ⚠️ No rows found in radiology_images table for medical_image_id=${imageId}, organization_id=${organizationId}`);
+            console.log(`📷 PRIMARY SOURCE: Ensure radiology_images rows were inserted with the same organization_id as medical_images (${organizationId}).`);
+          }
+
+          if (radiologyImages.length > 0) {
+            console.log(`📷 PROCESSING: Starting to process ${radiologyImages.length} image(s) from radiology_images table`);
+            let successfullyLoaded = 0;
+            let failedToLoad = 0;
+
+            for (let idx = 0; idx < radiologyImages.length; idx++) {
+              const radiologyImage = radiologyImages[idx];
+              const rowFileName = (radiologyImage as any).fileName ?? (radiologyImage as any).file_name ?? '';
+              const rowFilePath = (radiologyImage as any).filePath ?? (radiologyImage as any).file_path ?? '';
+              const rowOrg = (radiologyImage as any).organizationId ?? (radiologyImage as any).organization_id;
+              const rowPat = (radiologyImage as any).patientId ?? (radiologyImage as any).patient_id;
+              console.log(`\n📷 [${idx + 1}/${radiologyImages.length}] Processing image: ID=${radiologyImage.id}, fileName=${rowFileName}, filePath=${rowFilePath ? rowFilePath.substring(0, 80) + (rowFilePath.length > 80 ? '...' : '') : 'N/A'}, rowOrg=${rowOrg}, rowPat=${rowPat}`);
+
+              try {
+                let imageBuffer: Buffer | null = null;
+                let imageMimeType = radiologyImage.mimeType || 'image/jpeg';
+                let imageFileName = rowFileName;
+
+                // PRIORITY 1: Use base64 imageData if available (fastest, no file I/O needed)
+                if (radiologyImage.imageData) {
+                  try {
+                    console.log(`📷 [${idx + 1}] PRIORITY 1: Using base64 imageData from database`);
+                    console.log(`📷 [${idx + 1}]    imageData length: ${radiologyImage.imageData.length} characters`);
+
+                    // Extract base64 data (remove data URL prefix if present)
+                    let base64Data: string;
+                    if (radiologyImage.imageData.includes(',')) {
+                      // Data URL format: data:image/png;base64,<base64data>
+                      base64Data = radiologyImage.imageData.split(',')[1];
+                      console.log(`📷 [${idx + 1}]    Extracted base64 data (after comma): ${base64Data.length} characters`);
+                    } else if (radiologyImage.imageData.startsWith('data:')) {
+                      // Data URL without comma (unlikely but handle it)
+                      const base64Index = radiologyImage.imageData.indexOf('base64');
+                      if (base64Index !== -1) {
+                        base64Data = radiologyImage.imageData.substring(base64Index + 7); // Skip "base64,"
+                      } else {
+                        base64Data = radiologyImage.imageData;
+                      }
                     } else {
+                      // Pure base64 string
                       base64Data = radiologyImage.imageData;
                     }
-                  } else {
-                    // Pure base64 string
-                    base64Data = radiologyImage.imageData;
-                  }
-                  
-                  // Validate base64 string
-                  if (!base64Data || base64Data.trim().length === 0) {
-                    throw new Error('Base64 data is empty after extraction');
-                  }
-                  
-                  imageBuffer = Buffer.from(base64Data, 'base64');
-                  
-                  // Validate buffer
-                  if (!imageBuffer || imageBuffer.length === 0) {
-                    throw new Error('Image buffer is empty after base64 decoding');
-                  }
-                  
-                  console.log(`📷 [${idx + 1}] ✅ PRIORITY 1 SUCCESS: Loaded ${imageBuffer.length} bytes from base64 imageData`);
-                  console.log(`📷 [${idx + 1}]    Buffer validation: is Buffer=${imageBuffer instanceof Buffer}, length=${imageBuffer.length}`);
-                } catch (base64Error) {
-                  console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 1 FAILED: Error decoding base64 imageData:`, base64Error);
-                  if (base64Error instanceof Error) {
-                    console.warn(`📷 [${idx + 1}]    Error message: ${base64Error.message}`);
-                }
-                  // Clear buffer to try next priority
-                  imageBuffer = null;
-                }
-              } else {
-                console.log(`📷 [${idx + 1}] PRIORITY 1: No base64 imageData in database, will try filePath`);
-              }
-              
-              // PRIORITY 2: Use filePath (or file_path) from database - same resolution as "View Images" serve route
-              const dbFilePath = (radiologyImage as any).filePath ?? (radiologyImage as any).file_path;
-              const radiologyFileName = (radiologyImage as any).fileName ?? (radiologyImage as any).file_name;
-              if (!imageBuffer && dbFilePath) {
-                try {
-                  console.log(`📷 [${idx + 1}] PRIORITY 2: Loading image from server filesystem`);
-                  console.log(`📷 [${idx + 1}]    Database filePath: "${dbFilePath}"`);
-                  
-                  let rawPath = String(dbFilePath).trim();
-                  // Same as serve route: try direct path first (path as stored, and relative to cwd)
-                  const directPath = rawPath.replace(/\\\\/g, '\\');
-                  let fileExists = await fse.pathExists(directPath);
-                  let imagePath: string = path.resolve(process.cwd(), rawPath || '.');
-                  if (fileExists) {
-                    imagePath = directPath;
-                    console.log(`📷 [${idx + 1}]    Using direct path from DB: "${imagePath}"`);
-                  } else {
-                    fileExists = await fse.pathExists(imagePath);
-                    if (fileExists) {
-                      console.log(`📷 [${idx + 1}]    Using path resolved from cwd: "${imagePath}"`);
+
+                    // Validate base64 string
+                    if (!base64Data || base64Data.trim().length === 0) {
+                      throw new Error('Base64 data is empty after extraction');
                     }
-                  }
-                  if (!fileExists) {
-                    // Paths like "/uploads/..." - resolve from cwd
-                    if (rawPath.startsWith('/uploads') || (rawPath.startsWith('/') && rawPath.includes('uploads'))) {
-                      rawPath = rawPath.replace(/^\/+/, '') || rawPath;
-                    }
-                    const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(rawPath);
-                    if (path.isAbsolute(rawPath) && isWindowsAbsolute) {
-                      imagePath = path.normalize(rawPath);
-                      fileExists = await fse.pathExists(imagePath);
-                      if (fileExists) console.log(`📷 [${idx + 1}]    Using absolute path: "${imagePath}"`);
-                    } else if (rawPath.includes('uploads')) {
-                      const uploadsIndex = rawPath.indexOf('uploads');
-                      const relativePath = rawPath.substring(uploadsIndex);
-                      const normalizedRelative = relativePath.replace(/\\/g, '/');
-                      imagePath = path.resolve(process.cwd(), normalizedRelative);
-                      fileExists = await fse.pathExists(imagePath);
-                      if (fileExists) console.log(`📷 [${idx + 1}]    Using resolved uploads path: "${imagePath}"`);
-                    } else {
-                      imagePath = path.resolve(process.cwd(), rawPath);
-                      fileExists = await fse.pathExists(imagePath);
-                      if (fileExists) console.log(`📷 [${idx + 1}]    Using relative path: "${imagePath}"`);
-                    }
-                  }
-                  console.log(`📷 [${idx + 1}]    File exists at resolved path: ${fileExists ? '✅ YES' : '❌ NO'}`);
-                  if (fileExists) {
-                    imageBuffer = await readFile(imagePath);
-                    
+
+                    imageBuffer = Buffer.from(base64Data, 'base64');
+
                     // Validate buffer
                     if (!imageBuffer || imageBuffer.length === 0) {
-                      throw new Error(`File exists but buffer is empty (0 bytes)`);
+                      throw new Error('Image buffer is empty after base64 decoding');
                     }
-                    
-                    console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS: Read ${imageBuffer.length} bytes from filesystem`);
-                    console.log(`📷 [${idx + 1}]    Buffer type: ${imageBuffer instanceof Buffer ? 'Buffer' : typeof imageBuffer}`);
-                    
-                    // If we successfully read the file but imageData is missing, convert to base64 and update database
-                    // This ensures future PDF generations can use Priority 1 (faster)
-                    if (!radiologyImage.imageData && imageBuffer) {
-                      try {
-                        const mimeType = radiologyImage.mimeType || 'image/jpeg';
-                        const base64ImageData = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
-                        
-                        // Update the database record with base64 data (async, don't wait)
-                        db.update(schema.radiologyImages)
-                          .set({ imageData: base64ImageData })
-                          .where(eq(schema.radiologyImages.id, radiologyImage.id))
-                          .execute()
-                          .then(() => {
-                            console.log(`📷 [${idx + 1}] ✅ Updated database with base64 imageData for future use`);
-                          })
-                          .catch((updateError) => {
-                            console.warn(`📷 [${idx + 1}] ⚠️ Failed to update database with base64 (non-critical):`, updateError);
-                          });
-                      } catch (convertError) {
-                        console.warn(`📷 [${idx + 1}] ⚠️ Failed to convert file to base64 (non-critical):`, convertError);
-                      }
+
+                    console.log(`📷 [${idx + 1}] ✅ PRIORITY 1 SUCCESS: Loaded ${imageBuffer.length} bytes from base64 imageData`);
+                    console.log(`📷 [${idx + 1}]    Buffer validation: is Buffer=${imageBuffer instanceof Buffer}, length=${imageBuffer.length}`);
+                  } catch (base64Error) {
+                    console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 1 FAILED: Error decoding base64 imageData:`, base64Error);
+                    if (base64Error instanceof Error) {
+                      console.warn(`📷 [${idx + 1}]    Error message: ${base64Error.message}`);
                     }
-                  } else {
-                    console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 2: File not found at resolved path: "${imagePath}"`);
-                    
-                    // Try fallback: construct path from expected location using fileName (same as View Images)
-                    const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
-                    const constructedPath = path.join(imagesDir, radiologyFileName || radiologyImage.fileName || '');
-                    console.log(`📷 [${idx + 1}]    Trying fallback path: "${constructedPath}"`);
-                    
-                    const constructedExists = await fse.pathExists(constructedPath);
-                    if (constructedExists) {
-                      imagePath = constructedPath;
-                      imageBuffer = await readFile(imagePath);
-                      
-                      if (!imageBuffer || imageBuffer.length === 0) {
-                        throw new Error(`Fallback file exists but buffer is empty`);
-                      }
-                      
-                      console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS (fallback): Read ${imageBuffer.length} bytes`);
+                    // Clear buffer to try next priority
+                    imageBuffer = null;
+                  }
+                } else {
+                  console.log(`📷 [${idx + 1}] PRIORITY 1: No base64 imageData in database, will try filePath`);
+                }
+
+                // PRIORITY 2: Use filePath (or file_path) from database - same resolution as "View Images" serve route
+                const dbFilePath = (radiologyImage as any).filePath ?? (radiologyImage as any).file_path;
+                const radiologyFileName = (radiologyImage as any).fileName ?? (radiologyImage as any).file_name;
+                if (!imageBuffer && dbFilePath) {
+                  try {
+                    console.log(`📷 [${idx + 1}] PRIORITY 2: Loading image from server filesystem`);
+                    console.log(`📷 [${idx + 1}]    Database filePath: "${dbFilePath}"`);
+
+                    let rawPath = String(dbFilePath).trim();
+                    // Same as serve route: try direct path first (path as stored, and relative to cwd)
+                    const directPath = rawPath.replace(/\\\\/g, '\\');
+                    let fileExists = await fse.pathExists(directPath);
+                    let imagePath: string = path.resolve(process.cwd(), rawPath || '.');
+                    if (fileExists) {
+                      imagePath = directPath;
+                      console.log(`📷 [${idx + 1}]    Using direct path from DB: "${imagePath}"`);
                     } else {
-                      console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 2: File not found at fallback path either`);
-                    
-                    // List directory contents to help debug
-                    try {
+                      fileExists = await fse.pathExists(imagePath);
+                      if (fileExists) {
+                        console.log(`📷 [${idx + 1}]    Using path resolved from cwd: "${imagePath}"`);
+                      }
+                    }
+                    if (!fileExists) {
+                      // Paths like "/uploads/..." - resolve from cwd
+                      if (rawPath.startsWith('/uploads') || (rawPath.startsWith('/') && rawPath.includes('uploads'))) {
+                        rawPath = rawPath.replace(/^\/+/, '') || rawPath;
+                      }
+                      const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(rawPath);
+                      if (path.isAbsolute(rawPath) && isWindowsAbsolute) {
+                        imagePath = path.normalize(rawPath);
+                        fileExists = await fse.pathExists(imagePath);
+                        if (fileExists) console.log(`📷 [${idx + 1}]    Using absolute path: "${imagePath}"`);
+                      } else if (rawPath.includes('uploads')) {
+                        const uploadsIndex = rawPath.indexOf('uploads');
+                        const relativePath = rawPath.substring(uploadsIndex);
+                        const normalizedRelative = relativePath.replace(/\\/g, '/');
+                        imagePath = path.resolve(process.cwd(), normalizedRelative);
+                        fileExists = await fse.pathExists(imagePath);
+                        if (fileExists) console.log(`📷 [${idx + 1}]    Using resolved uploads path: "${imagePath}"`);
+                      } else {
+                        imagePath = path.resolve(process.cwd(), rawPath);
+                        fileExists = await fse.pathExists(imagePath);
+                        if (fileExists) console.log(`📷 [${idx + 1}]    Using relative path: "${imagePath}"`);
+                      }
+                    }
+                    console.log(`📷 [${idx + 1}]    File exists at resolved path: ${fileExists ? '✅ YES' : '❌ NO'}`);
+                    if (fileExists) {
+                      imageBuffer = await readFile(imagePath);
+
+                      // Validate buffer
+                      if (!imageBuffer || imageBuffer.length === 0) {
+                        throw new Error(`File exists but buffer is empty (0 bytes)`);
+                      }
+
+                      console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS: Read ${imageBuffer.length} bytes from filesystem`);
+                      console.log(`📷 [${idx + 1}]    Buffer type: ${imageBuffer instanceof Buffer ? 'Buffer' : typeof imageBuffer}`);
+
+                      // If we successfully read the file but imageData is missing, convert to base64 and update database
+                      // This ensures future PDF generations can use Priority 1 (faster)
+                      if (!radiologyImage.imageData && imageBuffer) {
+                        try {
+                          const mimeType = radiologyImage.mimeType || 'image/jpeg';
+                          const base64ImageData = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+
+                          // Update the database record with base64 data (async, don't wait)
+                          db.update(schema.radiologyImages)
+                            .set({ imageData: base64ImageData })
+                            .where(eq(schema.radiologyImages.id, radiologyImage.id))
+                            .execute()
+                            .then(() => {
+                              console.log(`📷 [${idx + 1}] ✅ Updated database with base64 imageData for future use`);
+                            })
+                            .catch((updateError) => {
+                              console.warn(`📷 [${idx + 1}] ⚠️ Failed to update database with base64 (non-critical):`, updateError);
+                            });
+                        } catch (convertError) {
+                          console.warn(`📷 [${idx + 1}] ⚠️ Failed to convert file to base64 (non-critical):`, convertError);
+                        }
+                      }
+                    } else {
+                      console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 2: File not found at resolved path: "${imagePath}"`);
+
+                      // Try fallback: construct path from expected location using fileName (same as View Images)
+                      const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+                      const constructedPath = path.join(imagesDir, radiologyFileName || radiologyImage.fileName || '');
+                      console.log(`📷 [${idx + 1}]    Trying fallback path: "${constructedPath}"`);
+
+                      const constructedExists = await fse.pathExists(constructedPath);
+                      if (constructedExists) {
+                        imagePath = constructedPath;
+                        imageBuffer = await readFile(imagePath);
+
+                        if (!imageBuffer || imageBuffer.length === 0) {
+                          throw new Error(`Fallback file exists but buffer is empty`);
+                        }
+
+                        console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS (fallback): Read ${imageBuffer.length} bytes`);
+                      } else {
+                        console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 2: File not found at fallback path either`);
+
+                        // List directory contents to help debug
+                        try {
+                          if (await fse.pathExists(imagesDir)) {
+                            const dirContents = await readdir(imagesDir);
+                            console.log(`📷 [${idx + 1}]    Directory exists: "${imagesDir}"`);
+                            console.log(`📷 [${idx + 1}]    Directory contents (${dirContents.length} files):`, dirContents.slice(0, 10).join(', '));
+                            if (dirContents.length > 10) {
+                              console.log(`📷 [${idx + 1}]    ... and ${dirContents.length - 10} more files`);
+                            }
+
+                            // Try to find file by partial name match (in case of filename mismatch)
+                            const fileNameWithoutExt = path.parse(radiologyFileName || rowFileName).name;
+                            const matchingFile = dirContents.find(f => {
+                              const fName = path.parse(f).name;
+                              return fName.includes(fileNameWithoutExt) || fileNameWithoutExt.includes(fName) || f.includes(fileNameWithoutExt);
+                            });
+                            if (matchingFile) {
+                              const matchedPath = path.join(imagesDir, matchingFile);
+                              console.log(`📷 [${idx + 1}]    Found potential match: "${matchingFile}"`);
+                              console.log(`📷 [${idx + 1}]    Trying matched path: "${matchedPath}"`);
+                              if (await fse.pathExists(matchedPath)) {
+                                imagePath = matchedPath;
+                                imageBuffer = await readFile(imagePath);
+                                if (imageBuffer && imageBuffer.length > 0) {
+                                  console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS (matched file): Read ${imageBuffer.length} bytes`);
+                                }
+                              }
+                            }
+                          } else {
+                            console.warn(`📷 [${idx + 1}]    Directory does not exist: "${imagesDir}"`);
+                          }
+                        } catch (dirError) {
+                          console.error(`📷 [${idx + 1}]    Error listing directory:`, dirError);
+                        }
+                      }
+                    }
+                  } catch (fileError) {
+                    console.error(`📷 [${idx + 1}] ❌ PRIORITY 2 FAILED: Error reading from filesystem:`, fileError);
+                    if (fileError instanceof Error) {
+                      console.error(`📷 [${idx + 1}]    Error message: ${fileError.message}`);
+                    }
+                    // Continue to next priority - don't throw
+                  }
+                }
+
+                // PRIORITY 3: Fallback - construct absolute path from fileName if filePath not available
+                if (!imageBuffer && rowFileName) {
+                  try {
+                    console.log(`📷 [${idx + 1}] PRIORITY 3: Constructing absolute path from fileName: "${rowFileName}"`);
+
+                    let imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+                    let constructedPath = path.resolve(imagesDir, rowFileName);
+                    console.log(`📷 [${idx + 1}]    Constructed absolute path: "${constructedPath}"`);
+
+                    let fileExists = await fse.pathExists(constructedPath);
+                    if (!fileExists) {
+                      const rowOrg = Number((radiologyImage as any).organizationId ?? (radiologyImage as any).organization_id ?? organizationId);
+                      const rowPat = Number((radiologyImage as any).patientId ?? (radiologyImage as any).patient_id ?? patientId);
+                      const rowDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(rowOrg), 'patients', String(rowPat));
+                      const rowPath = path.resolve(rowDir, rowFileName);
+                      if (await fse.pathExists(rowPath)) {
+                        constructedPath = rowPath;
+                        fileExists = true;
+                        imagesDir = rowDir;
+                        console.log(`📷 [${idx + 1}]    File found at row org/patient path: "${rowPath}"`);
+                      }
+                    }
+                    console.log(`📷 [${idx + 1}]    File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
+
+                    if (fileExists) {
+                      // Read file as binary buffer from filesystem
+                      imageBuffer = await readFile(constructedPath);
+
+                      if (!imageBuffer || imageBuffer.length === 0) {
+                        throw new Error(`File exists but buffer is empty`);
+                      }
+
+                      console.log(`📷 [${idx + 1}] ✅ PRIORITY 3 SUCCESS: Read ${imageBuffer.length} bytes from filesystem`);
+                    } else {
+                      console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 3 FAILED: File not found at constructed path`);
+
+                      // List directory to see what files actually exist
+                      try {
                         if (await fse.pathExists(imagesDir)) {
                           const dirContents = await readdir(imagesDir);
                           console.log(`📷 [${idx + 1}]    Directory exists: "${imagesDir}"`);
-                        console.log(`📷 [${idx + 1}]    Directory contents (${dirContents.length} files):`, dirContents.slice(0, 10).join(', '));
-                        if (dirContents.length > 10) {
-                          console.log(`📷 [${idx + 1}]    ... and ${dirContents.length - 10} more files`);
-                        }
-                        
-                        // Try to find file by partial name match (in case of filename mismatch)
-                        const fileNameWithoutExt = path.parse(radiologyFileName || rowFileName).name;
+                          console.log(`📷 [${idx + 1}]    Directory contents (${dirContents.length} files):`, dirContents.join(', '));
+
+                          // Try to find file by partial match
+                          const fileNameWithoutExt = path.parse(rowFileName).name;
                           const matchingFile = dirContents.find(f => {
                             const fName = path.parse(f).name;
                             return fName.includes(fileNameWithoutExt) || fileNameWithoutExt.includes(fName) || f.includes(fileNameWithoutExt);
                           });
-                        if (matchingFile) {
+
+                          if (matchingFile) {
                             const matchedPath = path.join(imagesDir, matchingFile);
-                          console.log(`📷 [${idx + 1}]    Found potential match: "${matchingFile}"`);
-                          console.log(`📷 [${idx + 1}]    Trying matched path: "${matchedPath}"`);
-                          if (await fse.pathExists(matchedPath)) {
-                            imagePath = matchedPath;
-                            imageBuffer = await readFile(imagePath);
-                            if (imageBuffer && imageBuffer.length > 0) {
-                              console.log(`📷 [${idx + 1}] ✅ PRIORITY 2 SUCCESS (matched file): Read ${imageBuffer.length} bytes`);
+                            console.log(`📷 [${idx + 1}]    Found potential match: "${matchingFile}"`);
+                            if (await fse.pathExists(matchedPath)) {
+                              imageBuffer = await readFile(matchedPath);
+                              if (imageBuffer && imageBuffer.length > 0) {
+                                console.log(`📷 [${idx + 1}] ✅ PRIORITY 3 SUCCESS (matched file): Read ${imageBuffer.length} bytes`);
+                              }
                             }
                           }
-                        }
-                      } else {
+                        } else {
                           console.warn(`📷 [${idx + 1}]    Directory does not exist: "${imagesDir}"`);
-                      }
-                    } catch (dirError) {
-                      console.error(`📷 [${idx + 1}]    Error listing directory:`, dirError);
-                    }
-                    }
-                  }
-                } catch (fileError) {
-                  console.error(`📷 [${idx + 1}] ❌ PRIORITY 2 FAILED: Error reading from filesystem:`, fileError);
-                  if (fileError instanceof Error) {
-                    console.error(`📷 [${idx + 1}]    Error message: ${fileError.message}`);
-                  }
-                  // Continue to next priority - don't throw
-                }
-              }
-              
-              // PRIORITY 3: Fallback - construct absolute path from fileName if filePath not available
-              if (!imageBuffer && rowFileName) {
-                try {
-                  console.log(`📷 [${idx + 1}] PRIORITY 3: Constructing absolute path from fileName: "${rowFileName}"`);
-                  
-                  let imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
-                  let constructedPath = path.resolve(imagesDir, rowFileName);
-                  console.log(`📷 [${idx + 1}]    Constructed absolute path: "${constructedPath}"`);
-                  
-                  let fileExists = await fse.pathExists(constructedPath);
-                  if (!fileExists) {
-                    const rowOrg = Number((radiologyImage as any).organizationId ?? (radiologyImage as any).organization_id ?? organizationId);
-                    const rowPat = Number((radiologyImage as any).patientId ?? (radiologyImage as any).patient_id ?? patientId);
-                    const rowDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(rowOrg), 'patients', String(rowPat));
-                    const rowPath = path.resolve(rowDir, rowFileName);
-                    if (await fse.pathExists(rowPath)) {
-                      constructedPath = rowPath;
-                      fileExists = true;
-                      imagesDir = rowDir;
-                      console.log(`📷 [${idx + 1}]    File found at row org/patient path: "${rowPath}"`);
-                    }
-                  }
-                  console.log(`📷 [${idx + 1}]    File exists: ${fileExists ? '✅ YES' : '❌ NO'}`);
-                  
-                  if (fileExists) {
-                    // Read file as binary buffer from filesystem
-                    imageBuffer = await readFile(constructedPath);
-                    
-                    if (!imageBuffer || imageBuffer.length === 0) {
-                      throw new Error(`File exists but buffer is empty`);
-                    }
-                    
-                    console.log(`📷 [${idx + 1}] ✅ PRIORITY 3 SUCCESS: Read ${imageBuffer.length} bytes from filesystem`);
-                  } else {
-                    console.warn(`📷 [${idx + 1}] ⚠️ PRIORITY 3 FAILED: File not found at constructed path`);
-                    
-                    // List directory to see what files actually exist
-                    try {
-                      if (await fse.pathExists(imagesDir)) {
-                        const dirContents = await readdir(imagesDir);
-                        console.log(`📷 [${idx + 1}]    Directory exists: "${imagesDir}"`);
-                        console.log(`📷 [${idx + 1}]    Directory contents (${dirContents.length} files):`, dirContents.join(', '));
-                        
-                        // Try to find file by partial match
-                        const fileNameWithoutExt = path.parse(rowFileName).name;
-                        const matchingFile = dirContents.find(f => {
-                          const fName = path.parse(f).name;
-                          return fName.includes(fileNameWithoutExt) || fileNameWithoutExt.includes(fName) || f.includes(fileNameWithoutExt);
-                        });
-                        
-                        if (matchingFile) {
-                          const matchedPath = path.join(imagesDir, matchingFile);
-                          console.log(`📷 [${idx + 1}]    Found potential match: "${matchingFile}"`);
-                          if (await fse.pathExists(matchedPath)) {
-                            imageBuffer = await readFile(matchedPath);
-                            if (imageBuffer && imageBuffer.length > 0) {
-                              console.log(`📷 [${idx + 1}] ✅ PRIORITY 3 SUCCESS (matched file): Read ${imageBuffer.length} bytes`);
-                            }
+                          // Try to create it
+                          try {
+                            await fse.ensureDir(imagesDir);
+                            console.log(`📷 [${idx + 1}]    Created directory: "${imagesDir}"`);
+                          } catch (mkdirError) {
+                            console.error(`📷 [${idx + 1}]    Failed to create directory:`, mkdirError);
                           }
                         }
-                      } else {
-                        console.warn(`📷 [${idx + 1}]    Directory does not exist: "${imagesDir}"`);
-                        // Try to create it
-                        try {
-                          await fse.ensureDir(imagesDir);
-                          console.log(`📷 [${idx + 1}]    Created directory: "${imagesDir}"`);
-                        } catch (mkdirError) {
-                          console.error(`📷 [${idx + 1}]    Failed to create directory:`, mkdirError);
-                        }
+                      } catch (dirError) {
+                        console.error(`📷 [${idx + 1}]    Error listing directory:`, dirError);
                       }
-                    } catch (dirError) {
-                      console.error(`📷 [${idx + 1}]    Error listing directory:`, dirError);
+                    }
+                  } catch (constructError) {
+                    console.error(`📷 [${idx + 1}] ❌ PRIORITY 3 FAILED: Error with constructed path:`, constructError);
+                    if (constructError instanceof Error) {
+                      console.error(`📷 [${idx + 1}]    Error message: ${constructError.message}`);
                     }
                   }
-                } catch (constructError) {
-                  console.error(`📷 [${idx + 1}] ❌ PRIORITY 3 FAILED: Error with constructed path:`, constructError);
-                  if (constructError instanceof Error) {
-                    console.error(`📷 [${idx + 1}]    Error message: ${constructError.message}`);
-                  }
                 }
-              }
-              
-              // If we successfully loaded an image buffer, validate and process it
-              if (imageBuffer) {
-                try {
-                  // Validate buffer is actually a Buffer instance
-                  if (!(imageBuffer instanceof Buffer)) {
-                    throw new Error(`Image buffer is not a Buffer instance (type: ${typeof imageBuffer})`);
-                  }
-                  
-                  // Validate buffer has content
-                  if (imageBuffer.length === 0) {
-                    throw new Error(`Image buffer is empty (0 bytes)`);
-                  }
-                  
-                  // Validate buffer size is reasonable (not corrupted)
-                  if (imageBuffer.length < 100) {
-                    console.warn(`📷 [${idx + 1}] ⚠️ WARNING: Image buffer is very small (${imageBuffer.length} bytes), may be corrupted`);
-                  }
-                  
-                  const fileExtension = path.extname(imageFileName || '').toLowerCase();
-                  console.log(`📷 [${idx + 1}] Processing image: ${imageBuffer.length} bytes, extension: ${fileExtension || 'unknown'}`);
-                  
-                  // Convert to supported format (PNG or JPEG) if needed
-                  const converted = await convertImageToSupportedFormat(imageBuffer, fileExtension);
-                  
-                  // Validate converted buffer
-                  if (!converted.buffer || !(converted.buffer instanceof Buffer) || converted.buffer.length === 0) {
-                    throw new Error(`Converted image buffer is invalid or empty`);
-                  }
-                  
-                  // Ensure mimeType is set correctly
-                  if (!converted.mimeType || (converted.mimeType !== 'image/png' && converted.mimeType !== 'image/jpeg')) {
-                    console.warn(`📷 [${idx + 1}] ⚠️ WARNING: Unexpected mimeType "${converted.mimeType}", defaulting to image/jpeg`);
-                    converted.mimeType = 'image/jpeg';
-                  }
-                  
-                  imageBuffers.push({
-                    buffer: converted.buffer,
-                    mimeType: converted.mimeType,
-                    fileName: imageFileName || 'image'
-                  });
-                  
-                  successfullyLoaded++;
-                  console.log(`📷 [${idx + 1}] ✅ FINAL SUCCESS: Image added to PDF buffer`);
-                  console.log(`📷 [${idx + 1}]    - Buffer size: ${converted.buffer.length} bytes`);
-                  console.log(`📷 [${idx + 1}]    - MIME type: ${converted.mimeType}`);
-                  console.log(`📷 [${idx + 1}]    - Total loaded: ${successfullyLoaded}/${radiologyImages.length}`);
-                } catch (convertError) {
-                  failedToLoad++;
-                  console.error(`📷 [${idx + 1}] ❌ ERROR processing image:`, convertError);
-                  if (convertError instanceof Error) {
-                    console.error(`📷 [${idx + 1}]    Error message: ${convertError.message}`);
-                  }
-                  // Continue to next image - don't throw
-                }
-              } else {
-                failedToLoad++;
-                console.warn(`📷 [${idx + 1}] ⚠️ ALL PRIORITIES FAILED: Could not load image from any source`);
-                console.warn(`📷 [${idx + 1}]    - Priority 1 (base64 imageData): ${radiologyImage.imageData ? 'Available but failed' : 'Not available'}`);
-                console.warn(`📷 [${idx + 1}]    - Priority 2 (filePath from DB): ${radiologyImage.filePath || 'Not available'}`);
-                console.warn(`📷 [${idx + 1}]    - Priority 3 (constructed path): Tried but file not found`);
-                console.warn(`📷 [${idx + 1}]    - Skipping this image and continuing with next...`);
-              }
-            } catch (error) {
-              failedToLoad++;
-              console.error(`📷 [${idx + 1}] ❌ FATAL ERROR loading radiology image:`, error);
-              if (error instanceof Error) {
-                console.error(`📷 [${idx + 1}]    Error message: ${error.message}`);
-                console.error(`📷 [${idx + 1}]    Error stack: ${error.stack}`);
-              }
-            }
-          }
-          
-          console.log(`\n📷 SUMMARY: Processed ${radiologyImages.length} image(s) from radiology_images table for medical_image_id: ${imageId}`);
-          console.log(`📷 SUMMARY: ✅ Successfully loaded: ${successfullyLoaded} out of ${radiologyImages.length} rows`);
-          console.log(`📷 SUMMARY: ❌ Failed to load: ${failedToLoad} out of ${radiologyImages.length} rows`);
-          console.log(`📷 SUMMARY: 📦 Total images ready for PDF embedding: ${imageBuffers.length}`);
-          
-          // Log all successfully loaded image paths to confirm ALL rows are processed
-          if (imageBuffers.length > 0) {
-            console.log(`📷 SUMMARY: ✅ ALL IMAGES TO BE EMBEDDED IN PDF (not just first row):`);
-            imageBuffers.forEach((img, idx) => {
-              console.log(`📷   Image ${idx + 1}/${imageBuffers.length}: "${img.fileName}" (${img.buffer.length} bytes, ${img.mimeType})`);
-            });
-          } else {
-            console.log(`📷 SUMMARY: ⚠️ WARNING - No images were successfully loaded for medical_image_id: ${imageId}`);
-            console.log(`📷 SUMMARY: This means NONE of the ${radiologyImages.length} rows in radiology_images table could be loaded`);
-            // Fallback 1: Try each row's (organizationId, patientId) + fileName in case files are under row's org/patient
-            for (let ri = 0; ri < radiologyImages.length && imageBuffers.length < radiologyImages.length; ri++) {
-              const row = radiologyImages[ri];
-              const rowOrg = Number((row as any).organizationId ?? (row as any).organization_id ?? organizationId);
-              const rowPat = Number((row as any).patientId ?? (row as any).patient_id ?? patientId);
-              const rowFile = (row as any).fileName ?? (row as any).file_name ?? '';
-              if (!rowFile) continue;
-              const rowDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(rowOrg), 'patients', String(rowPat));
-              const rowPath = path.join(rowDir, rowFile);
-              try {
-                if (await fse.pathExists(rowPath)) {
-                  const fileBuffer = await readFile(rowPath);
-                  if (fileBuffer && fileBuffer.length > 0) {
-                    const ext = path.extname(rowFile).toLowerCase();
-                    const converted = await convertImageToSupportedFormat(fileBuffer, ext);
+
+                // If we successfully loaded an image buffer, validate and process it
+                if (imageBuffer) {
+                  try {
+                    // Validate buffer is actually a Buffer instance
+                    if (!(imageBuffer instanceof Buffer)) {
+                      throw new Error(`Image buffer is not a Buffer instance (type: ${typeof imageBuffer})`);
+                    }
+
+                    // Validate buffer has content
+                    if (imageBuffer.length === 0) {
+                      throw new Error(`Image buffer is empty (0 bytes)`);
+                    }
+
+                    // Validate buffer size is reasonable (not corrupted)
+                    if (imageBuffer.length < 100) {
+                      console.warn(`📷 [${idx + 1}] ⚠️ WARNING: Image buffer is very small (${imageBuffer.length} bytes), may be corrupted`);
+                    }
+
+                    const fileExtension = path.extname(imageFileName || '').toLowerCase();
+                    console.log(`📷 [${idx + 1}] Processing image: ${imageBuffer.length} bytes, extension: ${fileExtension || 'unknown'}`);
+
+                    // Convert to supported format (PNG or JPEG) if needed
+                    const converted = await convertImageToSupportedFormat(imageBuffer, fileExtension);
+
+                    // Validate converted buffer
+                    if (!converted.buffer || !(converted.buffer instanceof Buffer) || converted.buffer.length === 0) {
+                      throw new Error(`Converted image buffer is invalid or empty`);
+                    }
+
+                    // Ensure mimeType is set correctly
+                    if (!converted.mimeType || (converted.mimeType !== 'image/png' && converted.mimeType !== 'image/jpeg')) {
+                      console.warn(`📷 [${idx + 1}] ⚠️ WARNING: Unexpected mimeType "${converted.mimeType}", defaulting to image/jpeg`);
+                      converted.mimeType = 'image/jpeg';
+                    }
+
                     imageBuffers.push({
                       buffer: converted.buffer,
                       mimeType: converted.mimeType,
-                      fileName: rowFile
+                      fileName: imageFileName || 'image'
                     });
-                    console.log(`📷 REGENERATE FALLBACK (row ${ri + 1}): ✅ Loaded from row path: "${rowPath}"`);
-                  }
-                }
-              } catch (rowLoadErr) {
-                console.warn(`📷 REGENERATE FALLBACK (row ${ri + 1}): Failed to load "${rowPath}":`, rowLoadErr);
-              }
-            }
-            // Fallback 2: Directory scan using medical image's org/patient
-            if (imageBuffers.length === 0) {
-              const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
-              console.log(`📷 REGENERATE FALLBACK: Trying directory scan for "${imagesDir}"`);
-              try {
-                if (await fse.pathExists(imagesDir)) {
-                  const allFiles = await readdir(imagesDir);
-                  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
-                  for (const file of allFiles) {
-                    const fileExt = path.extname(file).toLowerCase();
-                    if (imageExtensions.includes(fileExt)) {
-                      try {
-                        const filePath = path.join(imagesDir, file);
-                        const fileBuffer = await readFile(filePath);
-                        if (fileBuffer && fileBuffer.length > 0) {
-                          const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
-                          imageBuffers.push({
-                            buffer: converted.buffer,
-                            mimeType: converted.mimeType,
-                            fileName: file
-                          });
-                          console.log(`📷 REGENERATE FALLBACK: ✅ Loaded image: "${file}"`);
-                        }
-                      } catch (loadError) {
-                        console.error(`📷 REGENERATE FALLBACK: Failed to load "${file}":`, loadError);
-                      }
+
+                    successfullyLoaded++;
+                    console.log(`📷 [${idx + 1}] ✅ FINAL SUCCESS: Image added to PDF buffer`);
+                    console.log(`📷 [${idx + 1}]    - Buffer size: ${converted.buffer.length} bytes`);
+                    console.log(`📷 [${idx + 1}]    - MIME type: ${converted.mimeType}`);
+                    console.log(`📷 [${idx + 1}]    - Total loaded: ${successfullyLoaded}/${radiologyImages.length}`);
+                  } catch (convertError) {
+                    failedToLoad++;
+                    console.error(`📷 [${idx + 1}] ❌ ERROR processing image:`, convertError);
+                    if (convertError instanceof Error) {
+                      console.error(`📷 [${idx + 1}]    Error message: ${convertError.message}`);
                     }
-                  }
-                  if (imageBuffers.length > 0) {
-                    console.log(`📷 REGENERATE FALLBACK: Loaded ${imageBuffers.length} image(s) from directory for PDF embedding`);
+                    // Continue to next image - don't throw
                   }
                 } else {
-                  console.warn(`📷 REGENERATE FALLBACK: Directory does not exist: "${imagesDir}"`);
+                  failedToLoad++;
+                  console.warn(`📷 [${idx + 1}] ⚠️ ALL PRIORITIES FAILED: Could not load image from any source`);
+                  console.warn(`📷 [${idx + 1}]    - Priority 1 (base64 imageData): ${radiologyImage.imageData ? 'Available but failed' : 'Not available'}`);
+                  console.warn(`📷 [${idx + 1}]    - Priority 2 (filePath from DB): ${radiologyImage.filePath || 'Not available'}`);
+                  console.warn(`📷 [${idx + 1}]    - Priority 3 (constructed path): Tried but file not found`);
+                  console.warn(`📷 [${idx + 1}]    - Skipping this image and continuing with next...`);
                 }
-              } catch (dirError) {
-                console.error(`📷 REGENERATE FALLBACK: Error scanning directory:`, dirError);
+              } catch (error) {
+                failedToLoad++;
+                console.error(`📷 [${idx + 1}] ❌ FATAL ERROR loading radiology image:`, error);
+                if (error instanceof Error) {
+                  console.error(`📷 [${idx + 1}]    Error message: ${error.message}`);
+                  console.error(`📷 [${idx + 1}]    Error stack: ${error.stack}`);
+                }
               }
             }
-            // Fallback 3: Try each row's directory scan (in case files are under row org/patient with different filename)
-            if (imageBuffers.length === 0) {
-              const seenDirs = new Set<string>();
-              for (const row of radiologyImages) {
+
+            console.log(`\n📷 SUMMARY: Processed ${radiologyImages.length} image(s) from radiology_images table for medical_image_id: ${imageId}`);
+            console.log(`📷 SUMMARY: ✅ Successfully loaded: ${successfullyLoaded} out of ${radiologyImages.length} rows`);
+            console.log(`📷 SUMMARY: ❌ Failed to load: ${failedToLoad} out of ${radiologyImages.length} rows`);
+            console.log(`📷 SUMMARY: 📦 Total images ready for PDF embedding: ${imageBuffers.length}`);
+
+            // Log all successfully loaded image paths to confirm ALL rows are processed
+            if (imageBuffers.length > 0) {
+              console.log(`📷 SUMMARY: ✅ ALL IMAGES TO BE EMBEDDED IN PDF (not just first row):`);
+              imageBuffers.forEach((img, idx) => {
+                console.log(`📷   Image ${idx + 1}/${imageBuffers.length}: "${img.fileName}" (${img.buffer.length} bytes, ${img.mimeType})`);
+              });
+            } else {
+              console.log(`📷 SUMMARY: ⚠️ WARNING - No images were successfully loaded for medical_image_id: ${imageId}`);
+              console.log(`📷 SUMMARY: This means NONE of the ${radiologyImages.length} rows in radiology_images table could be loaded`);
+              // Fallback 1: Try each row's (organizationId, patientId) + fileName in case files are under row's org/patient
+              for (let ri = 0; ri < radiologyImages.length && imageBuffers.length < radiologyImages.length; ri++) {
+                const row = radiologyImages[ri];
                 const rowOrg = Number((row as any).organizationId ?? (row as any).organization_id ?? organizationId);
                 const rowPat = Number((row as any).patientId ?? (row as any).patient_id ?? patientId);
-                const dirKey = `${rowOrg}/${rowPat}`;
-                if (seenDirs.has(dirKey)) continue;
-                seenDirs.add(dirKey);
+                const rowFile = (row as any).fileName ?? (row as any).file_name ?? '';
+                if (!rowFile) continue;
                 const rowDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(rowOrg), 'patients', String(rowPat));
-                if (!(await fse.pathExists(rowDir))) continue;
+                const rowPath = path.join(rowDir, rowFile);
                 try {
-                  const allFiles = await readdir(rowDir);
-                  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
-                  for (const file of allFiles) {
-                    const fileExt = path.extname(file).toLowerCase();
-                    if (!imageExtensions.includes(fileExt)) continue;
-                    if (imageBuffers.some(ib => ib.fileName === file)) continue;
-                    try {
-                      const filePath = path.join(rowDir, file);
-                      const fileBuffer = await readFile(filePath);
-                      if (fileBuffer && fileBuffer.length > 0) {
-                        const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
-                        imageBuffers.push({ buffer: converted.buffer, mimeType: converted.mimeType, fileName: file });
-                        console.log(`📷 REGENERATE FALLBACK (dir ${dirKey}): ✅ Loaded: "${file}"`);
-                      }
-                    } catch (_) {}
-                  }
-                } catch (_) {}
-              }
-            }
-          }
-        } else {
-          console.log(`📷 No images found in radiology_images table for medical_image_id: ${imageId}`);
-          
-          // Final fallback: Check if directory exists and list all files
-          const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
-          console.log(`📷 FINAL FALLBACK: Checking directory for any image files: "${imagesDir}"`);
-          
-          try {
-            if (await fse.pathExists(imagesDir)) {
-              const allFiles = await readdir(imagesDir);
-              console.log(`📷 FINAL FALLBACK: Directory exists with ${allFiles.length} file(s):`, allFiles.join(', '));
-              
-              // Try to load any image files found in the directory
-              const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
-              for (const file of allFiles) {
-                const fileExt = path.extname(file).toLowerCase();
-                if (imageExtensions.includes(fileExt)) {
-                  try {
-                    const filePath = path.join(imagesDir, file);
-                    console.log(`📷 FINAL FALLBACK: Attempting to load image file: "${file}"`);
-                    const fileBuffer = await readFile(filePath);
-                    
+                  if (await fse.pathExists(rowPath)) {
+                    const fileBuffer = await readFile(rowPath);
                     if (fileBuffer && fileBuffer.length > 0) {
-                      const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
+                      const ext = path.extname(rowFile).toLowerCase();
+                      const converted = await convertImageToSupportedFormat(fileBuffer, ext);
                       imageBuffers.push({
                         buffer: converted.buffer,
                         mimeType: converted.mimeType,
-                        fileName: file
+                        fileName: rowFile
                       });
-                      console.log(`📷 FINAL FALLBACK: ✅ Successfully loaded image: "${file}" (${fileBuffer.length} bytes)`);
+                      console.log(`📷 REGENERATE FALLBACK (row ${ri + 1}): ✅ Loaded from row path: "${rowPath}"`);
                     }
-                  } catch (loadError) {
-                    console.error(`📷 FINAL FALLBACK: ❌ Failed to load "${file}":`, loadError);
                   }
+                } catch (rowLoadErr) {
+                  console.warn(`📷 REGENERATE FALLBACK (row ${ri + 1}): Failed to load "${rowPath}":`, rowLoadErr);
                 }
               }
-              
-              if (imageBuffers.length > 0) {
-                console.log(`📷 FINAL FALLBACK: ✅ Loaded ${imageBuffers.length} image(s) from directory scan`);
+              // Fallback 2: Directory scan using medical image's org/patient
+              if (imageBuffers.length === 0) {
+                const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+                console.log(`📷 REGENERATE FALLBACK: Trying directory scan for "${imagesDir}"`);
+                try {
+                  if (await fse.pathExists(imagesDir)) {
+                    const allFiles = await readdir(imagesDir);
+                    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
+                    for (const file of allFiles) {
+                      const fileExt = path.extname(file).toLowerCase();
+                      if (imageExtensions.includes(fileExt)) {
+                        try {
+                          const filePath = path.join(imagesDir, file);
+                          const fileBuffer = await readFile(filePath);
+                          if (fileBuffer && fileBuffer.length > 0) {
+                            const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
+                            imageBuffers.push({
+                              buffer: converted.buffer,
+                              mimeType: converted.mimeType,
+                              fileName: file
+                            });
+                            console.log(`📷 REGENERATE FALLBACK: ✅ Loaded image: "${file}"`);
+                          }
+                        } catch (loadError) {
+                          console.error(`📷 REGENERATE FALLBACK: Failed to load "${file}":`, loadError);
+                        }
+                      }
+                    }
+                    if (imageBuffers.length > 0) {
+                      console.log(`📷 REGENERATE FALLBACK: Loaded ${imageBuffers.length} image(s) from directory for PDF embedding`);
+                    }
+                  } else {
+                    console.warn(`📷 REGENERATE FALLBACK: Directory does not exist: "${imagesDir}"`);
+                  }
+                } catch (dirError) {
+                  console.error(`📷 REGENERATE FALLBACK: Error scanning directory:`, dirError);
+                }
               }
-            } else {
-              console.warn(`📷 FINAL FALLBACK: Directory does not exist: "${imagesDir}"`);
+              // Fallback 3: Try each row's directory scan (in case files are under row org/patient with different filename)
+              if (imageBuffers.length === 0) {
+                const seenDirs = new Set<string>();
+                for (const row of radiologyImages) {
+                  const rowOrg = Number((row as any).organizationId ?? (row as any).organization_id ?? organizationId);
+                  const rowPat = Number((row as any).patientId ?? (row as any).patient_id ?? patientId);
+                  const dirKey = `${rowOrg}/${rowPat}`;
+                  if (seenDirs.has(dirKey)) continue;
+                  seenDirs.add(dirKey);
+                  const rowDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(rowOrg), 'patients', String(rowPat));
+                  if (!(await fse.pathExists(rowDir))) continue;
+                  try {
+                    const allFiles = await readdir(rowDir);
+                    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
+                    for (const file of allFiles) {
+                      const fileExt = path.extname(file).toLowerCase();
+                      if (!imageExtensions.includes(fileExt)) continue;
+                      if (imageBuffers.some(ib => ib.fileName === file)) continue;
+                      try {
+                        const filePath = path.join(rowDir, file);
+                        const fileBuffer = await readFile(filePath);
+                        if (fileBuffer && fileBuffer.length > 0) {
+                          const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
+                          imageBuffers.push({ buffer: converted.buffer, mimeType: converted.mimeType, fileName: file });
+                          console.log(`📷 REGENERATE FALLBACK (dir ${dirKey}): ✅ Loaded: "${file}"`);
+                        }
+                      } catch (_) { }
+                    }
+                  } catch (_) { }
+                }
+              }
             }
-          } catch (dirError) {
-            console.error(`📷 FINAL FALLBACK: Error checking directory:`, dirError);
+          } else {
+            console.log(`📷 No images found in radiology_images table for medical_image_id: ${imageId}`);
+
+            // Final fallback: Check if directory exists and list all files
+            const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
+            console.log(`📷 FINAL FALLBACK: Checking directory for any image files: "${imagesDir}"`);
+
+            try {
+              if (await fse.pathExists(imagesDir)) {
+                const allFiles = await readdir(imagesDir);
+                console.log(`📷 FINAL FALLBACK: Directory exists with ${allFiles.length} file(s):`, allFiles.join(', '));
+
+                // Try to load any image files found in the directory
+                const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.jfif'];
+                for (const file of allFiles) {
+                  const fileExt = path.extname(file).toLowerCase();
+                  if (imageExtensions.includes(fileExt)) {
+                    try {
+                      const filePath = path.join(imagesDir, file);
+                      console.log(`📷 FINAL FALLBACK: Attempting to load image file: "${file}"`);
+                      const fileBuffer = await readFile(filePath);
+
+                      if (fileBuffer && fileBuffer.length > 0) {
+                        const converted = await convertImageToSupportedFormat(fileBuffer, fileExt);
+                        imageBuffers.push({
+                          buffer: converted.buffer,
+                          mimeType: converted.mimeType,
+                          fileName: file
+                        });
+                        console.log(`📷 FINAL FALLBACK: ✅ Successfully loaded image: "${file}" (${fileBuffer.length} bytes)`);
+                      }
+                    } catch (loadError) {
+                      console.error(`📷 FINAL FALLBACK: ❌ Failed to load "${file}":`, loadError);
+                    }
+                  }
+                }
+
+                if (imageBuffers.length > 0) {
+                  console.log(`📷 FINAL FALLBACK: ✅ Loaded ${imageBuffers.length} image(s) from directory scan`);
+                }
+              } else {
+                console.warn(`📷 FINAL FALLBACK: Directory does not exist: "${imagesDir}"`);
+              }
+            } catch (dirError) {
+              console.error(`📷 FINAL FALLBACK: Error checking directory:`, dirError);
+            }
           }
+        } catch (error) {
+          console.error('Error fetching radiology images from database:', error);
         }
-      } catch (error) {
-        console.error('Error fetching radiology images from database:', error);
-      }
       } // end if (!usedPreviewImages)
-      
+
       // SECONDARY: Also try to use radiologyImagePaths provided from frontend (skip when already using preview to avoid duplicates)
       if (!usedPreviewImages && radiologyImagePaths && Array.isArray(radiologyImagePaths) && radiologyImagePaths.length > 0) {
         console.log(`📷 Also processing ${radiologyImagePaths.length} image paths provided from frontend`);
-        
+
         for (const rawPath of radiologyImagePaths) {
           try {
             const imagePath = (typeof rawPath === 'string' ? rawPath : (rawPath != null ? String(rawPath) : '')).replace(/\\/g, '/');
@@ -31408,7 +31456,7 @@ Cura EMR Team
               console.log(`📷 Skipping duplicate image: ${fileName}`);
               continue;
             }
-            
+
             // Resolve the path - it might be relative or absolute
             let fullPath: string;
             if (path.isAbsolute(imagePath)) {
@@ -31417,7 +31465,7 @@ Cura EMR Team
               // If relative (e.g. uploads/Imaging_Images/20/patients/132/IMG.jpg), resolve from process.cwd()
               fullPath = path.resolve(process.cwd(), imagePath);
             }
-            
+
             if (await fse.pathExists(fullPath)) {
               const imageBuffer = await readFile(fullPath);
               const fileExtension = path.extname(fullPath).toLowerCase();
@@ -31449,17 +31497,17 @@ Cura EMR Team
           }
         }
       }
-      
+
       // Process uploaded image filenames if provided (skip when already using preview to avoid duplicates)
       if (!usedPreviewImages && uploadedImageFileNames && Array.isArray(uploadedImageFileNames) && uploadedImageFileNames.length > 0) {
         const imagesDir = path.resolve(process.cwd(), 'uploads', 'Imaging_Images', String(organizationId), 'patients', String(patientId));
-        
+
         for (const fileName of uploadedImageFileNames) {
           // Skip if already loaded from radiology_images
           if (imageBuffers.some(img => img.fileName === fileName)) {
             continue;
           }
-          
+
           try {
             const imagePath = path.join(imagesDir, fileName);
             if (await fse.pathExists(imagePath)) {
@@ -31476,7 +31524,7 @@ Cura EMR Team
           }
         }
       }
-      
+
       // If no images found yet, try to load from medical image fileName (fallback)
       if (imageBuffers.length === 0 && medicalImage.fileName) {
         try {
@@ -31495,16 +31543,16 @@ Cura EMR Team
           console.error('Error loading image from fileName:', error);
         }
       }
-      
+
       // Embed images into PDF if available - ALL images, properly spaced
       console.log(`\n📄 PDF EMBEDDING: ========== STARTING PDF EMBEDDING PROCESS ==========`);
       console.log(`📄 PDF EMBEDDING: medical_image_id: ${imageId}`);
       console.log(`📄 PDF EMBEDDING: Total images in buffer to embed: ${imageBuffers.length}`);
       console.log(`📄 PDF EMBEDDING: imageBuffers array type: ${Array.isArray(imageBuffers) ? 'Array' : typeof imageBuffers}`);
-      
+
       // embeddedCount is already declared at the top of the function, reset it to 0 for this embedding session
       embeddedCount = 0;
-      
+
       if (imageBuffers.length === 0) {
         console.error(`\n❌❌❌ CRITICAL ERROR: imageBuffers array is EMPTY!`);
         console.error(`❌ PDF EMBEDDING: No images were loaded into the buffer.`);
@@ -31514,7 +31562,7 @@ Cura EMR Team
         console.error(`❌   3. Files could not be read from the server filesystem`);
         console.error(`❌ PDF EMBEDDING: Check the logs above for "📷" entries to see what happened.`);
       }
-      
+
       if (imageBuffers.length > 0) {
         console.log(`📄 PDF EMBEDDING: ✅ Will embed ALL ${imageBuffers.length} image(s) into PDF report (not just the first one)`);
         console.log(`📄 PDF EMBEDDING: Complete image list to embed:`);
@@ -31531,7 +31579,7 @@ Cura EMR Team
           color: primaryBlue
         });
         yPosition -= 25;
-        
+
         // Fixed image size: 200px * 200px (convert to points: 200 * 0.75 = 150 points)
         const fixedImageSize = 150; // 200px in points (72 DPI = 0.75 conversion factor)
         const pageMargin = 40;
@@ -31539,27 +31587,27 @@ Cura EMR Team
         const labelGap = 7.5; // 10px gap = 7.5 points (at 72 DPI)
         const labelHeight = 8; // Font size for label
         const rowSpacing = 10 + labelGap + labelHeight; // Spacing between rows (includes label space)
-        
+
         // Calculate how many images fit per row (2 or 3 depending on page width)
         const availableWidth = width - (pageMargin * 2);
         const imagesPerRow = Math.floor((availableWidth + imageSpacing) / (fixedImageSize + imageSpacing));
-        
+
         let currentRow = 0;
         let currentCol = 0;
         let rowStartY = yPosition; // Track where the current row started
-        
+
         // embeddedCount is already declared above, reset it to 0 for this embedding session
         embeddedCount = 0;
         console.log(`\n📄 PDF EMBEDDING: Starting loop to embed ${imageBuffers.length} image(s)`);
         console.log(`📄 PDF EMBEDDING: Fixed image size: ${fixedImageSize} points (200px x 200px)`);
         console.log(`📄 PDF EMBEDDING: Images per row: ${imagesPerRow}`);
         console.log(`📄 PDF EMBEDDING: imageBuffers array:`, JSON.stringify(imageBuffers.map(img => ({ fileName: img.fileName, bufferLength: img.buffer.length })), null, 2));
-        
+
         for (let i = 0; i < imageBuffers.length; i++) {
           const imageBuffer = imageBuffers[i];
           console.log(`\n📄 PDF EMBEDDING [${i + 1}/${imageBuffers.length}]: Starting to embed image "${imageBuffer.fileName}"`);
           console.log(`📄 PDF EMBEDDING [${i + 1}]: Image buffer size: ${imageBuffer.buffer.length} bytes, mimeType: ${imageBuffer.mimeType}`);
-          
+
           // Check if we need a new page (before starting a new row)
           if (currentCol === 0) {
             const estimatedRowHeight = fixedImageSize + rowSpacing;
@@ -31584,16 +31632,16 @@ Cura EMR Team
               rowStartY = yPosition;
             }
           }
-          
+
           try {
             console.log(`📄 PDF EMBEDDING [${i + 1}]: Attempting to embed ${imageBuffer.mimeType} image (${imageBuffer.buffer.length} bytes)`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]: Buffer validation - is Buffer: ${imageBuffer.buffer instanceof Buffer}, length: ${imageBuffer.buffer.length}`);
-            
+
             if (!imageBuffer.buffer || imageBuffer.buffer.length === 0) {
               console.error(`❌ PDF EMBEDDING [${i + 1}]: ERROR - Image buffer is empty or invalid!`);
               throw new Error(`Image buffer is empty for ${imageBuffer.fileName}`);
             }
-            
+
             // Embed image into PDF document using native PDF library methods
             let pdfImage;
             try {
@@ -31601,11 +31649,11 @@ Cura EMR Team
               if (!imageBuffer.buffer || !(imageBuffer.buffer instanceof Buffer)) {
                 throw new Error(`Image buffer is not a valid Buffer instance`);
               }
-              
+
               if (imageBuffer.buffer.length === 0) {
                 throw new Error(`Image buffer is empty (0 bytes)`);
               }
-              
+
               // Embed based on MIME type (PNG or JPEG only)
               if (imageBuffer.mimeType === 'image/png') {
                 console.log(`📄 PDF EMBEDDING [${i + 1}]: Embedding PNG image (${imageBuffer.buffer.length} bytes)...`);
@@ -31629,48 +31677,48 @@ Cura EMR Team
               // Skip this image and continue with next
               continue;
             }
-            
+
             // Get original image dimensions from embedded PDF image
             const originalDims = pdfImage.scale(1);
             const originalWidth = originalDims.width;
             const originalHeight = originalDims.height;
-            
+
             // Validate dimensions
             if (originalWidth <= 0 || originalHeight <= 0 || !isFinite(originalWidth) || !isFinite(originalHeight)) {
               console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ Invalid image dimensions: ${originalWidth}x${originalHeight}`);
               continue; // Skip this image
             }
-            
+
             // Calculate scale to fit within 200x200px box while maintaining aspect ratio (no stretching)
             const scaleX = fixedImageSize / originalWidth;
             const scaleY = fixedImageSize / originalHeight;
             const scale = Math.min(scaleX, scaleY); // Use smaller scale to fit within box
-            
+
             // Calculate final dimensions (maintain aspect ratio, no stretching)
             // Explicitly define width and height as required
             const finalWidth = originalWidth * scale;
             const finalHeight = originalHeight * scale;
-            
+
             // Validate final dimensions
             if (finalWidth <= 0 || finalHeight <= 0 || !isFinite(finalWidth) || !isFinite(finalHeight)) {
               console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ Invalid calculated dimensions: ${finalWidth}x${finalHeight}`);
               continue; // Skip this image
             }
-            
+
             // Center the image within the 200x200px box
             const offsetX = (fixedImageSize - finalWidth) / 2;
             const offsetY = (fixedImageSize - finalHeight) / 2;
-            
+
             console.log(`📄 PDF EMBEDDING [${i + 1}]: Image dimensions:`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]:    Original: ${originalWidth.toFixed(2)} x ${originalHeight.toFixed(2)} points`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]:    Final (scaled): ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)} points`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]:    Scale factor: ${scale.toFixed(3)}`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]:    Centering offsets: ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)}`);
-            
+
             // Calculate position - ensure no overlap
             const xPos = pageMargin + currentCol * (fixedImageSize + imageSpacing) + offsetX;
             let yPos = rowStartY - fixedImageSize + offsetY; // Top of the 200x200 box
-            
+
             // Validate yPosition is within page bounds (must be positive and not too low)
             if (yPos < 50) {
               console.warn(`📄 PDF EMBEDDING [${i + 1}]: ⚠️ yPosition (${yPos.toFixed(2)}) is too low, creating new page`);
@@ -31693,7 +31741,7 @@ Cura EMR Team
               rowStartY = yPosition;
               yPos = rowStartY - fixedImageSize + offsetY; // Recalculate for new page
             }
-            
+
             // Ensure xPos is within page bounds
             if (xPos < 0 || xPos + finalWidth > width) {
               console.warn(`📄 PDF EMBEDDING [${i + 1}]: ⚠️ xPosition (${xPos.toFixed(2)}) is out of bounds, adjusting`);
@@ -31701,10 +31749,10 @@ Cura EMR Team
               const adjustedXPos = Math.max(pageMargin, Math.min(xPos, width - finalWidth - pageMargin));
               console.log(`📄 PDF EMBEDDING [${i + 1}]: Adjusted xPosition from ${xPos.toFixed(2)} to ${adjustedXPos.toFixed(2)}`);
             }
-            
+
             console.log(`📄 PDF EMBEDDING [${i + 1}]: Drawing image at position (${xPos.toFixed(2)}, ${yPos.toFixed(2)})`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]: Page dimensions: ${width} x ${height}, Image will be at (${xPos.toFixed(2)}, ${yPos.toFixed(2)}) with size ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)}`);
-            
+
             // Draw image with explicitly defined width and height (required)
             try {
               page.drawImage(pdfImage, {
@@ -31716,17 +31764,17 @@ Cura EMR Team
               console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅ Image drawn successfully on PDF page`);
               console.log(`📄 PDF EMBEDDING [${i + 1}]:    Position: (${xPos.toFixed(2)}, ${yPos.toFixed(2)})`);
               console.log(`📄 PDF EMBEDDING [${i + 1}]:    Size: ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)} points`);
-              
+
               // Add image label below the image (Image 1, Image 2, etc.) in grey color
               // 10px gap = 10 * 0.75 = 7.5 points (at 72 DPI)
               const labelY = yPos - finalHeight - labelGap;
               const imageNumber = i + 1;
               const labelText = `Image ${imageNumber}`;
-              
+
               // Calculate label position to center it below the image
               const labelTextWidth = font.widthOfTextAtSize(labelText, labelHeight);
               const labelX = xPos + (finalWidth - labelTextWidth) / 2;
-              
+
               // Draw label in grey color
               page.drawText(labelText, {
                 x: labelX,
@@ -31735,7 +31783,7 @@ Cura EMR Team
                 font,
                 color: darkGray // Grey color
               });
-              
+
               console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅ Image label "${labelText}" added below image`);
             } catch (drawError) {
               console.error(`📄 PDF EMBEDDING [${i + 1}]: ❌ FATAL ERROR drawing image on PDF page:`, drawError);
@@ -31746,15 +31794,15 @@ Cura EMR Team
               // Skip this image and continue with next
               continue;
             }
-            
+
             embeddedCount++;
             console.log(`📄 PDF EMBEDDING [${i + 1}]: ✅✅✅ COMPLETE SUCCESS - Image "${imageBuffer.fileName}" embedded and drawn on PDF`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]: Progress: ${embeddedCount}/${imageBuffers.length} images embedded so far`);
             console.log(`📄 PDF EMBEDDING [${i + 1}]: ========== COMPLETED IMAGE ${i + 1} ==========`);
-            
+
             // Move to next column
             currentCol++;
-            
+
             // Move to next row if needed
             if (currentCol >= imagesPerRow) {
               currentCol = 0;
@@ -31763,7 +31811,7 @@ Cura EMR Team
               yPosition = rowStartY - (fixedImageSize + rowSpacing);
               rowStartY = yPosition; // Update row start position for next row
             }
-            
+
             if (i === 0) {
               imageHeight = fixedImageSize + 40;
             }
@@ -31775,9 +31823,9 @@ Cura EMR Team
             }
           }
         }
-        
+
         console.log(`\n📄 PDF EMBEDDING SUMMARY: Successfully embedded ${embeddedCount} out of ${imageBuffers.length} image(s) into PDF`);
-        
+
         // Adjust yPosition for remaining images in the last row (no extra space)
         if (currentCol > 0) {
           yPosition = rowStartY - (fixedImageSize + rowSpacing);
@@ -31785,18 +31833,18 @@ Cura EMR Team
           // If we completed a full row, position is already correct
           yPosition = rowStartY;
         }
-        
+
         console.log(`\n✅ PDF REPORT FINAL SUMMARY for medical_image_id: ${imageId}:`);
         console.log(`✅ PDF REPORT: Successfully embedded ${embeddedCount} image(s) into PDF report`);
         console.log(`📷 PDF REPORT: Images were loaded from radiology_images table using file_path column`);
         console.log(`📦 PDF REPORT: Total images in buffer: ${imageBuffers.length}`);
         console.log(`📄 PDF REPORT: Total images embedded in PDF: ${embeddedCount}`);
         console.log(`📊 PDF REPORT: Database rows found: ${radiologyImagesCount}, Images loaded: ${imageBuffers.length}, Images embedded: ${embeddedCount}`);
-        
+
         if (embeddedCount < imageBuffers.length) {
           console.warn(`⚠️ PDF REPORT: WARNING - Some images in buffer were not embedded (${imageBuffers.length - embeddedCount} skipped)`);
         }
-        
+
         if (radiologyImagesCount > embeddedCount) {
           console.warn(`⚠️ PDF REPORT: WARNING - Not all database rows were embedded (${radiologyImagesCount} rows found, ${embeddedCount} embedded)`);
         } else if (radiologyImagesCount === embeddedCount && embeddedCount > 0) {
@@ -31808,7 +31856,7 @@ Cura EMR Team
         console.warn(`   - SECONDARY: radiologyImagePaths from frontend: ${radiologyImagePaths?.length || 0} paths`);
         console.warn(`   - FALLBACK: uploadedImageFileNames: ${uploadedImageFileNames?.length || 0} files`);
         console.warn(`   - FALLBACK: medicalImage.fileName: ${medicalImage.fileName || 'N/A'}`);
-        
+
         // Add a message in the PDF indicating no images were found
         yPosition -= 20;
         page.drawText('REPRESENTATIVE IMAGES', {
@@ -31827,17 +31875,17 @@ Cura EMR Team
           color: rgb(0.5, 0.5, 0.5) // Gray color
         });
       }
-      
+
       // Add header and footer to all pages if available
-        const pageCount = pdfDoc.getPageCount();
-        for (let i = 0; i < pageCount; i++) {
-          const currentPage = pdfDoc.getPage(i);
+      const pageCount = pdfDoc.getPageCount();
+      for (let i = 0; i < pageCount; i++) {
+        const currentPage = pdfDoc.getPage(i);
         // Add header to each page
         await addHeaderToPage(currentPage);
         // Add footer to each page
-          addFooterToPage(currentPage);
+        addFooterToPage(currentPage);
       }
-      
+
       // Save PDF to file
       console.log(`\n💾 PDF SAVE: Starting to save PDF document...`);
       console.log(`💾 PDF SAVE: PDF document has ${pdfDoc.getPageCount()} page(s)`);
@@ -31848,11 +31896,11 @@ Cura EMR Team
       // When Edit Generated Report: use fixed filename so we replace existing PDF; otherwise use timestamped name
       const pdfFileName = replaceExistingReport ? `${reportId}.pdf` : `${reportId}_${timestamp}.pdf`;
       const pdfFilePath = path.join(reportsDir, pdfFileName);
-      
+
       console.log(`💾 PDF SAVE: Writing PDF file to: "${pdfFilePath}"${replaceExistingReport ? ' (replacing existing)' : ''}`);
       console.log(`💾 PDF SAVE: File will contain ${embeddedCount} embedded image(s)`);
       await fse.outputFile(pdfFilePath, pdfBytes);
-      
+
       // When replacing: remove old timestamped PDFs for this report so only the fixed-named file remains
       if (replaceExistingReport) {
         try {
@@ -31860,14 +31908,14 @@ Cura EMR Team
           const toRemove = existingFiles.filter((f: string) => f.startsWith(`${reportId}_`) && f.endsWith('.pdf'));
           for (const f of toRemove) {
             const oldPath = path.join(reportsDir, f);
-            await fse.remove(oldPath).catch(() => {});
+            await fse.remove(oldPath).catch(() => { });
             console.log(`💾 PDF SAVE: Removed old report file: ${f}`);
           }
         } catch (e) {
           // ignore
         }
       }
-      
+
       // Verify file was written
       const fileExists = await fse.pathExists(pdfFilePath);
       if (fileExists) {
@@ -31883,7 +31931,7 @@ Cura EMR Team
       } else {
         console.error(`❌ PDF SAVE: ERROR - File was not written successfully! Path: ${pdfFilePath}`);
       }
-      
+
       // Update database with report filename and path (and findings/impression etc. - updates existing rows when replaceExistingReport)
       const relativePath = `uploads/Imaging_Reports/${organizationId}/patients/${patientId}/${pdfFileName}`;
       await storage.updateMedicalImageReport(imageId, organizationId, {
@@ -31895,7 +31943,7 @@ Cura EMR Team
         scheduledAt: reportFormData?.scheduledAt || medicalImage.scheduledAt?.toISOString() || null,
         performedAt: reportFormData?.performedAt || medicalImage.performedAt?.toISOString() || null,
       });
-      
+
       // Return success response
       res.json({
         success: true,
@@ -31906,7 +31954,7 @@ Cura EMR Team
       });
     } catch (error) {
       console.error("Error generating PDF report:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to generate PDF report",
         details: error instanceof Error ? error.message : String(error)
       });
@@ -31921,7 +31969,7 @@ Cura EMR Team
       }
 
       const { imageId } = req.body;
-      
+
       if (!imageId) {
         return res.status(400).json({ error: "imageId is required" });
       }
@@ -31945,18 +31993,18 @@ Cura EMR Team
       }
 
       const organizationId = req.organizationId || req.tenant!.id;
-      
+
       // Save PDF in organizational structure: uploads/Image_Prescriptions/organization_id/patients/patient_id/
       const prescriptionsDir = path.resolve(process.cwd(), 'uploads', 'Image_Prescriptions', String(organizationId), 'patients', String(medicalImage.patientId));
       await fse.ensureDir(prescriptionsDir);
-      
+
       // Fetch clinic headers and footers from database
       const clinicHeader = await storage.getActiveClinicHeader(organizationId);
       const clinicFooter = await storage.getActiveClinicFooter(organizationId);
-      
+
       // Get organization information
       const organization = await storage.getOrganization(organizationId);
-      
+
       // Helper function to safely format values (prevent [object Object])
       const safeFormat = (value: any): string => {
         if (value === null || value === undefined || value === '') {
@@ -31975,7 +32023,7 @@ Cura EMR Team
         }
         return String(value);
       };
-      
+
       // Calculate patient age from DOB
       const calculateAge = (dob: Date | string | null): string => {
         if (!dob) return 'N/A';
@@ -31992,7 +32040,7 @@ Cura EMR Team
           return 'N/A';
         }
       };
-      
+
       // Format date for display
       const formatDate = (date: Date | string | null): string => {
         if (!date) return 'N/A';
@@ -32006,7 +32054,7 @@ Cura EMR Team
           return 'N/A';
         }
       };
-      
+
       // Format date with time
       const formatDateTime = (date: Date | string | null): string => {
         if (!date) {
@@ -32034,25 +32082,25 @@ Cura EMR Team
           return 'N/A';
         }
       };
-      
+
       // Import pdf-lib dynamically
       const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
-      
+
       // Create a new PDF document
       const pdfDoc = await PDFDocument.create();
       let page = pdfDoc.addPage([595, 842]); // A4 size in points
       const { width, height } = page.getSize();
-      
+
       // Load fonts
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      
+
       // Colors
       const primaryBlue = rgb(0.12, 0.23, 0.54); // #1e3a8a
       const darkGray = rgb(0.3, 0.3, 0.3);
       const blackColor = rgb(0, 0, 0);
       const greenColor = rgb(0, 0.6, 0);
-      
+
       // Helper function to draw a checkmark shape (WinAnsi-compatible alternative to ✓)
       const drawCheckmark = (pageToDraw: typeof page, x: number, y: number, size: number = 8) => {
         const checkmarkSize = size * 0.5;
@@ -32071,7 +32119,7 @@ Cura EMR Team
           color: greenColor,
         });
       };
-      
+
       // Helper function to add header to any page
       const addHeaderToPage = async (pageToAddHeader: typeof page, startY?: number) => {
         const headerHeight = 100;
@@ -32079,16 +32127,16 @@ Cura EMR Team
         const logoWidth = 80;
         const logoHeight = 80;
         let headerY = startY !== undefined ? startY : height - 40;
-        
+
         // Embed logo from clinic_headers if available
         if (clinicHeader?.logoBase64) {
           try {
             // Remove data URL prefix if present
-            const base64Data = clinicHeader.logoBase64.includes(',') 
-              ? clinicHeader.logoBase64.split(',')[1] 
+            const base64Data = clinicHeader.logoBase64.includes(',')
+              ? clinicHeader.logoBase64.split(',')[1]
               : clinicHeader.logoBase64;
             const logoBuffer = Buffer.from(base64Data, 'base64');
-            
+
             // Try to embed logo as PNG or JPEG
             let logoImage;
             try {
@@ -32100,7 +32148,7 @@ Cura EMR Team
                 console.error('Failed to embed logo:', error);
               }
             }
-            
+
             if (logoImage) {
               // Draw logo with equal height to header info
               pageToAddHeader.drawImage(logoImage, {
@@ -32123,11 +32171,11 @@ Cura EMR Team
             color: primaryBlue
           });
         }
-        
+
         // Header information (clinic name, address, phone) - to the right of logo
         const headerInfoX = logoX + logoWidth + 20;
         let headerTextY = headerY - 20;
-        
+
         // Clinic name
         const clinicName = clinicHeader?.clinicName || organization?.name || organization?.brandName || 'CURA HEALTH EMR';
         pageToAddHeader.drawText(clinicName, {
@@ -32138,7 +32186,7 @@ Cura EMR Team
           color: primaryBlue
         });
         headerTextY -= 18;
-        
+
         // Address
         const address = clinicHeader?.address || '';
         if (address) {
@@ -32151,7 +32199,7 @@ Cura EMR Team
           });
           headerTextY -= 13;
         }
-        
+
         // Phone and email
         const phone = clinicHeader?.phone || '';
         if (phone) {
@@ -32164,7 +32212,7 @@ Cura EMR Team
           });
           headerTextY -= 13;
         }
-        
+
         const email = clinicHeader?.email || '';
         if (email) {
           pageToAddHeader.drawText(email, {
@@ -32176,15 +32224,15 @@ Cura EMR Team
           });
         }
       };
-      
+
       // Helper function to add footer to any page
       const addFooterToPage = (pageToAddFooter: typeof page) => {
         if (clinicFooter && clinicFooter.footerText) {
           let footerBgColor = rgb(0.29, 0.49, 1.0); // Default #4A7DFF
           if (clinicFooter.backgroundColor) {
             try {
-              const bgColor = clinicFooter.backgroundColor.startsWith('#') 
-                ? clinicFooter.backgroundColor.slice(1) 
+              const bgColor = clinicFooter.backgroundColor.startsWith('#')
+                ? clinicFooter.backgroundColor.slice(1)
                 : clinicFooter.backgroundColor;
               if (bgColor.length === 6) {
                 footerBgColor = rgb(
@@ -32197,7 +32245,7 @@ Cura EMR Team
               console.error('Error parsing footer background color:', error);
             }
           }
-          
+
           const footerHeight = 40;
           const footerY = 40;
           pageToAddFooter.drawRectangle({
@@ -32207,13 +32255,13 @@ Cura EMR Team
             height: footerHeight,
             color: footerBgColor
           });
-          
+
           const footerText = clinicFooter.footerText;
           let footerTextColor = rgb(1, 1, 1); // Default white
           if (clinicFooter.textColor) {
             try {
-              const textColor = clinicFooter.textColor.startsWith('#') 
-                ? clinicFooter.textColor.slice(1) 
+              const textColor = clinicFooter.textColor.startsWith('#')
+                ? clinicFooter.textColor.slice(1)
                 : clinicFooter.textColor;
               if (textColor.length === 6) {
                 footerTextColor = rgb(
@@ -32226,7 +32274,7 @@ Cura EMR Team
               console.error('Error parsing footer text color:', error);
             }
           }
-          
+
           const footerTextWidth = font.widthOfTextAtSize(footerText, 10);
           pageToAddFooter.drawText(footerText, {
             x: (width - footerTextWidth) / 2,
@@ -32237,12 +32285,12 @@ Cura EMR Team
           });
         }
       };
-      
+
       // Add prescription header section at the very top: CURA HEALTH EMR, Prescription #, and COMPLETED status
       const headerTopY = height - 20;
       const leftMargin = 40;
       const rightMargin = width - 40;
-      
+
       // CURA HEALTH EMR (top left, bold)
       page.drawText('CURA HEALTH EMR', {
         x: leftMargin,
@@ -32251,14 +32299,14 @@ Cura EMR Team
         font: boldFont,
         color: blackColor
       });
-      
+
       // Generate prescription number from imageId (format: RX-{timestamp}-{random})
       const timestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substr(2, 4);
-      const prescriptionNumber = medicalImage.imageId 
+      const prescriptionNumber = medicalImage.imageId
         ? `RX-${medicalImage.imageId.replace(/[^0-9]/g, '').substring(0, 13)}-${randomSuffix}`
         : `RX-${timestamp}-${randomSuffix}`;
-      
+
       // Prescription # below CURA HEALTH EMR
       page.drawText(`Prescription #: ${prescriptionNumber}`, {
         x: leftMargin,
@@ -32267,7 +32315,7 @@ Cura EMR Team
         font,
         color: darkGray
       });
-      
+
       // COMPLETED status badge (top right, green background)
       const statusText = 'COMPLETED';
       const statusTextWidth = boldFont.widthOfTextAtSize(statusText, 10);
@@ -32275,7 +32323,7 @@ Cura EMR Team
       const statusBoxHeight = 18;
       const statusX = rightMargin - statusBoxWidth;
       const statusY = headerTopY - 2;
-      
+
       // Draw green background rectangle
       page.drawRectangle({
         x: statusX,
@@ -32284,7 +32332,7 @@ Cura EMR Team
         height: statusBoxHeight,
         color: greenColor,
       });
-      
+
       // Draw status text (white on green)
       page.drawText(statusText, {
         x: statusX + 6,
@@ -32293,16 +32341,16 @@ Cura EMR Team
         font: boldFont,
         color: rgb(1, 1, 1) // White
       });
-      
+
       // Add header from database below the prescription header (start at height - 60 to leave space for prescription header)
       await addHeaderToPage(page, height - 60);
-      
+
       // Position tracker (account for prescription header ~40 points + clinic header ~100 points)
       let yPosition = height - 160;
-      
+
       // Add one line space after headers
       yPosition -= 20;
-      
+
       // Main title: RADIOLOGY / IMAGING ORDER (centered)
       const titleWidth = boldFont.widthOfTextAtSize('RADIOLOGY / IMAGING ORDER', 18);
       page.drawText('RADIOLOGY / IMAGING ORDER', {
@@ -32312,15 +32360,15 @@ Cura EMR Team
         font: boldFont,
         color: blackColor
       });
-      
+
       // Add one line space after title
       yPosition -= 50;
-      
+
       // Patient Information in two columns
       const leftColumnX = 40;
       const rightColumnX = width / 2 + 20;
       const sectionsStartY = yPosition;
-      
+
       // Add "Patient Details" heading before patient information
       page.drawText('Patient Details', {
         x: leftColumnX,
@@ -32329,57 +32377,57 @@ Cura EMR Team
         font: boldFont,
         color: blackColor
       });
-      
+
       yPosition = sectionsStartY - 20; // Add spacing after heading
-      
+
       // Left column: Name, Address, Gender, Weight
       let leftY = yPosition;
       const patientName = safeFormat(`${patient.firstName || ''} ${patient.lastName || ''}`.trim() || 'N/A');
       page.drawText(`Name: ${patientName}`, { x: leftColumnX, y: leftY, size: 10, font });
       leftY -= 15;
-      
+
       const patientAddress = safeFormat(patient.address || patient.streetAddress || '');
       page.drawText(`Address: ${patientAddress}`, { x: leftColumnX, y: leftY, size: 10, font });
       leftY -= 15;
-      
+
       const patientGender = safeFormat(patient.gender || patient.sex || '');
       page.drawText(`Gender: ${patientGender}`, { x: leftColumnX, y: leftY, size: 10, font });
       leftY -= 15;
-      
+
       const patientWeight = safeFormat(patient.weight || '');
       const weightDisplay = (patientWeight === '-' || patientWeight === '' || patientWeight === 'N/A') ? 'N/A' : patientWeight;
       page.drawText(`Weight: ${weightDisplay}`, { x: leftColumnX, y: leftY, size: 10, font });
-      
+
       // Right column: DOB, Age, Sex, Date
       let rightY = yPosition;
       const dob = formatDate(patient.dateOfBirth);
       page.drawText(`DOB: ${dob}`, { x: rightColumnX, y: rightY, size: 10, font });
       rightY -= 15;
-      
+
       const age = calculateAge(patient.dateOfBirth);
       page.drawText(`Age: ${age}`, { x: rightColumnX, y: rightY, size: 10, font });
       rightY -= 15;
-      
+
       const sexValue = safeFormat(patient.sex || patient.gender || '');
       // Fix "No: N/A" issue - if it contains "No:", remove it
       const sex = sexValue.includes('No:') ? 'N/A' : sexValue;
       page.drawText(`Sex: ${sex}`, { x: rightColumnX, y: rightY, size: 10, font });
       rightY -= 15;
-      
+
       // Date field (normal black text, no checkmark)
       const reportDate = formatDate(medicalImage.performedAt || medicalImage.scheduledAt || medicalImage.createdAt || new Date());
-      page.drawText(`Date: ${reportDate}`, { 
-        x: rightColumnX, 
-        y: rightY, 
-        size: 10, 
+      page.drawText(`Date: ${reportDate}`, {
+        x: rightColumnX,
+        y: rightY,
+        size: 10,
         font,
         color: blackColor
       });
-      
+
       // Calculate the lowest point of the two columns
       const lowestY = Math.min(leftY, rightY);
       yPosition = lowestY - 30; // Add spacing after patient info
-      
+
       // Provider Information
       yPosition -= 10;
       const providerName = safeFormat(medicalImage.radiologist || '');
@@ -32388,51 +32436,51 @@ Cura EMR Team
           const uploadedByUser = await storage.getUser(medicalImage.uploadedBy, organizationId);
           if (uploadedByUser) {
             const provider = `${uploadedByUser.firstName} ${uploadedByUser.lastName}`;
-            page.drawText(`Provider: ${provider}`, { 
-              x: leftColumnX, 
-              y: yPosition, 
-              size: 10, 
+            page.drawText(`Provider: ${provider}`, {
+              x: leftColumnX,
+              y: yPosition,
+              size: 10,
               font,
               color: blackColor
             });
           } else {
-            page.drawText(`Provider: N/A`, { 
-              x: leftColumnX, 
-              y: yPosition, 
-              size: 10, 
+            page.drawText(`Provider: N/A`, {
+              x: leftColumnX,
+              y: yPosition,
+              size: 10,
               font,
               color: blackColor
             });
           }
         } catch (error) {
-          page.drawText(`Provider: N/A`, { 
-            x: leftColumnX, 
-            y: yPosition, 
-            size: 10, 
+          page.drawText(`Provider: N/A`, {
+            x: leftColumnX,
+            y: yPosition,
+            size: 10,
             font,
             color: blackColor
           });
         }
       } else if (providerName !== 'N/A') {
-        page.drawText(`Provider: ${providerName}`, { 
-          x: leftColumnX, 
-          y: yPosition, 
-          size: 10, 
+        page.drawText(`Provider: ${providerName}`, {
+          x: leftColumnX,
+          y: yPosition,
+          size: 10,
           font,
           color: blackColor
         });
       } else {
-        page.drawText(`Provider: N/A`, { 
-          x: leftColumnX, 
-          y: yPosition, 
-          size: 10, 
+        page.drawText(`Provider: N/A`, {
+          x: leftColumnX,
+          y: yPosition,
+          size: 10,
           font,
           color: blackColor
         });
       }
-      
+
       yPosition -= 25; // Add spacing after Provider
-      
+
       // IMAGING STUDY DETAILS Section
       page.drawText('IMAGING STUDY DETAILS', {
         x: leftColumnX,
@@ -32441,31 +32489,31 @@ Cura EMR Team
         font: boldFont,
         color: blackColor
       });
-      
+
       yPosition -= 25; // Add spacing after section title
-      
+
       const studyType = safeFormat(medicalImage.studyType || '');
       page.drawText(`Study Type: ${studyType}`, { x: leftColumnX, y: yPosition, size: 10, font });
       yPosition -= 15;
-      
+
       const modality = safeFormat(medicalImage.modality || '');
       page.drawText(`Modality: ${modality}`, { x: leftColumnX, y: yPosition, size: 10, font });
       yPosition -= 15;
-      
+
       const bodyPart = safeFormat(medicalImage.bodyPart || '');
       page.drawText(`Body Part: ${bodyPart}`, { x: leftColumnX, y: yPosition, size: 10, font });
       yPosition -= 15;
-      
+
       const displayImageId = safeFormat(medicalImage.imageId || '');
       page.drawText(`Image ID: ${displayImageId}`, { x: leftColumnX, y: yPosition, size: 10, font });
       yPosition -= 15;
-      
+
       const status = safeFormat(medicalImage.status || 'ORDERED');
       page.drawText(`Status: ${status}`, { x: leftColumnX, y: yPosition, size: 10, font });
-      
+
       // Signature block right after Status: ORDERED
       yPosition -= 25; // Add spacing after Status
-      
+
       // Signature section title
       page.drawText('Resident Physician', {
         x: leftColumnX,
@@ -32474,9 +32522,9 @@ Cura EMR Team
         font,
         color: blackColor
       });
-      
+
       yPosition -= 15;
-      
+
       page.drawText('(Signature)', {
         x: leftColumnX,
         y: yPosition,
@@ -32484,18 +32532,18 @@ Cura EMR Team
         font,
         color: blackColor
       });
-      
+
       yPosition -= 20;
-      
+
       // E-Signature Section (if signature data provided)
       if (medicalImage.signatureData) {
         try {
           // Remove data URL prefix if present
-          const base64Data = medicalImage.signatureData.includes(',') 
-            ? medicalImage.signatureData.split(',')[1] 
+          const base64Data = medicalImage.signatureData.includes(',')
+            ? medicalImage.signatureData.split(',')[1]
             : medicalImage.signatureData;
           const signatureBuffer = Buffer.from(base64Data, 'base64');
-          
+
           // Try to embed signature as PNG first, then JPEG
           let signatureImage;
           try {
@@ -32507,12 +32555,12 @@ Cura EMR Team
               console.error('Failed to embed signature:', error);
             }
           }
-          
+
           if (signatureImage) {
             // Draw signature box
             const signatureBoxWidth = 120;
             const signatureBoxHeight = 50;
-            
+
             // Draw border
             page.drawRectangle({
               x: leftColumnX,
@@ -32522,7 +32570,7 @@ Cura EMR Team
               borderColor: rgb(0.7, 0.7, 0.7),
               borderWidth: 1,
             });
-            
+
             // Draw signature image inside the box
             page.drawImage(signatureImage, {
               x: leftColumnX + 2,
@@ -32530,9 +32578,9 @@ Cura EMR Team
               width: signatureBoxWidth - 4,
               height: signatureBoxHeight - 4,
             });
-            
+
             yPosition -= signatureBoxHeight + 10; // Update position after signature box
-            
+
             // Add signature datetime after the signature box (green with checkmark - drawing checkmark shape for WinAnsi compatibility)
             const signatureDateTime = formatDateTime(medicalImage.signatureDate || new Date());
             const checkmarkX = leftColumnX;
@@ -32559,7 +32607,7 @@ Cura EMR Team
               borderWidth: 1,
             });
             yPosition -= signatureBoxHeight + 10;
-            
+
             // Add signature datetime after the empty signature box
             const signatureDateTime = formatDateTime(medicalImage.signatureDate || new Date());
             page.drawText(signatureDateTime, {
@@ -32585,7 +32633,7 @@ Cura EMR Team
             borderWidth: 1,
           });
           yPosition -= signatureBoxHeight + 10;
-          
+
           // Add signature datetime after the empty signature box
           const signatureDateTime = formatDateTime(medicalImage.signatureDate || new Date());
           page.drawText(signatureDateTime, {
@@ -32610,7 +32658,7 @@ Cura EMR Team
           borderWidth: 1,
         });
         yPosition -= signatureBoxHeight + 10;
-        
+
         // Add signature datetime after the empty signature box
         const signatureDateTime = formatDateTime(medicalImage.signatureDate || new Date());
         page.drawText(signatureDateTime, {
@@ -32622,7 +32670,7 @@ Cura EMR Team
         });
         yPosition -= 15;
       }
-      
+
       // Add header and footer to all pages if available
       // Note: First page already has prescription header and clinic header added above
       const pageCount = pdfDoc.getPageCount();
@@ -32635,7 +32683,7 @@ Cura EMR Team
       }
       // Add footer to first page
       addFooterToPage(page);
-      
+
       // Save PDF
       const fileName = `PRESCRIPTION_${medicalImage.imageId}_${Date.now()}.pdf`;
       const pdfFilePath = path.join(prescriptionsDir, fileName);
@@ -32643,14 +32691,14 @@ Cura EMR Team
       // Ensure directory exists, then write file
       await fse.ensureDir(prescriptionsDir);
       await fs.promises.writeFile(pdfFilePath, pdfBytes);
-      
+
       // Update medical image with prescription path
       const relativePath = `uploads/Image_Prescriptions/${organizationId}/patients/${medicalImage.patientId}/${fileName}`;
       await storage.updateMedicalImage(medicalImage.id, req.tenant!.id, {
         prescriptionFilePath: relativePath,
         prescriptionFileName: fileName
       } as any);
-      
+
       // Generate signed URL (7 days validity)
       const fileSecret = process.env.FILE_SECRET;
       if (!fileSecret) {
@@ -32659,13 +32707,13 @@ Cura EMR Team
       }
 
       const token = jwt.sign(
-        { 
+        {
           imageId: medicalImage.id,
           organizationId: organizationId,
           patientId: medicalImage.patientId,
           fileName: fileName
-        }, 
-        fileSecret, 
+        },
+        fileSecret,
         { expiresIn: "7d" }
       );
 
@@ -32673,7 +32721,7 @@ Cura EMR Team
       let baseUrl;
       const origin = req.get('origin');
       const referer = req.get('referer');
-      
+
       if (origin) {
         baseUrl = origin;
       } else if (referer) {
@@ -32687,9 +32735,9 @@ Cura EMR Team
         }
         baseUrl = `${protocol}://${host}`;
       }
-      
+
       const viewUrl = `${baseUrl}/api/imaging/view-prescription/${organizationId}/${medicalImage.patientId}/${fileName}?token=${token}`;
-      
+
       res.json({
         success: true,
         fileName,
@@ -32698,7 +32746,7 @@ Cura EMR Team
       });
     } catch (error) {
       console.error("Error generating image prescription:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to generate prescription",
         details: error instanceof Error ? error.message : String(error)
       });
@@ -32769,12 +32817,12 @@ Cura EMR Team
 
       const { organizationId: tokenOrgId, patientId: tokenPatientId, fileName: tokenFileName } = payload;
       const { organizationId, patientId, fileName } = req.params;
-      
+
       // Verify token matches URL parameters
       if (tokenOrgId !== parseInt(organizationId) || tokenPatientId !== parseInt(patientId) || tokenFileName !== fileName) {
         return res.status(403).json({ error: "Token does not match request parameters" });
       }
-      
+
       // Construct file path
       const relativePath = `uploads/Image_Prescriptions/${organizationId}/patients/${patientId}/${fileName}`;
       const fullPath = path.join(process.cwd(), relativePath);
@@ -32787,11 +32835,11 @@ Cura EMR Team
       }
 
       console.log(`[PRESCRIPTION-VIEW] Serving file: ${fullPath}`);
-      
+
       // Set headers for PDF viewing
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'inline; filename="' + fileName + '"');
-      
+
       // Stream the file
       res.sendFile(fullPath);
 

@@ -138,6 +138,7 @@ export interface Appointment {
 export interface Subscription {
   id: number;
   plan: "starter" | "professional" | "enterprise" | "pro";
+  planName?: string;
   status: "trial" | "active" | "suspended" | "cancelled" | "expired";
   paymentStatus?: "trial" | "paid" | "unpaid" | "failed" | "pending";
   userLimit: number;

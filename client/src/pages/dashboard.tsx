@@ -3,7 +3,10 @@ import { RoleBasedDashboard } from "@/components/dashboards/role-based-dashboard
 import { useAuth } from "@/hooks/use-auth";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { NotificationBell } from "@/components/layout/notification-bell";
+import { useTenant } from "@/hooks/use-tenant";
 import { useQuery } from "@tanstack/react-query";
+import { Globe } from "lucide-react";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { useEffect, useRef } from "react";
 import { useLocation } from "wouter";
@@ -13,6 +16,7 @@ import { getFirstAccessiblePage } from "@/lib/get-first-accessible-page";
 export default function Dashboard() {
   const { user } = useAuth();
   const { canView, isLoading: permissionsLoading } = useRolePermissions();
+  const { tenant } = useTenant();
   const [, setLocation] = useLocation();
 
   // Redirect lab_technician and pharmacist roles to their dedicated dashboards
@@ -78,12 +82,12 @@ export default function Dashboard() {
   // IMPORTANT: This hook must be called before any conditional returns
   useEffect(() => {
     if (permissionsLoading) return; // Don't redirect while permissions are loading
-    
+
     if (!hasDashboardAccess && !hasRedirected.current) {
       hasRedirected.current = true;
       const subdomain = getActiveSubdomain();
       const firstAccessiblePage = getFirstAccessiblePage(canView, subdomain, permissionsLoading);
-      
+
       // Only redirect if there's a different accessible page
       if (firstAccessiblePage !== `/${subdomain}/dashboard`) {
         console.log("🔄 Dashboard access restricted, redirecting to:", firstAccessiblePage);
@@ -109,12 +113,12 @@ export default function Dashboard() {
   if (!hasDashboardAccess) {
     const subdomain = getActiveSubdomain();
     const firstAccessiblePage = getFirstAccessiblePage(canView, subdomain, permissionsLoading);
-    
+
     // If dashboard is the only option (no other accessible pages), show restriction message
     if (firstAccessiblePage === `/${subdomain}/dashboard`) {
       return <AccessRestricted moduleName="Dashboard" />;
     }
-    
+
     // Otherwise, show loading while redirecting
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -134,14 +138,33 @@ export default function Dashboard() {
           title="Dashboard"
           subtitle={
             canViewPatients
-              ? `Welcome back. Here's your patient overview. Total Active Patients: ${
-                  activePatientsLoading ? "..." : activePatientCount
-                }`
+              ? `Welcome back. Here's your patient overview. Total Active Patients: ${activePatientsLoading ? "..." : activePatientCount
+              }`
               : "Welcome back. Here's your overview."
           }
+          hideNotificationBell={true}
+          hideAiStatus={true}
+          hideRegionalSettings={true}
         />
 
         <div className="flex items-center gap-2">
+          {/* AI Status Indicator */}
+          {tenant?.settings?.features?.aiEnabled && (
+            <div className="hidden md:flex items-center space-x-2 bg-green-50 dark:bg-green-900 px-2 py-1 rounded-lg">
+              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-[10px] uppercase font-bold text-green-700 dark:text-green-200">AI Active</span>
+            </div>
+          )}
+
+          {/* Regional Settings */}
+          <div className="hidden sm:flex items-center space-x-1 bg-neutral-50 dark:bg-neutral-800 px-2 py-1 rounded-lg">
+            <Globe className="h-3 w-3 text-neutral-600 dark:text-neutral-400" />
+            <span className="text-[10px] uppercase font-bold text-neutral-700 dark:text-neutral-300">
+              {tenant?.region?.substring(0, 2)}/{tenant?.settings?.compliance?.gdprEnabled ? "GDPR" : "Std"}
+            </span>
+          </div>
+
+          <NotificationBell />
           <span className="text-sm text-neutral-600 dark:text-neutral-400">Theme:</span>
           <ThemeToggle />
         </div>

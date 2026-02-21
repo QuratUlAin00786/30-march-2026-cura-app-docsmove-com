@@ -124,11 +124,11 @@ const buildInvoiceDefaults = (appointment: any, serviceInfo: BookingServiceInfo 
     const day = String(today.getDate()).padStart(2, '0');
     serviceDate = `${year}-${month}-${day}`;
   }
-  
+
   // Invoice date should be current date, while service date and due date should be appointment date
   const invoiceDate = new Date().toISOString().split("T")[0]; // Current date for invoice date
   const dueDate = serviceDate; // Due date should be the same as service date (appointment date)
-  
+
   const amount = serviceInfo?.amount || "50.00";
   const serviceDescription =
     serviceInfo?.name || appointment?.title || "General Consultation";
@@ -170,10 +170,10 @@ const departmentColors = {
 };
 
 const roleColors = {
-  doctor: "bg-blue-100 text-blue-800",
-  nurse: "bg-green-100 text-green-800",
-  admin: "bg-purple-100 text-purple-800",
-  receptionist: "bg-orange-100 text-orange-800",
+  doctor: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  nurse: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  admin: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  receptionist: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
 };
 
 // Helper function to get the correct tenant subdomain
@@ -182,23 +182,23 @@ function getTenantSubdomain(): string {
   if (storedSubdomain) {
     return storedSubdomain;
   }
-  
+
   const urlParams = new URLSearchParams(window.location.search);
   const subdomainParam = urlParams.get('subdomain');
   if (subdomainParam) {
     return subdomainParam;
   }
-  
+
   const hostname = window.location.hostname;
   if (hostname.includes('.replit.app') || hostname.includes('localhost') || hostname.includes('replit.dev') || hostname.includes('127.0.0.1')) {
     return 'demo';
   }
-  
+
   const parts = hostname.split('.');
   if (parts.length >= 2) {
     return parts[0] || 'demo';
   }
-  
+
   return 'demo';
 }
 
@@ -240,19 +240,19 @@ export function DoctorList({
   const [consultationSelectionError, setConsultationSelectionError] = useState("");
   const [openTreatmentCombo, setOpenTreatmentCombo] = useState(false);
   const [openConsultationCombo, setOpenConsultationCombo] = useState(false);
-  
+
   // Confirmation dialog state
   const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
-  
+
   // Insufficient time alert state
   const [showInsufficientTimeModal, setShowInsufficientTimeModal] = useState(false);
   const [insufficientTimeMessage, setInsufficientTimeMessage] = useState("");
-  
+
   // Duplicate appointment alert state
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateMessage, setDuplicateMessage] = useState("");
-  
+
   // Track currently booking slot to prevent duplicates
   const [bookingInProgress, setBookingInProgress] = useState<string | null>(null);
   const [pendingAppointmentData, setPendingAppointmentData] = useState<any>(null);
@@ -586,10 +586,10 @@ export function DoctorList({
     return null;
   };
 
-const bookingSummaryServiceInfo = useMemo(
-  () => getBookingServiceInfo(pendingAppointmentData),
-  [pendingAppointmentData, treatmentsMap, consultationMap],
-);
+  const bookingSummaryServiceInfo = useMemo(
+    () => getBookingServiceInfo(pendingAppointmentData),
+    [pendingAppointmentData, treatmentsMap, consultationMap],
+  );
 
   // Auto-select first available date when booking dialog opens and data is loaded
   const [hasAutoSelectedDate, setHasAutoSelectedDate] = useState(false);
@@ -599,23 +599,23 @@ const bookingSummaryServiceInfo = useMemo(
     const [time, period] = timeSlot.split(' ');
     const [hours, minutes] = time.split(':');
     let hour24 = parseInt(hours);
-    
+
     if (period === 'PM' && hour24 !== 12) {
       hour24 += 12;
     } else if (period === 'AM' && hour24 === 12) {
       hour24 = 0;
     }
-    
+
     return `${hour24.toString().padStart(2, '0')}:${minutes}`;
   };
 
   // Check if a time slot is available
   const isTimeSlotAvailable = (date: Date, timeSlot: string) => {
     if (!date || !timeSlot || !appointments) return true;
-    
+
     const selectedDateString = format(date, 'yyyy-MM-dd');
     const slot24Hour = timeSlotTo24Hour(timeSlot);
-    
+
     // Check if this slot is currently being booked
     if (bookingInProgress) {
       const bookingKey = `${selectedDateString}_${slot24Hour}_${selectedBookingDoctor?.id}`;
@@ -623,7 +623,7 @@ const bookingSummaryServiceInfo = useMemo(
         return false;
       }
     }
-    
+
     // Convert the time slot to minutes (this represents the START time of the slot)
     const [time, period] = timeSlot.split(' ');
     const [hours, minutes] = time.split(':').map(Number);
@@ -632,31 +632,31 @@ const bookingSummaryServiceInfo = useMemo(
     if (period === 'AM' && hours === 12) hour24 = 0;
     const slotStartMinutes = hour24 * 60 + minutes;
     const slotEndMinutes = slotStartMinutes + 15;
-    
+
     // Check if this slot overlaps with any existing appointment for this doctor
     const isBooked = appointments.some((apt: any) => {
       // Only check appointments for the selected doctor
       if (selectedBookingDoctor && apt.providerId !== selectedBookingDoctor.id) {
         return false;
       }
-      
+
       // Parse the scheduledAt directly without timezone conversion
       const aptDateString = apt.scheduledAt.substring(0, 10);
-      
+
       // Only check appointments on the same date
       if (aptDateString !== selectedDateString) return false;
-      
+
       // Extract time in 24-hour format
       const timeString = apt.scheduledAt.substring(11, 16);
       const [aptHour, aptMinute] = timeString.split(':').map(Number);
       const aptStartMinutes = aptHour * 60 + aptMinute;
       const aptDuration = apt.duration || 30;
       const aptEndMinutes = aptStartMinutes + aptDuration;
-      
+
       // Check if this 15-minute slot overlaps with the existing appointment
       return slotStartMinutes < aptEndMinutes && slotEndMinutes > aptStartMinutes;
     });
-    
+
     return !isBooked;
   };
 
@@ -670,11 +670,11 @@ const bookingSummaryServiceInfo = useMemo(
     // Generate all 15-minute slots needed for the duration
     const slotsNeeded = Math.ceil(durationMinutes / 15);
     let availableMinutes = 0;
-    
+
     for (let i = 0; i < slotsNeeded; i++) {
       let currentMinute = startMinute + (i * 15);
       let currentHour = startHour;
-      
+
       if (currentMinute >= 60) {
         currentHour += Math.floor(currentMinute / 60);
         currentMinute = currentMinute % 60;
@@ -689,7 +689,7 @@ const bookingSummaryServiceInfo = useMemo(
       if (!timeSlots.includes(timeSlotStr) || !isTimeSlotAvailable(selectedDate, timeSlotStr)) {
         return { available: false, availableMinutes };
       }
-      
+
       availableMinutes += 15;
     }
 
@@ -708,10 +708,10 @@ const bookingSummaryServiceInfo = useMemo(
 
     // First, check if there are custom shifts for the selected date
     if (shiftsData) {
-      const customShifts = shiftsData.filter((shift: any) => 
+      const customShifts = shiftsData.filter((shift: any) =>
         shift.staffId === selectedBookingDoctor.id
       );
-      
+
       if (customShifts.length > 0) {
         shiftsToUse = customShifts;
       }
@@ -720,11 +720,11 @@ const bookingSummaryServiceInfo = useMemo(
     // If no custom shifts, fall back to default shifts
     if (shiftsToUse.length === 0 && defaultShiftsData && defaultShiftsData.length > 0) {
       const dayOfWeek = format(selectedDate, 'EEEE');
-      
-      const defaultShift = defaultShiftsData.find((shift: any) => 
+
+      const defaultShift = defaultShiftsData.find((shift: any) =>
         shift.userId === selectedBookingDoctor.id
       );
-      
+
       // Only use default shift if the selected date's day is in working days
       if (defaultShift && defaultShift.workingDays && defaultShift.workingDays.includes(dayOfWeek)) {
         shiftsToUse = [defaultShift];
@@ -750,7 +750,7 @@ const bookingSummaryServiceInfo = useMemo(
         const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
         const period = currentHour < 12 ? 'AM' : 'PM';
         const timeString = `${hour12}:${currentMinute.toString().padStart(2, '0')} ${period}`;
-        
+
         if (!allSlots.includes(timeString)) {
           allSlots.push(timeString);
         }
@@ -839,7 +839,7 @@ const bookingSummaryServiceInfo = useMemo(
       // Due date should always be the same as service date (dateOfService)
       const appointmentDate = appointment.scheduledAt || appointmentData.scheduledAt;
       let serviceDate = invoiceData.dateOfService;
-      
+
       // Extract date from appointment scheduledAt if available
       // Use UTC methods to avoid timezone conversion issues
       if (appointmentDate) {
@@ -859,10 +859,10 @@ const bookingSummaryServiceInfo = useMemo(
           serviceDate = `${year}-${month}-${day}`;
         }
       }
-      
+
       // Due date should always be the same as service date (dateOfService)
       const dueDate = serviceDate;
-      
+
       // Ensure all required fields are explicitly included in the invoice data
       const invoiceDataWithServiceId = {
         ...invoiceData,
@@ -980,7 +980,7 @@ const bookingSummaryServiceInfo = useMemo(
           error.message || "Failed to book appointment. Please try again.",
         variant: "destructive",
       });
-      
+
       // Clear booking in progress
       setBookingInProgress(null);
       setIsConfirmationOpen(false);
@@ -1010,7 +1010,7 @@ const bookingSummaryServiceInfo = useMemo(
     const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
     const patientId = parseInt(selectedPatient);
     const providerId = selectedBookingDoctor.id;
-    
+
     // Get patient name for the message
     const patientData = patients?.find((p: any) => p.id === patientId);
     const patientName = patientData ? `${patientData.firstName} ${patientData.lastName}` : 'Patient';
@@ -1022,10 +1022,10 @@ const bookingSummaryServiceInfo = useMemo(
       const aptPatientId = apt.patientId;
       const aptProviderId = apt.providerId;
       const aptDateStr = apt.scheduledAt.substring(0, 10);
-      
-      return aptPatientId === patientId && 
-             aptProviderId === providerId && 
-             aptDateStr === selectedDateStr;
+
+      return aptPatientId === patientId &&
+        aptProviderId === providerId &&
+        aptDateStr === selectedDateStr;
     });
 
     if (sameDocSameDateAppointment) {
@@ -1044,7 +1044,7 @@ const bookingSummaryServiceInfo = useMemo(
       if (apt.status === 'cancelled') return false;
       const aptPatientId = apt.patientId;
       const aptDateStr = apt.scheduledAt.substring(0, 10);
-      
+
       if (aptPatientId !== patientId || aptDateStr !== selectedDateStr) return false;
 
       // Check time overlap
@@ -1066,7 +1066,7 @@ const bookingSummaryServiceInfo = useMemo(
       const aptHour12 = aptH === 0 ? 12 : aptH > 12 ? aptH - 12 : aptH;
       const aptPeriod = aptH < 12 ? 'AM' : 'PM';
       const aptTimeFormatted = `${aptHour12}:${aptM.toString().padStart(2, '0')} ${aptPeriod}`;
-      
+
       // Get the doctor name for this conflicting appointment
       const conflictDoctor = medicalStaff?.find((doc: any) => doc.id === patientTimeConflict.providerId);
       const conflictDoctorName = conflictDoctor ? `${conflictDoctor.firstName} ${conflictDoctor.lastName}` : 'another doctor';
@@ -1082,7 +1082,7 @@ const bookingSummaryServiceInfo = useMemo(
       if (apt.status === 'cancelled') return false;
       const aptProviderId = apt.providerId;
       const aptDateStr = apt.scheduledAt.substring(0, 10);
-      
+
       if (aptProviderId !== providerId || aptDateStr !== selectedDateStr) return false;
 
       // Check time overlap
@@ -1136,7 +1136,7 @@ const bookingSummaryServiceInfo = useMemo(
     }
 
     const { isDuplicate, message } = checkDuplicateAppointments();
-    
+
     if (isDuplicate) {
       setDuplicateMessage(message);
       setShowDuplicateModal(true);
@@ -1229,10 +1229,10 @@ const bookingSummaryServiceInfo = useMemo(
     const hour12 = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
     const period = hours < 12 ? 'AM' : 'PM';
     const timeSlot12Hour = `${hour12}:${minutes.toString().padStart(2, '0')} ${period}`;
-    
+
     // Validate sufficient time is available for the selected duration
     const { available, availableMinutes } = checkSufficientTime(timeSlot12Hour, parseInt(duration));
-    
+
     if (!available) {
       setInsufficientTimeMessage(
         `Only ${availableMinutes} minutes are available at ${timeSlot12Hour}. Please select another time slot.`
@@ -1247,10 +1247,10 @@ const bookingSummaryServiceInfo = useMemo(
     const day = String(selectedDate.getDate()).padStart(2, "0");
     const hourStr = String(hours).padStart(2, "0");
     const minuteStr = String(minutes).padStart(2, "0");
-    
+
     const scheduledAtString = `${year}-${month}-${day}T${hourStr}:${minuteStr}:00`;
     const selectedDateString = format(selectedDate, 'yyyy-MM-dd');
-    
+
     // Mark this slot as being booked to prevent duplicates
     const bookingKey = `${selectedDateString}_${selectedTimeSlot}_${selectedBookingDoctor.id}`;
     setBookingInProgress(bookingKey);
@@ -1269,13 +1269,13 @@ const bookingSummaryServiceInfo = useMemo(
       }
 
       const amount = parseFloat(invoiceForm.amount || "0");
-      
+
       // Set invoice status based on payment method (follow admin strategy):
       // - Cash payments: "paid" (since paidAmount equals totalAmount)
       // - All other cases (including Stripe/Online payments not paid): "unpaid" status
       const isCashPayment = invoiceForm.paymentMethod === "Cash";
       const paidAmount = isCashPayment ? invoiceForm.amount : "0";
-      
+
       let invoiceStatus: string;
       if (isCashPayment && parseFloat(paidAmount) === amount) {
         invoiceStatus = "paid";
@@ -1283,18 +1283,18 @@ const bookingSummaryServiceInfo = useMemo(
         // Default to "unpaid" for all non-cash payments or unpaid invoices
         invoiceStatus = "unpaid";
       }
-      
+
       // Fix payment method: If status is "unpaid", paymentMethod should always be "Not Selected" (like admin role)
       let finalPaymentMethod = invoiceForm.paymentMethod;
       if (invoiceStatus === "unpaid") {
         finalPaymentMethod = "Not Selected";
       }
-      
+
       // Extract appointment date from appointmentData for correct service date and due date
       // Invoice date should be current date, while service date and due date should be appointment date
       const appointmentScheduledAt = appointmentData?.scheduledAt;
       let finalServiceDate = invoiceForm.serviceDate;
-      
+
       if (appointmentScheduledAt) {
         const scheduledAtStr = appointmentScheduledAt.toString();
         if (scheduledAtStr.includes('T')) {
@@ -1312,19 +1312,19 @@ const bookingSummaryServiceInfo = useMemo(
           finalServiceDate = `${year}-${month}-${day}`;
         }
       }
-      
+
       // Due date should always be the same as service date (dateOfService)
       const finalDueDate = finalServiceDate;
-      
+
       // Get doctor/provider ID from appointmentData - ensure we get it from multiple sources
-      const doctorId = appointmentData?.providerId || 
-                      appointmentData?.doctorId || 
-                      selectedBookingDoctor?.id || 
-                      null;
-      
+      const doctorId = appointmentData?.providerId ||
+        appointmentData?.doctorId ||
+        selectedBookingDoctor?.id ||
+        null;
+
       // Ensure doctorId is always a number if available
       const finalDoctorId = doctorId ? Number(doctorId) : null;
-      
+
       const invoiceData = {
         patientId: patient.patientId || patient.id.toString(),
         patientName: `${patient.firstName} ${patient.lastName}`,
@@ -1374,14 +1374,14 @@ const bookingSummaryServiceInfo = useMemo(
     if (patients && patients.length > 0) {
       if (user?.role === 'patient') {
         // Find the patient record matching the logged-in user by email
-        const currentPatient = patients.find((patient: any) => 
+        const currentPatient = patients.find((patient: any) =>
           patient.email && user?.email && patient.email.toLowerCase() === user.email.toLowerCase()
-        ) || patients.find((patient: any) => 
+        ) || patients.find((patient: any) =>
           patient.firstName && user?.firstName && patient.lastName && user?.lastName &&
-          patient.firstName.toLowerCase() === user.firstName.toLowerCase() && 
+          patient.firstName.toLowerCase() === user.firstName.toLowerCase() &&
           patient.lastName.toLowerCase() === user.lastName.toLowerCase()
         );
-        
+
         if (currentPatient) {
           setSelectedPatient(currentPatient.id.toString());
         } else {
@@ -1424,34 +1424,34 @@ const bookingSummaryServiceInfo = useMemo(
   // Check if a date has shifts in the database (custom shifts OR default shifts)
   const hasShiftsOnDate = (date: Date): boolean => {
     if (!selectedBookingDoctor) return false;
-    
+
     const dateStr = format(date, 'yyyy-MM-dd');
-    
+
     // First check if there are custom shifts for this specific date
     if (allDoctorShifts) {
       const hasCustomShift = allDoctorShifts.some((shift: any) => {
         const shiftDateStr = shift.date.substring(0, 10);
         return shiftDateStr === dateStr && shift.staffId === selectedBookingDoctor.id;
       });
-      
+
       if (hasCustomShift) {
         return true;
       }
     }
-    
+
     // If no custom shift, check if there's a default shift with this day in working days
     if (defaultShiftsData && defaultShiftsData.length > 0) {
       const dayOfWeek = format(date, 'EEEE'); // Get day name (e.g., "Monday")
-      
-      const defaultShift = defaultShiftsData.find((shift: any) => 
+
+      const defaultShift = defaultShiftsData.find((shift: any) =>
         shift.userId === selectedBookingDoctor.id
       );
-      
+
       if (defaultShift && defaultShift.workingDays && defaultShift.workingDays.includes(dayOfWeek)) {
         return true;
       }
     }
-    
+
     return false;
   };
 
@@ -1461,18 +1461,18 @@ const bookingSummaryServiceInfo = useMemo(
       // Reset selectedDate and auto-select flag when doctor changes or dialog opens
       setSelectedDate(undefined);
       setHasAutoSelectedDate(false);
-      
+
       // Wait a bit for data to load
       const timeoutId = setTimeout(() => {
         // Find the first available date starting from today
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         // Check up to 60 days ahead
         for (let i = 0; i < 60; i++) {
           const checkDate = new Date(today);
           checkDate.setDate(today.getDate() + i);
-          
+
           if (hasShiftsOnDate(checkDate)) {
             setSelectedDate(checkDate);
             setHasAutoSelectedDate(true);
@@ -1480,10 +1480,10 @@ const bookingSummaryServiceInfo = useMemo(
           }
         }
       }, 300);
-      
+
       return () => clearTimeout(timeoutId);
     }
-    
+
     // Reset auto-select flag when dialog closes
     if (!isBookingOpen && hasAutoSelectedDate) {
       setHasAutoSelectedDate(false);
@@ -1493,7 +1493,7 @@ const bookingSummaryServiceInfo = useMemo(
   // Format time to 12-hour format for display
   const formatTime = (time: string): string => {
     if (!time) return "";
-    
+
     // Handle 24-hour format like "14:30"
     const [hours, minutes] = time.split(":");
     const hour = parseInt(hours);
@@ -1507,7 +1507,7 @@ const bookingSummaryServiceInfo = useMemo(
   // For doctor role: show patients who have appointments with them
   // For admin role: show only doctors who are available today
   const today = new Date().toLocaleDateString("en-US", { weekday: "long" });
-  
+
   // For doctors: extract unique patients from their appointments
   const doctorPatients = useMemo(() => {
     if (!isDoctorLike(user?.role) || !user || !doctorAppointments || !patients) {
@@ -1523,7 +1523,7 @@ const bookingSummaryServiceInfo = useMemo(
 
     // Get patients who have appointments with this doctor
     let filteredPatients = patients.filter((patient: any) => patientIds.has(patient.id));
-    
+
     // Apply patient search filter if provided
     if (patientSearch && patientSearch.trim() !== "") {
       const searchLower = patientSearch.toLowerCase().trim();
@@ -1536,15 +1536,15 @@ const bookingSummaryServiceInfo = useMemo(
         const phone = (patient.phone || '').toLowerCase();
         const city = (patient.city || '').toLowerCase();
         const country = (patient.country || '').toLowerCase();
-        
+
         return fullName.includes(searchLower) ||
-               email.includes(searchLower) ||
-               age.includes(searchLower) ||
-               id.includes(searchLower) ||
-               nhsNumber.includes(searchLower) ||
-               phone.includes(searchLower) ||
-               city.includes(searchLower) ||
-               country.includes(searchLower);
+          email.includes(searchLower) ||
+          age.includes(searchLower) ||
+          id.includes(searchLower) ||
+          nhsNumber.includes(searchLower) ||
+          phone.includes(searchLower) ||
+          city.includes(searchLower) ||
+          country.includes(searchLower);
       });
     }
 
@@ -1585,12 +1585,12 @@ const bookingSummaryServiceInfo = useMemo(
         if (doctor.role === 'admin' || doctor.role === 'patient' || doctor.role === 'sample_taker' || doctor.role === 'lab_technician') {
           return false;
         }
-        
+
         // Apply role filter if a specific role is selected
         if (filterRole !== 'all' && filterRole !== '' && doctor.role !== filterRole) {
           return false;
         }
-        
+
         // Apply specialty/subcategory filter based on role
         if (filterSpecialty && filterSpecialty !== 'all' && filterSpecialty !== '') {
           if (['doctor', 'nurse', 'dentist', 'dental_nurse', 'phlebotomist'].includes(filterRole)) {
@@ -1605,11 +1605,11 @@ const bookingSummaryServiceInfo = useMemo(
             }
           }
         }
-        
+
         return true;
       });
     }
-    
+
     // For admin role: show all users except patient, admin, sample_taker, lab_technician, with role filter and search
     if (user?.role === 'admin') {
       return medicalStaff.filter((staff: Doctor) => {
@@ -1617,12 +1617,12 @@ const bookingSummaryServiceInfo = useMemo(
         if (staff.role === 'patient' || staff.role === 'admin' || staff.role === 'sample_taker' || staff.role === 'lab_technician') {
           return false;
         }
-        
+
         // Apply role filter if a specific role is selected
         if (filterRole !== 'all' && filterRole !== '' && staff.role !== filterRole) {
           return false;
         }
-        
+
         // Apply specialty/subcategory filter based on role
         if (filterSpecialty && filterSpecialty !== 'all' && filterSpecialty !== '') {
           if (['doctor', 'nurse', 'dentist', 'dental_nurse', 'phlebotomist'].includes(filterRole)) {
@@ -1637,7 +1637,7 @@ const bookingSummaryServiceInfo = useMemo(
             }
           }
         }
-        
+
         // Apply search filter
         if (filterSearch.trim()) {
           const query = filterSearch.toLowerCase();
@@ -1645,22 +1645,22 @@ const bookingSummaryServiceInfo = useMemo(
           const email = (staff.email || '').toLowerCase();
           const specialization = (staff.medicalSpecialtyCategory || '').toLowerCase();
           const department = (staff.department || '').toLowerCase();
-          
-          const matches = 
+
+          const matches =
             fullName.includes(query) ||
             email.includes(query) ||
             specialization.includes(query) ||
             department.includes(query);
-            
+
           if (!matches) {
             return false;
           }
         }
-        
+
         return true;
       });
     }
-    
+
     // For other roles: show only doctors who are available today
     return medicalStaff.filter((doctor: Doctor) => {
       if (!isDoctorLike(doctor.role)) {
@@ -1737,7 +1737,7 @@ const bookingSummaryServiceInfo = useMemo(
               <div className="flex items-start gap-3 w-full">
                 <div className="flex-shrink-0">
                   <Avatar>
-                    <AvatarFallback className="bg-blue-100 text-blue-700">
+                    <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">
                       {getInitials(item.firstName, item.lastName)}
                     </AvatarFallback>
                   </Avatar>
@@ -1763,7 +1763,10 @@ const bookingSummaryServiceInfo = useMemo(
                   {/* Row 3: Role Badge - Show for admin and patient users */}
                   {(user?.role === 'admin' || user?.role === 'patient') && item.role && (
                     <div className="w-full">
-                      <Badge className={`${roleColors[item.role as keyof typeof roleColors] || 'bg-gray-100 text-gray-800'} max-w-full truncate inline-block capitalize`}>
+                      <Badge className={cn(
+                        roleColors[item.role?.toLowerCase() as keyof typeof roleColors] || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
+                        "max-w-full truncate inline-block capitalize font-medium"
+                      )}>
                         {item.role}
                       </Badge>
                     </div>
@@ -1874,7 +1877,7 @@ const bookingSummaryServiceInfo = useMemo(
                       className="bg-white hover:bg-gray-50 border border-gray-200 flex-shrink-0 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-600"
                       onClick={(e) => {
                         e.stopPropagation();
-                        const profilePath = isDoctorLike(user?.role) 
+                        const profilePath = isDoctorLike(user?.role)
                           ? `/${getTenantSubdomain()}/patients/${item.id}`
                           : `/${getTenantSubdomain()}/staff/${item.id}`;
                         setLocation(profilePath);
@@ -1962,7 +1965,7 @@ const bookingSummaryServiceInfo = useMemo(
                 <p className="text-sm font-medium mb-1">Current Schedule:</p>
                 <div className="text-sm text-gray-600 dark:text-gray-400">
                   {selectedDoctor.workingDays &&
-                  selectedDoctor.workingDays.length > 0 ? (
+                    selectedDoctor.workingDays.length > 0 ? (
                     <>
                       <p>Days: {selectedDoctor.workingDays.join(", ")}</p>
                       {selectedDoctor.workingHours && (
@@ -2011,7 +2014,7 @@ const bookingSummaryServiceInfo = useMemo(
         // If open is false, ignore it - user must click X or Cancel button
         // Only close via explicit button handlers
       }}>
-        <DialogContent 
+        <DialogContent
           className="max-w-md max-h-[550px] flex flex-col"
           onPointerDownOutside={(e) => {
             // Prevent closing on outside click
@@ -2043,18 +2046,18 @@ const bookingSummaryServiceInfo = useMemo(
                         const invoiceResponse = await apiRequest('GET', `/api/billing/invoices/${createdInvoiceId}`);
                         const invoice = await invoiceResponse.json();
                         const totalAmount = parseFloat(invoice.totalAmount || invoice.subtotal || "0");
-                        
+
                         // Update invoice to paid status with payment details
                         await apiRequest("PATCH", `/api/billing/invoices/${createdInvoiceId}`, {
                           status: "paid",
                           paymentMethod: "Online Payment",
                           paidAmount: totalAmount.toString()
                         });
-                        
+
                         // Invalidate queries to refresh the billing page
                         queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
                         queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
-                        
+
                         console.log("✅ Invoice status updated to paid with payment details");
                       } catch (error) {
                         console.error("❌ Failed to update invoice status:", error);
@@ -2078,8 +2081,8 @@ const bookingSummaryServiceInfo = useMemo(
       </Dialog>
 
       {/* Booking Dialog */}
-      <Dialog 
-        open={isBookingOpen} 
+      <Dialog
+        open={isBookingOpen}
         onOpenChange={(open) => {
           // Allow closing via close button (X) or Cancel button
           // Backdrop and Escape key closing are prevented via onPointerDownOutside and onEscapeKeyDown
@@ -2103,23 +2106,23 @@ const bookingSummaryServiceInfo = useMemo(
               Book Appointment with Dr. {selectedBookingDoctor ? `${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}` : 'John Smith'}
             </DialogTitle>
           </DialogHeader>
-            {shiftWarning && (
-              <Alert className="mb-4 bg-yellow-50 text-yellow-900 border-yellow-200 shadow-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <AlertDescription className="flex-1">{shiftWarning}</AlertDescription>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const targetSubdomain = getTenantSubdomain();
-                      setLocation(`/${targetSubdomain}/shifts?tab=default-shifts`);
-                    }}
-                  >
-                    Create Shifts
-                  </Button>
-                </div>
-              </Alert>
-            )}
+          {shiftWarning && (
+            <Alert className="mb-4 bg-yellow-50 text-yellow-900 border-yellow-200 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <AlertDescription className="flex-1">{shiftWarning}</AlertDescription>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const targetSubdomain = getTenantSubdomain();
+                    setLocation(`/${targetSubdomain}/shifts?tab=default-shifts`);
+                  }}
+                >
+                  Create Shifts
+                </Button>
+              </div>
+            </Alert>
+          )}
           <div id="booking-dialog-description" className="sr-only">
             Schedule a new appointment by selecting specialty, doctor, date, and time slot.
           </div>
@@ -2416,9 +2419,9 @@ const bookingSummaryServiceInfo = useMemo(
                     disabled={(date: Date) => {
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
-                      
+
                       if (date < today) return true;
-                      
+
                       return !hasShiftsOnDate(date);
                     }}
                     className="w-full"
@@ -2451,13 +2454,12 @@ const bookingSummaryServiceInfo = useMemo(
                           <Button
                             key={slot}
                             variant={isSelected ? "default" : "outline"}
-                            className={`h-10 text-xs font-medium ${
-                              !isAvailable 
-                                ? "bg-gray-200 text-gray-400 cursor-not-allowed border-gray-300" 
-                                : isSelected 
-                                  ? "bg-blue-500 hover:bg-blue-600 text-white border-blue-500" 
-                                  : "bg-green-500 hover:bg-green-600 text-white border-green-500"
-                            }`}
+                            className={`h-10 text-xs font-medium ${!isAvailable
+                              ? "bg-gray-200 text-gray-400 cursor-not-allowed border-gray-300"
+                              : isSelected
+                                ? "bg-blue-500 hover:bg-blue-600 text-white border-blue-500"
+                                : "bg-green-500 hover:bg-green-600 text-white border-green-500"
+                              }`}
                             disabled={!isAvailable}
                             onClick={() => {
                               if (!selectedDate) return;
@@ -2511,7 +2513,7 @@ const bookingSummaryServiceInfo = useMemo(
                       className="mt-1"
                     />
                   </div>
-                  
+
                   {/* Description */}
                   <div>
                     <Label className="text-sm font-medium">Description</Label>
@@ -2549,8 +2551,8 @@ const bookingSummaryServiceInfo = useMemo(
       </Dialog>
 
       {/* Confirmation Dialog */}
-      <Dialog 
-        open={isConfirmationOpen} 
+      <Dialog
+        open={isConfirmationOpen}
         onOpenChange={(open) => {
           // Prevent closing on outside click - only close via X button or Cancel
           // Don't allow closing via onOpenChange (which triggers on backdrop click)
@@ -2561,8 +2563,8 @@ const bookingSummaryServiceInfo = useMemo(
           // Reset booking progress only when explicitly closed via button
         }}
       >
-        <DialogContent 
-          className="max-w-2xl" 
+        <DialogContent
+          className="max-w-2xl"
           aria-describedby="confirmation-dialog-description"
           onPointerDownOutside={(e) => {
             // Prevent closing on outside click
@@ -2579,7 +2581,7 @@ const bookingSummaryServiceInfo = useMemo(
           <div id="confirmation-dialog-description" className="sr-only">
             Review and confirm your appointment booking details before submission.
           </div>
-          
+
           <div className="space-y-4">
             <h3 className="text-base font-medium">Booking Summary</h3>
             <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
@@ -2587,23 +2589,23 @@ const bookingSummaryServiceInfo = useMemo(
                 <div className="space-y-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Appointment Type</Label>
-                  <p className="text-sm font-medium">{appointmentTypeLabel}</p>
-                  {selectedServiceInfo && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <span
-                        className="inline-flex h-2 w-2 rounded-full border border-gray-300"
-                        style={{ backgroundColor: selectedServiceInfo.color }}
-                      />
-                      <span className="text-xs text-gray-500">
-                        {selectedServiceInfo.label} • {selectedServiceInfo.price}
-                      </span>
-                    </div>
-                  )}
+                    <p className="text-sm font-medium">{appointmentTypeLabel}</p>
+                    {selectedServiceInfo && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span
+                          className="inline-flex h-2 w-2 rounded-full border border-gray-300"
+                          style={{ backgroundColor: selectedServiceInfo.color }}
+                        />
+                        <span className="text-xs text-gray-500">
+                          {selectedServiceInfo.label} • {selectedServiceInfo.price}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Patient</Label>
                     <p className="text-sm font-medium">
-                      {selectedPatient 
+                      {selectedPatient
                         ? `${patients?.find((p: any) => p.id.toString() === selectedPatient)?.firstName} ${patients?.find((p: any) => p.id.toString() === selectedPatient)?.lastName}`
                         : "Not selected"
                       }
@@ -2622,7 +2624,7 @@ const bookingSummaryServiceInfo = useMemo(
                   <div>
                     <Label className="text-xs font-medium text-gray-600 dark:text-gray-400">Doctor</Label>
                     <p className="text-sm font-medium">
-                      {selectedBookingDoctor 
+                      {selectedBookingDoctor
                         ? `Dr. ${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}`
                         : "Not selected"
                       }
@@ -2717,8 +2719,8 @@ const bookingSummaryServiceInfo = useMemo(
       </Dialog>
 
       {/* Invoice Creation Modal */}
-      <Dialog 
-        open={showInvoiceModal} 
+      <Dialog
+        open={showInvoiceModal}
         onOpenChange={(open) => {
           // Prevent closing on outside click - only close via X button or Cancel
           // Don't allow closing via onOpenChange (which triggers on backdrop click)
@@ -2728,7 +2730,7 @@ const bookingSummaryServiceInfo = useMemo(
           // If open is false, ignore it - user must click X or Cancel button
         }}
       >
-        <DialogContent 
+        <DialogContent
           className="max-w-3xl max-h-[90vh] overflow-y-auto"
           onPointerDownOutside={(e) => {
             // Prevent closing on outside click - only close via X button or Cancel
@@ -2901,7 +2903,7 @@ const bookingSummaryServiceInfo = useMemo(
           <div id="success-dialog-description" className="sr-only">
             Appointment booking confirmation message.
           </div>
-          
+
           <div className="text-center py-6">
             <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mb-4">
               <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />

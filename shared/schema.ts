@@ -1032,7 +1032,9 @@ export const notifications = pgTable("notifications", {
     patientName?: string;
     appointmentId?: number;
     prescriptionId?: number;
-    urgency?: "low" | "medium" | "high" | "critical";
+    urgency?: "low" | "medium" | "high" | "critical" | "moderate";
+    riskLevel?: "low" | "medium" | "high" | "critical" | "moderate";
+    alertType?: string;
     department?: string;
     requiresResponse?: boolean;
     autoMarkAsRead?: boolean;
@@ -1435,19 +1437,19 @@ export const inventoryItems = pgTable("inventory_items", {
   manufacturer: text("manufacturer"),
   unitOfMeasurement: varchar("unit_of_measurement", { length: 20 }).notNull().default("pieces"), // pieces, ml, mg, grams, etc.
   packSize: integer("pack_size").notNull().default(1),
-  
+
   // Pricing
   purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }).notNull(),
   salePrice: decimal("sale_price", { precision: 10, scale: 2 }).notNull(),
   mrp: decimal("mrp", { precision: 10, scale: 2 }), // Maximum Retail Price
   taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).notNull().default("0.00"), // VAT/GST percentage
-  
+
   // Stock Management
   currentStock: integer("current_stock").notNull().default(0),
   minimumStock: integer("minimum_stock").notNull().default(10),
   maximumStock: integer("maximum_stock").notNull().default(1000),
   reorderPoint: integer("reorder_point").notNull().default(20),
-  
+
   // Additional Information
   expiryTracking: boolean("expiry_tracking").notNull().default(false),
   batchTracking: boolean("batch_tracking").notNull().default(false),
@@ -1456,11 +1458,11 @@ export const inventoryItems = pgTable("inventory_items", {
   sideEffects: text("side_effects"),
   contraindications: text("contraindications"),
   dosageInstructions: text("dosage_instructions"),
-  
+
   // Status
   isActive: boolean("is_active").notNull().default(true),
   isDiscontinued: boolean("is_discontinued").notNull().default(false),
-  
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -2673,7 +2675,7 @@ export const insertAppointmentSchema = createInsertSchema(appointments).omit({
     invalid_type_error: "Invalid patient selection"
   }),
   providerId: z.coerce.number({
-    required_error: "Provider is required", 
+    required_error: "Provider is required",
     invalid_type_error: "Invalid provider selection"
   }),
   title: z.string().trim().min(1, "Appointment title is required"),
@@ -3905,31 +3907,31 @@ export const pharmacyShiftClosings = pgTable("pharmacy_shift_closings", {
   shiftStartTime: timestamp("shift_start_time").notNull(),
   shiftEndTime: timestamp("shift_end_time"),
   status: varchar("status", { length: 20 }).default("open").notNull(),
-  
+
   // Sales Summary
   totalSalesCount: integer("total_sales_count").default(0),
   totalSalesAmount: decimal("total_sales_amount", { precision: 12, scale: 2 }).default("0.00"),
   totalReturnsCount: integer("total_returns_count").default(0),
   totalReturnsAmount: decimal("total_returns_amount", { precision: 12, scale: 2 }).default("0.00"),
-  
+
   // Payment Breakdown
   cashSales: decimal("cash_sales", { precision: 12, scale: 2 }).default("0.00"),
   cardSales: decimal("card_sales", { precision: 12, scale: 2 }).default("0.00"),
   insuranceSales: decimal("insurance_sales", { precision: 12, scale: 2 }).default("0.00"),
   creditSales: decimal("credit_sales", { precision: 12, scale: 2 }).default("0.00"),
-  
+
   // Cash Drawer
   openingCash: decimal("opening_cash", { precision: 12, scale: 2 }).default("0.00"),
   closingCash: decimal("closing_cash", { precision: 12, scale: 2 }).default("0.00"),
   expectedCash: decimal("expected_cash", { precision: 12, scale: 2 }).default("0.00"),
   cashDiscrepancy: decimal("cash_discrepancy", { precision: 12, scale: 2 }).default("0.00"),
   discrepancyNotes: text("discrepancy_notes"),
-  
+
   // Approval
   approvedBy: integer("approved_by").references(() => users.id),
   approvedAt: timestamp("approved_at"),
   approvalNotes: text("approval_notes"),
-  
+
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -3940,27 +3942,27 @@ export const pharmacyDashboardSnapshots = pgTable("pharmacy_dashboard_snapshots"
   id: serial("id").primaryKey(),
   organizationId: integer("organization_id").notNull().references(() => organizations.id),
   snapshotDate: timestamp("snapshot_date").notNull(),
-  
+
   // Sales Metrics
   totalSales: decimal("total_sales", { precision: 12, scale: 2 }).default("0.00"),
   totalSalesCount: integer("total_sales_count").default(0),
   averageSaleValue: decimal("average_sale_value", { precision: 10, scale: 2 }).default("0.00"),
-  
+
   // Returns Metrics
   totalReturns: decimal("total_returns", { precision: 12, scale: 2 }).default("0.00"),
   totalReturnsCount: integer("total_returns_count").default(0),
-  
+
   // Inventory Metrics
   lowStockItemsCount: integer("low_stock_items_count").default(0),
   nearExpiryItemsCount: integer("near_expiry_items_count").default(0),
   outOfStockItemsCount: integer("out_of_stock_items_count").default(0),
-  
+
   // Pending Amounts
   pendingInsuranceAmount: decimal("pending_insurance_amount", { precision: 12, scale: 2 }).default("0.00"),
   pendingCreditAmount: decimal("pending_credit_amount", { precision: 12, scale: 2 }).default("0.00"),
   pendingInsuranceCount: integer("pending_insurance_count").default(0),
   pendingCreditCount: integer("pending_credit_count").default(0),
-  
+
   // Top Items
   topSellingItems: jsonb("top_selling_items").$type<Array<{
     itemId: number;
@@ -3968,7 +3970,7 @@ export const pharmacyDashboardSnapshots = pgTable("pharmacy_dashboard_snapshots"
     quantitySold: number;
     totalAmount: number;
   }>>().default([]),
-  
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

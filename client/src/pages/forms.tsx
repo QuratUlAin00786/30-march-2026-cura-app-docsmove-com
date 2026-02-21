@@ -52,6 +52,7 @@ import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { Toaster } from "@/components/ui/toaster";
 import { isDoctorLike } from "@/lib/role-utils";
 import { Header } from "@/components/layout/header";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
   FormBuilder,
@@ -202,7 +203,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
   const [isEditingFooter, setIsEditingFooter] = useState(false);
   const [editHeaderData, setEditHeaderData] = useState<any>(null);
   const [editFooterData, setEditFooterData] = useState<any>(null);
-  
+
   const { data: savedHeader, isLoading: headerLoading } = useQuery({
     queryKey: ['/api/clinic-headers'],
     enabled: !!user,
@@ -268,7 +269,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
   }
 
   const handleEditHeader = () => {
-    setEditHeaderData({...savedHeader});
+    setEditHeaderData({ ...savedHeader });
     setIsEditingHeader(true);
   };
 
@@ -289,7 +290,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
   };
 
   const handleEditFooter = () => {
-    setEditFooterData({...savedFooter});
+    setEditFooterData({ ...savedFooter });
     setIsEditingFooter(true);
   };
 
@@ -335,44 +336,44 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                 <div style={{ borderBottom: '3px solid ' + (savedFooter?.backgroundColor || '#4A7DFF'), paddingBottom: '20px' }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "20px" }}>
                     {savedHeader.logoBase64 && (
-                      <img 
-                        src={savedHeader.logoBase64} 
-                        alt="Clinic Logo - Left" 
+                      <img
+                        src={savedHeader.logoBase64}
+                        alt="Clinic Logo - Left"
                         style={{ maxHeight: "80px", objectFit: "contain" }}
                       />
                     )}
                     <div style={{ flex: 1 }}>
-                      <h1 style={{ 
-                        margin: 0, 
+                      <h1 style={{
+                        margin: 0,
                         fontSize: savedHeader.clinicNameFontSize || "24pt",
                         fontFamily: savedHeader.fontFamily || "verdana",
                         fontWeight: savedHeader.fontWeight || "normal",
                         fontStyle: savedHeader.fontStyle || "normal",
                         textDecoration: savedHeader.textDecoration || "none",
-                        color: savedFooter?.backgroundColor || '#4A7DFF' 
+                        color: savedFooter?.backgroundColor || '#4A7DFF'
                       }}>
                         {savedHeader.clinicName}
                       </h1>
                       {savedHeader.address && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>{savedHeader.address}</p>
                       )}
                       {(savedHeader.phone || savedHeader.email) && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>
                           {savedHeader.phone}
                           {savedHeader.phone && savedHeader.email && " • "}
@@ -380,14 +381,14 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                         </p>
                       )}
                       {savedHeader.website && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>{savedHeader.website}</p>
                       )}
                     </div>
@@ -402,44 +403,44 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                 <div style={{ borderBottom: '3px solid ' + (savedFooter?.backgroundColor || '#4A7DFF'), paddingBottom: '20px' }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: "20px" }}>
                     {savedHeader.logoBase64 && (
-                      <img 
-                        src={savedHeader.logoBase64} 
-                        alt="Clinic Logo - Center" 
+                      <img
+                        src={savedHeader.logoBase64}
+                        alt="Clinic Logo - Center"
                         style={{ maxHeight: "80px", objectFit: "contain" }}
                       />
                     )}
                     <div style={{ textAlign: "center" }}>
-                      <h1 style={{ 
-                        margin: 0, 
+                      <h1 style={{
+                        margin: 0,
                         fontSize: savedHeader.clinicNameFontSize || "24pt",
                         fontFamily: savedHeader.fontFamily || "verdana",
                         fontWeight: savedHeader.fontWeight || "normal",
                         fontStyle: savedHeader.fontStyle || "normal",
                         textDecoration: savedHeader.textDecoration || "none",
-                        color: savedFooter?.backgroundColor || '#4A7DFF' 
+                        color: savedFooter?.backgroundColor || '#4A7DFF'
                       }}>
                         {savedHeader.clinicName}
                       </h1>
                       {savedHeader.address && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>{savedHeader.address}</p>
                       )}
                       {(savedHeader.phone || savedHeader.email) && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>
                           {savedHeader.phone}
                           {savedHeader.phone && savedHeader.email && " • "}
@@ -447,14 +448,14 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                         </p>
                       )}
                       {savedHeader.website && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>{savedHeader.website}</p>
                       )}
                     </div>
@@ -469,44 +470,44 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                 <div style={{ borderBottom: '3px solid ' + (savedFooter?.backgroundColor || '#4A7DFF'), paddingBottom: '20px' }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "20px", flexDirection: "row-reverse" }}>
                     {savedHeader.logoBase64 && (
-                      <img 
-                        src={savedHeader.logoBase64} 
-                        alt="Clinic Logo - Right" 
+                      <img
+                        src={savedHeader.logoBase64}
+                        alt="Clinic Logo - Right"
                         style={{ maxHeight: "80px", objectFit: "contain" }}
                       />
                     )}
                     <div style={{ flex: 1, textAlign: "right" }}>
-                      <h1 style={{ 
-                        margin: 0, 
+                      <h1 style={{
+                        margin: 0,
                         fontSize: savedHeader.clinicNameFontSize || "24pt",
                         fontFamily: savedHeader.fontFamily || "verdana",
                         fontWeight: savedHeader.fontWeight || "normal",
                         fontStyle: savedHeader.fontStyle || "normal",
                         textDecoration: savedHeader.textDecoration || "none",
-                        color: savedFooter?.backgroundColor || '#4A7DFF' 
+                        color: savedFooter?.backgroundColor || '#4A7DFF'
                       }}>
                         {savedHeader.clinicName}
                       </h1>
                       {savedHeader.address && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>{savedHeader.address}</p>
                       )}
                       {(savedHeader.phone || savedHeader.email) && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>
                           {savedHeader.phone}
                           {savedHeader.phone && savedHeader.email && " • "}
@@ -514,14 +515,14 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                         </p>
                       )}
                       {savedHeader.website && (
-                        <p style={{ 
-                          margin: "5px 0", 
+                        <p style={{
+                          margin: "5px 0",
                           fontSize: savedHeader.fontSize || "12pt",
                           fontFamily: savedHeader.fontFamily || "verdana",
                           fontWeight: savedHeader.fontWeight || "normal",
                           fontStyle: savedHeader.fontStyle || "normal",
                           textDecoration: savedHeader.textDecoration || "none",
-                          color: "#666" 
+                          color: "#666"
                         }}>{savedHeader.website}</p>
                       )}
                     </div>
@@ -561,11 +562,11 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
               </Button>
             </div>
           </div>
-          <div 
+          <div
             className="rounded-lg p-6 text-center"
-            style={{ 
+            style={{
               backgroundColor: savedFooter.backgroundColor,
-              color: savedFooter.textColor 
+              color: savedFooter.textColor
             }}
           >
             <p className="text-sm font-medium">{savedFooter.footerText}</p>
@@ -599,7 +600,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                       if (file) {
                         const reader = new FileReader();
                         reader.onloadend = () => {
-                          setEditHeaderData({...editHeaderData, logoBase64: reader.result as string});
+                          setEditHeaderData({ ...editHeaderData, logoBase64: reader.result as string });
                         };
                         reader.readAsDataURL(file);
                       }
@@ -608,9 +609,9 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   />
                   <div className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-800 min-h-[120px] flex items-center justify-center">
                     {editHeaderData.logoBase64 ? (
-                      <img 
-                        src={editHeaderData.logoBase64} 
-                        alt="Logo Preview" 
+                      <img
+                        src={editHeaderData.logoBase64}
+                        alt="Logo Preview"
                         className="max-h-[100px] object-contain"
                       />
                     ) : (
@@ -625,7 +626,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Clinic Name</Label>
                   <Input
                     value={editHeaderData.clinicName || ''}
-                    onChange={(e) => setEditHeaderData({...editHeaderData, clinicName: e.target.value})}
+                    onChange={(e) => setEditHeaderData({ ...editHeaderData, clinicName: e.target.value })}
                     placeholder="Enter clinic name"
                   />
                 </div>
@@ -633,7 +634,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Clinic Name Font Size</Label>
                   <Select
                     value={editHeaderData.clinicNameFontSize || '24pt'}
-                    onValueChange={(value) => setEditHeaderData({...editHeaderData, clinicNameFontSize: value})}
+                    onValueChange={(value) => setEditHeaderData({ ...editHeaderData, clinicNameFontSize: value })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -650,13 +651,13 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   </Select>
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Address</Label>
                   <Input
                     value={editHeaderData.address || ''}
-                    onChange={(e) => setEditHeaderData({...editHeaderData, address: e.target.value})}
+                    onChange={(e) => setEditHeaderData({ ...editHeaderData, address: e.target.value })}
                     placeholder="Enter address"
                   />
                 </div>
@@ -664,7 +665,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Phone</Label>
                   <Input
                     value={editHeaderData.phone || ''}
-                    onChange={(e) => setEditHeaderData({...editHeaderData, phone: e.target.value})}
+                    onChange={(e) => setEditHeaderData({ ...editHeaderData, phone: e.target.value })}
                     placeholder="Enter phone"
                   />
                 </div>
@@ -675,7 +676,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Email</Label>
                   <Input
                     value={editHeaderData.email || ''}
-                    onChange={(e) => setEditHeaderData({...editHeaderData, email: e.target.value})}
+                    onChange={(e) => setEditHeaderData({ ...editHeaderData, email: e.target.value })}
                     placeholder="Enter email"
                   />
                 </div>
@@ -683,7 +684,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Website</Label>
                   <Input
                     value={editHeaderData.website || ''}
-                    onChange={(e) => setEditHeaderData({...editHeaderData, website: e.target.value})}
+                    onChange={(e) => setEditHeaderData({ ...editHeaderData, website: e.target.value })}
                     placeholder="Enter website"
                   />
                 </div>
@@ -694,7 +695,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Font Family</Label>
                   <Select
                     value={editHeaderData.fontFamily || 'verdana'}
-                    onValueChange={(value) => setEditHeaderData({...editHeaderData, fontFamily: value})}
+                    onValueChange={(value) => setEditHeaderData({ ...editHeaderData, fontFamily: value })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -719,7 +720,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Label>Font Size</Label>
                   <Select
                     value={editHeaderData.fontSize || '12pt'}
-                    onValueChange={(value) => setEditHeaderData({...editHeaderData, fontSize: value})}
+                    onValueChange={(value) => setEditHeaderData({ ...editHeaderData, fontSize: value })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -743,7 +744,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Button
                     type="button"
                     variant={editHeaderData.fontWeight === 'bold' ? 'default' : 'outline'}
-                    onClick={() => setEditHeaderData({...editHeaderData, fontWeight: editHeaderData.fontWeight === 'bold' ? 'normal' : 'bold'})}
+                    onClick={() => setEditHeaderData({ ...editHeaderData, fontWeight: editHeaderData.fontWeight === 'bold' ? 'normal' : 'bold' })}
                     className="flex items-center gap-1"
                   >
                     <Bold className="h-4 w-4" />
@@ -752,7 +753,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Button
                     type="button"
                     variant={editHeaderData.fontStyle === 'italic' ? 'default' : 'outline'}
-                    onClick={() => setEditHeaderData({...editHeaderData, fontStyle: editHeaderData.fontStyle === 'italic' ? 'normal' : 'italic'})}
+                    onClick={() => setEditHeaderData({ ...editHeaderData, fontStyle: editHeaderData.fontStyle === 'italic' ? 'normal' : 'italic' })}
                     className="flex items-center gap-1"
                   >
                     <Italic className="h-4 w-4" />
@@ -761,7 +762,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Button
                     type="button"
                     variant={editHeaderData.textDecoration === 'underline' ? 'default' : 'outline'}
-                    onClick={() => setEditHeaderData({...editHeaderData, textDecoration: editHeaderData.textDecoration === 'underline' ? 'none' : 'underline'})}
+                    onClick={() => setEditHeaderData({ ...editHeaderData, textDecoration: editHeaderData.textDecoration === 'underline' ? 'none' : 'underline' })}
                     className="flex items-center gap-1"
                   >
                     <Underline className="h-4 w-4" />
@@ -774,7 +775,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                 <Label>Logo Position</Label>
                 <Select
                   value={editHeaderData.logoPosition || 'center'}
-                  onValueChange={(value) => setEditHeaderData({...editHeaderData, logoPosition: value})}
+                  onValueChange={(value) => setEditHeaderData({ ...editHeaderData, logoPosition: value })}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -786,7 +787,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="flex justify-end gap-2 mt-6">
                 <Button variant="outline" onClick={() => setIsEditingHeader(false)}>
                   Cancel
@@ -816,7 +817,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                 <Label>Footer Text</Label>
                 <Input
                   value={editFooterData.footerText || ''}
-                  onChange={(e) => setEditFooterData({...editFooterData, footerText: e.target.value})}
+                  onChange={(e) => setEditFooterData({ ...editFooterData, footerText: e.target.value })}
                   placeholder="Enter footer text"
                 />
               </div>
@@ -826,7 +827,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Input
                     type="color"
                     value={editFooterData.backgroundColor || '#4A7DFF'}
-                    onChange={(e) => setEditFooterData({...editFooterData, backgroundColor: e.target.value})}
+                    onChange={(e) => setEditFooterData({ ...editFooterData, backgroundColor: e.target.value })}
                   />
                 </div>
                 <div>
@@ -834,7 +835,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
                   <Input
                     type="color"
                     value={editFooterData.textColor || '#FFFFFF'}
-                    onChange={(e) => setEditFooterData({...editFooterData, textColor: e.target.value})}
+                    onChange={(e) => setEditFooterData({ ...editFooterData, textColor: e.target.value })}
                   />
                 </div>
               </div>
@@ -1013,13 +1014,13 @@ export default function Forms() {
   const [showAddClinicInfoDialog, setShowAddClinicInfoDialog] = useState(false);
   const [showClinicDisplayDialog, setShowClinicDisplayDialog] = useState(false);
   const [selectedClinicalHeader, setSelectedClinicalHeader] = useState("");
-  
+
   // Additional preview states for other template types
   const [showOtherTemplatePreviewDialog, setShowOtherTemplatePreviewDialog] = useState(false);
   const [previewOtherTemplate, setPreviewOtherTemplate] = useState<any>(null);
   const [previewOtherTemplateName, setPreviewOtherTemplateName] = useState("");
   const [previewTemplateType, setPreviewTemplateType] = useState("");
-  
+
   // Saved template preview states
   const [showSavedTemplatePreviewDialog, setShowSavedTemplatePreviewDialog] = useState(false);
   const [selectedSavedTemplate, setSelectedSavedTemplate] = useState<any>(null);
@@ -1119,7 +1120,7 @@ export default function Forms() {
     "1. Appointment-Related": {
       options: [
         "a) Request for a new appointment",
-        "b) Rescheduling or canceling an appointment", 
+        "b) Rescheduling or canceling an appointment",
         "c) Confirmation of an upcoming appointment"
       ],
       templates: {
@@ -1146,7 +1147,7 @@ Best regards,
 [Patient Name]`
         },
         "c) Confirmation of an upcoming appointment": {
-          subject: "Appointment Confirmation", 
+          subject: "Appointment Confirmation",
           body: `Dear Dr. [Doctor's Name],
 
 I am writing to confirm my appointment scheduled for [date/time]. Please let me know if any preparation is required beforehand.
@@ -1173,7 +1174,7 @@ Thank you,
 [Patient Name]`
         },
         "b) Questions about dosage, side effects, or alternatives": {
-          subject: "Medication Inquiry", 
+          subject: "Medication Inquiry",
           body: `Dear Dr. [Doctor's Name],
 
 I have some concerns about the dosage and possible side effects of my current medication ([medication name]). Could you please provide guidance or suggest alternatives?
@@ -1195,7 +1196,7 @@ Sincerely,
     "3. Lab Results & Reports": {
       options: [
         "a) Request for lab/test results",
-        "b) Questions about interpretation of results", 
+        "b) Questions about interpretation of results",
         "c) Follow-up on pending results"
       ],
       templates: {
@@ -1325,7 +1326,7 @@ Thank you,
 [Patient Name]`
         },
         "b) Insurance or claim-related queries": {
-          subject: "Insurance/Claim Assistance", 
+          subject: "Insurance/Claim Assistance",
           body: `Dear Dr. [Doctor's Name],
 
 I require documentation regarding my recent treatment for insurance purposes. Could you kindly provide the necessary details?
@@ -1750,7 +1751,7 @@ Dr. [Name]`
     const bodyHtml = paragraphs
       .map(para => `<p style="margin: 0 0 12px; line-height: 1.6; white-space: normal;">${para.replace(/\n/g, '<br>')}</p>`)
       .join('');
-    
+
     return `<p style="margin: 0 0 12px; line-height: 1.6;"><strong>Subject:</strong> ${template.subject}</p>${bodyHtml}`;
   };
 
@@ -1766,7 +1767,7 @@ Dr. [Name]`
     const categoryData = selectedCategoryData;
     if (categoryData && categoryData.templates[option]) {
       const template = categoryData.templates[option];
-      
+
       // Show preview dialog instead of directly loading
       setPreviewTemplate(template);
       setPreviewTemplateName(option);
@@ -1787,7 +1788,7 @@ Dr. [Name]`
     const categoryData = selectedDoctorCategoryData;
     if (categoryData && categoryData.templates[option]) {
       const template = categoryData.templates[option];
-      
+
       // Show preview dialog instead of directly loading
       setPreviewTemplate(template);
       setPreviewTemplateName(option);
@@ -2059,7 +2060,7 @@ Coverage Details: [Insurance Coverage]`;
   const handlePreviewOtherTemplate = (infoType: string, templateName: string, templateType: string) => {
     // Create template object based on type and infoType
     let template: any = { subject: templateName, body: "" };
-    
+
     switch (templateType) {
       case "patient":
         template.body = getPatientTemplateContent(infoType);
@@ -2082,7 +2083,7 @@ Coverage Details: [Insurance Coverage]`;
       default:
         template.body = "Template content";
     }
-    
+
     setPreviewOtherTemplate(template);
     setPreviewOtherTemplateName(templateName);
     setPreviewTemplateType(templateType);
@@ -2092,7 +2093,7 @@ Coverage Details: [Insurance Coverage]`;
   const handleLoadTemplateFromPreview = () => {
     if (previewTemplate) {
       let finalHtml = '';
-      
+
       // Add header section with logo and clinic header if selected
       if (addLogo || addClinicHeader) {
         const getClinicHeaderContent = () => {
@@ -2204,14 +2205,14 @@ Coverage Details: [Insurance Coverage]`;
           `;
         } else {
           finalHtml += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
-          
+
           // Left side
           if (logoPosition === "left" && addLogo) {
             finalHtml += `<div style="text-align: left;">${logoContent}</div>`;
           } else {
             finalHtml += '<div style="flex: 1;"></div>';
           }
-          
+
           // Center
           if (addClinicHeader) {
             finalHtml += `<div style="flex: 2;">${getClinicHeaderContent()}</div>`;
@@ -2220,24 +2221,24 @@ Coverage Details: [Insurance Coverage]`;
           } else {
             finalHtml += '<div style="flex: 2;"></div>';
           }
-          
+
           // Right side
           if (logoPosition === "right" && addLogo) {
             finalHtml += `<div style="text-align: right;">${logoContent}</div>`;
           } else {
             finalHtml += '<div style="flex: 1;"></div>';
           }
-          
+
           finalHtml += '</div>';
         }
-        
+
         finalHtml += '<hr style="margin: 20px 0; border: 1px solid #e5e7eb;">';
       }
-      
+
       // Add the main template content
       const templateHtml = templateToHtml(previewTemplate);
       finalHtml += templateHtml;
-      
+
       // Add footer if selected
       if (addFooter) {
         finalHtml += `
@@ -2249,13 +2250,13 @@ Coverage Details: [Insurance Coverage]`;
           </div>
         `;
       }
-      
+
       // Load template into editor with proper HTML formatting
       if (textareaRef) {
         textareaRef.innerHTML = finalHtml;
         setDocumentContent(finalHtml);
       }
-      
+
       setShowTemplatePreviewDialog(false);
       setAddLogo(false);
       setAddClinicHeader(false);
@@ -2264,7 +2265,7 @@ Coverage Details: [Insurance Coverage]`;
       setAddFooter(false);
       setClinicHeaderPosition("center");
       setSelectedLogoTemplate("");
-      
+
       setSuccessMessage(`${previewTemplateName} template has been loaded into the editor.`);
       setShowSuccessModal(true);
     }
@@ -2386,17 +2387,17 @@ Coverage Details: [Insurance Coverage]`;
   const loadFormIntoBuilder = (form: FormSummary) => {
     const normalizedSections: SectionInput[] = form.sections.length
       ? form.sections.map((section) => ({
-          id: `section_${form.id}_${section.id}`,
-          title: section.title || `Section ${section.order + 1}`,
-          fields: section.fields.map((field) => ({
-            id: `field_${section.id}_${field.id}`,
-            label: field.label || `Field ${field.id}`,
-            type: field.fieldType as FieldType,
-            required: field.required,
-            placeholder: field.placeholder ?? "",
-            options: field.fieldOptions ?? [],
-          })),
-        }))
+        id: `section_${form.id}_${section.id}`,
+        title: section.title || `Section ${section.order + 1}`,
+        fields: section.fields.map((field) => ({
+          id: `field_${section.id}_${field.id}`,
+          label: field.label || `Field ${field.id}`,
+          type: field.fieldType as FieldType,
+          required: field.required,
+          placeholder: field.placeholder ?? "",
+          options: field.fieldOptions ?? [],
+        })),
+      }))
       : [{ id: `section_${form.id}_0`, title: "Section 1", fields: [] }];
 
     setFormLoadPayload({
@@ -2431,28 +2432,28 @@ Coverage Details: [Insurance Coverage]`;
     setFormResponsesLoading(true);
     try {
       const response = await apiRequest("GET", `/api/forms/${form.id}/responses`);
-    const rawText = await response.text();
-    if (!rawText) {
-      throw new Error("Received empty response from server");
-    }
-    const trimmed = rawText.trim();
-    if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
-      toast({
-        title: "Unable to load responses",
-        description:
-          "Server returned HTML instead of JSON. Please ensure the API is reachable and the form exists.",
-        variant: "destructive",
-      });
-      setResponseDialogOpen(false);
-      return;
-    }
-    let parsed: FormResponsesPayload;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch (parseError) {
-      throw new Error(`Failed to parse responses: ${rawText.slice(0, 200)}`);
-    }
-    setFormResponsesData(parsed);
+      const rawText = await response.text();
+      if (!rawText) {
+        throw new Error("Received empty response from server");
+      }
+      const trimmed = rawText.trim();
+      if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+        toast({
+          title: "Unable to load responses",
+          description:
+            "Server returned HTML instead of JSON. Please ensure the API is reachable and the form exists.",
+          variant: "destructive",
+        });
+        setResponseDialogOpen(false);
+        return;
+      }
+      let parsed: FormResponsesPayload;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (parseError) {
+        throw new Error(`Failed to parse responses: ${rawText.slice(0, 200)}`);
+      }
+      setFormResponsesData(parsed);
     } catch (error) {
       toast({
         title: "Unable to load responses",
@@ -2567,10 +2568,10 @@ Coverage Details: [Insurance Coverage]`;
     },
     onError(error) {
       let errorMessage = "Unable to share the form. Please try again.";
-      
+
       if (error instanceof Error) {
         const errorText = error.message;
-        
+
         // Check for foreign key constraint error
         if (errorText.includes("foreign key constraint") && errorText.includes("patient_id")) {
           errorMessage = "The selected patient is not found in the system. Please select a different patient or contact support if this issue persists.";
@@ -2597,7 +2598,7 @@ Coverage Details: [Insurance Coverage]`;
           errorMessage = errorText;
         }
       }
-      
+
       setShareFormErrorMessage(errorMessage);
       setShowShareFormErrorModal(true);
     },
@@ -2749,10 +2750,10 @@ Coverage Details: [Insurance Coverage]`;
   const [showPatientIdDropdown, setShowPatientIdDropdown] = useState(false);
   const [activeFilledDropdown, setActiveFilledDropdown] = useState<"formName" | "formId" | null>(null);
 
-const formNames = useMemo(
-  () => Array.from(new Set(filledForms.map((doc: any) => doc.name || "").filter(Boolean))),
-  [filledForms],
-);
+  const formNames = useMemo(
+    () => Array.from(new Set(filledForms.map((doc: any) => doc.name || "").filter(Boolean))),
+    [filledForms],
+  );
   const patientEmailsFromTable = useMemo(
     () =>
       Array.from(
@@ -2775,18 +2776,18 @@ const formNames = useMemo(
       ),
     [patientsFromTable],
   );
-const formIds = useMemo(
-  () =>
-    Array.from(
-      new Set(
-        filledForms
-          .map((doc: any) => doc.metadata?.formId)
-          .filter((value) => value !== undefined && value !== null)
-          .map((value) => String(value)),
+  const formIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filledForms
+            .map((doc: any) => doc.metadata?.formId)
+            .filter((value) => value !== undefined && value !== null)
+            .map((value) => String(value)),
+        ),
       ),
-    ),
-  [filledForms],
-);
+    [filledForms],
+  );
   const closeCommandMenu = () => {
     setTimeout(() => {
       const active = document.activeElement as HTMLElement | null;
@@ -2975,57 +2976,57 @@ const formIds = useMemo(
   };
 
   const filledFormCardContent = (doc: any) => {
-  const link = doc.metadata?.pdfPath ? `/${doc.metadata.pdfPath}` : null;
+    const link = doc.metadata?.pdfPath ? `/${doc.metadata.pdfPath}` : null;
     const creatorInfo = resolveFormCreator(doc);
-  return (
-    <>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-          {doc.name || "Form response"}
-        </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Patient: {doc.metadata?.patientName || "Unknown patient"}
-        </p>
-        {(doc.metadata?.patientEmail || doc.patientEmail || doc.metadata?.patient?.email) && (
+    return (
+      <>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+            {doc.name || "Form response"}
+          </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Email: {doc.metadata?.patientEmail || doc.patientEmail || doc.metadata?.patient?.email}
+            Patient: {doc.metadata?.patientName || "Unknown patient"}
           </p>
-        )}
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Form ID: {doc.metadata?.formId ?? "—"} • Response #{doc.metadata?.responseId ?? "—"}
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          Created {new Date(doc.createdAt).toLocaleString()}
-        </p>
-        {creatorInfo && (
+          {(doc.metadata?.patientEmail || doc.patientEmail || doc.metadata?.patient?.email) && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Email: {doc.metadata?.patientEmail || doc.patientEmail || doc.metadata?.patient?.email}
+            </p>
+          )}
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Form ID: {doc.metadata?.formId ?? "—"} • Response #{doc.metadata?.responseId ?? "—"}
+          </p>
           <p className="text-[11px] text-muted-foreground">
-            Created by {creatorInfo.name}
-            {creatorInfo.email ? ` (${creatorInfo.email})` : ""}
+            Created {new Date(doc.createdAt).toLocaleString()}
           </p>
-        )}
-      </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <Button size="sm" variant="outline" onClick={() => loadFilledForm(doc)}>
-          View Form
-        </Button>
-        {doc.metadata?.headerName && (
-          <span className="text-[11px] text-muted-foreground">
-            Clinic: {doc.metadata.headerName}
-          </span>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => handleDeleteFilledFormClick(doc)}
-          className="text-rose-500 hover:bg-rose-50/70 dark:text-rose-400 dark:hover:bg-rose-500/10"
-          title="Delete PDF"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-    </>
-  );
-};
+          {creatorInfo && (
+            <p className="text-[11px] text-muted-foreground">
+              Created by {creatorInfo.name}
+              {creatorInfo.email ? ` (${creatorInfo.email})` : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button size="sm" variant="outline" onClick={() => loadFilledForm(doc)}>
+            View Form
+          </Button>
+          {doc.metadata?.headerName && (
+            <span className="text-[11px] text-muted-foreground">
+              Clinic: {doc.metadata.headerName}
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleDeleteFilledFormClick(doc)}
+            className="text-rose-500 hover:bg-rose-50/70 dark:text-rose-400 dark:hover:bg-rose-500/10"
+            title="Delete PDF"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </>
+    );
+  };
 
   const resendShareEmailMutation = useMutation({
     mutationFn: async (logId: number) => {
@@ -3099,7 +3100,7 @@ const formIds = useMemo(
     queryKey: ["/api/me/preferences"],
     queryFn: async () => {
       const response = await fetch("/api/me/preferences", {
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
           "X-Tenant-Subdomain": tenantSubdomainForApi,
@@ -3226,10 +3227,10 @@ const formIds = useMemo(
           email: editingClinicInfo.email,
           website: editingClinicInfo.website,
         });
-        
+
         // Refetch user preferences to stay in sync
         refetchPreferences();
-        
+
         setSuccessMessage("Your clinic information has been saved successfully.");
         setShowSuccessModal(true);
         setShowEditClinic(false);
@@ -3255,7 +3256,7 @@ const formIds = useMemo(
       setShowEmptyContentDialog(true);
       return;
     }
-    
+
     setShowDocumentPreviewDialog(true);
   };
 
@@ -3289,7 +3290,7 @@ const formIds = useMemo(
 
     try {
       document.execCommand('bold', false);
-      
+
       if (textareaRef) {
         setDocumentContent(textareaRef.innerHTML);
         textareaRef.focus();
@@ -4105,7 +4106,7 @@ const formIds = useMemo(
           email: editingClinicInfo.email,
           website: editingClinicInfo.website,
         });
-        
+
         toast({
           title: "Success",
           description: "Clinical header information saved successfully",
@@ -4128,10 +4129,10 @@ const formIds = useMemo(
   const handleInsertClinicHeader = () => {
     // Update preview with selected clinic header type (do NOT insert into document yet)
     setSelectedClinicHeaderType(tempClinicHeaderType);
-    
+
     // Close dialog
     setShowClinicPositionDialog(false);
-    
+
     toast({
       title: "✓ Preview Updated",
       description: "Clinic header is ready. Click 'Load' to add it to your document",
@@ -4149,13 +4150,13 @@ const formIds = useMemo(
         <p style="margin: 5px 0; color: #666;">${editingClinicInfo.website || "www.yourclinic.com"}</p>
       </div>
     `;
-    
+
     if (textareaRef) {
       const currentContent = textareaRef.value;
       textareaRef.value = clinicHTML + currentContent;
       setDocumentContent(textareaRef.value);
     }
-    
+
     setShowAddClinicInfoDialog(false);
     setShowClinicDisplayDialog(false);
   };
@@ -5537,7 +5538,7 @@ const formIds = useMemo(
       const savedTemplate = await response.json();
 
       // Invalidate and refetch templates query to refresh the list
-      await queryClient.invalidateQueries({ 
+      await queryClient.invalidateQueries({
         queryKey: ["/api/documents/templates"],
         refetchType: 'active'
       });
@@ -5852,7 +5853,7 @@ const formIds = useMemo(
       // Use document.execCommand for heading formatting
       const formatTag = formatType === "paragraph" ? "p" : formatType.replace("heading", "h");
       document.execCommand('formatBlock', false, `<${formatTag}>`);
-      
+
       if (textareaRef) {
         setDocumentContent(textareaRef.innerHTML);
       }
@@ -5948,7 +5949,7 @@ const formIds = useMemo(
       const fontWeight = header.fontWeight || 'normal';
       const fontStyle = header.fontStyle || 'normal';
       const textDecoration = header.textDecoration || 'none';
-      
+
       if (header.logoPosition === 'left') {
         headerHTML = `
           <div style="border-bottom: 3px solid ${borderColor}; padding-bottom: 20px; margin-bottom: 20px;">
@@ -6222,7 +6223,7 @@ const formIds = useMemo(
       // Replace the selected content with the new span
       range.deleteContents();
       range.insertNode(span);
-      
+
       console.log("Applied font family:", {
         fontFamily: fontFamilyCSS,
         selectedText,
@@ -6331,13 +6332,21 @@ const formIds = useMemo(
     <div className="h-screen flex flex-col bg-gray-100 dark:bg-[hsl(var(--cura-midnight))] forms-page-ui page-zoom-90">
       {/* Page Header - Like Dashboard */}
       <div className="flex items-center justify-between mr-5 bg-white dark:bg-[hsl(var(--cura-midnight))] px-2 py-1 rounded border-b border-gray-200 dark:border-gray-700">
-        <Header
-          title="Forms"
-          subtitle="Create and manage medical forms, letters, and documents"
-        />
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-neutral-600 dark:text-neutral-400">Theme:</span>
-          <ThemeToggle />
+        <div className="flex-1">
+          <Header
+            title="Forms"
+            subtitle="Create and manage medical forms, letters, and documents"
+            hideNotificationBell={true}
+          />
+        </div>
+        <div className="flex items-center gap-4 px-4 bg-neutral-50/50 dark:bg-neutral-800/50 py-1.5 rounded-xl border border-neutral-200/50 dark:border-neutral-700/50 shadow-sm">
+          <div className="flex items-center gap-2 pr-4 border-r border-neutral-200 dark:border-neutral-700">
+            <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Theme:</span>
+            <ThemeToggle />
+          </div>
+          <div className="flex items-center">
+            <NotificationBell />
+          </div>
         </div>
       </div>
 
@@ -6372,333 +6381,149 @@ const formIds = useMemo(
               )}
             </TabsList>
 
-          {!userIsPatient && (
-            <>
-              <TabsContent
-                value="dynamic"
-                className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
-              >
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Dynamic Form Builder</p>
-                <p className="text-xs text-gray-500 dark:text-gray-500">
-                  Sections, fields, and sharing logic are now fully dynamic. Build once and send secure links to patients via email.
-                </p>
-              </div>
-              <FormBuilder
-                loadForm={formLoadPayload}
-                onLoadComplete={() => setFormLoadPayload(undefined)}
-              />
-              </TabsContent>
-              <TabsContent
-                value="saved"
-                className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
-              >
-                <Tabs value={customTemplateTab} onValueChange={(v) => setCustomTemplateTab(v as "custom" | "templates")} className="w-full">
-                  <TabsList className="grid w-full grid-cols-2 mb-4">
-                    <TabsTrigger value="custom">Custom Forms</TabsTrigger>
-                    <TabsTrigger value="templates">Form Templates</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="custom" className="space-y-4 mt-4">
-                    <div className="flex items-center justify-between flex-wrap gap-4">
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Custom Forms</h3>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Forms you have created and saved. Edit, share, or manage links below. Send one of your saved dynamic forms to a patient using a secure link.</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400">Auto synced</span>
-                        <span className="h-5 border-l border-gray-300 dark:border-gray-600" />
-                        <Button
-                          size="sm"
-                          variant={savedViewMode === "grid" ? "default" : "outline"}
-                          onClick={() => setSavedViewMode("grid")}
-                          className="px-3"
-                        >
-                          Grid
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={savedViewMode === "list" ? "default" : "outline"}
-                          onClick={() => setSavedViewMode("list")}
-                          className="px-3"
-                        >
-                          List
-                        </Button>
-                      </div>
-                    </div>
-                {formsLoading ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Loading saved forms…</p>
-                ) : savedForms.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">No forms saved yet. Create one above or use a template below to start sharing.</p>
-                ) : savedViewMode === "list" ? (
-                  <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden bg-white dark:bg-[#0b0c16]">
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[880px] text-sm text-left border-collapse">
-                        <thead className="bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
-                          <tr>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Form ID</th>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Form Name</th>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Created At</th>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Updated At</th>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Status</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-10"></th>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Created By</th>
-                            <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Share / View / Links</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-12">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {savedFormsToDisplay.map((form) => {
-                            const creatorId =
-                              form.createdBy ??
-                              (form as any).metadata?.createdBy ??
-                              (form as any).metadata?.created_by ??
-                              (form as any).metadata?.userId;
-                            const creator = creatorId ? creatorsById.get(Number(creatorId)) : undefined;
-                            return (
-                              <tr key={form.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                                <td className="px-3 py-2.5 text-gray-700 dark:text-gray-300 font-mono text-xs">{form.id}</td>
-                                <td className="px-3 py-2.5 font-semibold text-gray-900 dark:text-gray-100">{form.title}</td>
-                                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{form.createdAt ? new Date(form.createdAt).toLocaleString() : "—"}</td>
-                                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{form.updatedAt ? new Date(form.updatedAt).toLocaleString() : "—"}</td>
-                                <td className="px-3 py-2.5">
-                                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-0 text-xs capitalize">{(form.status || "saved").toLowerCase()}</Badge>
-                                </td>
-                                <td className="px-3 py-2.5 text-center">
-                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-gray-500 hover:text-gray-700" onClick={() => loadFormIntoBuilder(form)} title="Edit">
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                </td>
-                                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{creator ? creator.name : "—"}</td>
-                                <td className="px-3 py-2.5">
-                                  <div className="flex items-center gap-1">
-                                    <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => openFormShareDialog(form)} title="Share" disabled={patientsLoading}>
-                                      <Share2 className="h-4 w-4" />
-                                    </Button>
-                                    <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => handleViewFormResponses(form)} title="View responses">
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
-                                    <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => openShareLinksDialog(form)} title="Links">
-                                      <Link className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </td>
-                                <td className="px-3 py-2.5 text-center">
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                        <MoreVertical className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => loadFormIntoBuilder(form)}>
-                                        <Edit className="h-4 w-4 mr-2" />
-                                        Edit
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => handleViewFormResponses(form)}>
-                                        <Eye className="h-4 w-4 mr-2" />
-                                        View responses
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => openShareLinksDialog(form)}>
-                                        <Link className="h-4 w-4 mr-2" />
-                                        Links
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        className="text-red-600 dark:text-red-400 focus:text-red-600"
-                                        onClick={() => {
-                                          setFormToDelete(form);
-                                          setShowDeleteFormDialog(true);
-                                        }}
-                                        disabled={deleteFormMutation.isPending}
-                                      >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+            {!userIsPatient && (
+              <>
+                <TabsContent
+                  value="dynamic"
+                  className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
+                >
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Dynamic Form Builder</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-500">
+                      Sections, fields, and sharing logic are now fully dynamic. Build once and send secure links to patients via email.
+                    </p>
                   </div>
-                ) : (
-                  <div className="space-y-3 max-h-[770px] overflow-y-auto pr-2">
-                    {savedFormsToDisplay.map((form) => {
-                      const creatorId =
-                        form.createdBy ??
-                        form.metadata?.createdBy ??
-                        form.metadata?.created_by ??
-                        form.metadata?.userId;
-                      const creator = creatorId ? creatorsById.get(Number(creatorId)) : undefined;
-                      return (
-                        <div
-                          key={form.id}
-                          className="flex flex-col justify-between gap-4 p-4 border rounded-lg bg-white dark:bg-[#0b0c16] border-gray-200 dark:border-gray-800"
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-gray-800 dark:text-gray-100">{form.title}</p>
-                            </div>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{form.description || "No description provided."}</p>
-                            <p className="text-xs text-gray-400">Created {new Date(form.createdAt).toLocaleDateString()}</p>
-                            {creator && (
-                              <p className="text-xs text-gray-400">
-                                Created by {creator.name}
-                                {creator.email ? ` (${creator.email})` : ""}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            className="px-3 py-1 rounded-md bg-gray-200 dark:bg-slate-700 text-black dark:text-white shadow-sm border border-transparent hover:bg-gray-300 dark:hover:bg-slate-600"
-                            onClick={() => openFormShareDialog(form)}
-                            disabled={patientsLoading}
-                          >
-                            Share
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="px-3 py-1 rounded-md bg-[#4A7DFF] text-white shadow-sm border border-transparent hover:bg-[#2563eb]"
-                            onClick={() => handleViewFormResponses(form)}
-                          >
-                            View responses
-                          </Button>
-                           
-                          <Button
-                            size="sm"
-                            className="px-3 py-1 rounded-md bg-[#4A7DFF] text-white shadow-sm border border-transparent hover:bg-[#2563eb]"
-                            onClick={() => openShareLinksDialog(form)}
-                          >
-                            Links
-                          </Button>
-                          <Button
-                                size="sm"
-                                className="px-3 py-1 rounded-md bg-[#ef4444] text-white shadow-sm border border-transparent hover:bg-[#dc2626]"
-                                onClick={() => {
-                                  setFormToDelete(form);
-                                  setShowDeleteFormDialog(true);
-                                }}
-                                disabled={deleteFormMutation.isPending}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => loadFormIntoBuilder(form)}
-                              >
-                                Edit
-                              </Button>
-                              {(!formSharesMap[form.id] || formSharesMap[form.id].length === 0) && user?.role === "patient" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={!latestLinks[form.id]}
-                                asChild
-                              >
-                                <a
-                                  href={latestLinks[form.id]}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className={!latestLinks[form.id] ? "pointer-events-none opacity-60" : ""}
-                                >
-                                  Open Form
-                                </a>
-                              </Button>
-                              )}
-                            </div>
-                          </div>
+                  <FormBuilder
+                    loadForm={formLoadPayload}
+                    onLoadComplete={() => setFormLoadPayload(undefined)}
+                  />
+                </TabsContent>
+                <TabsContent
+                  value="saved"
+                  className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
+                >
+                  <Tabs value={customTemplateTab} onValueChange={(v) => setCustomTemplateTab(v as "custom" | "templates")} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2 mb-4">
+                      <TabsTrigger value="custom">Custom Forms</TabsTrigger>
+                      <TabsTrigger value="templates">Form Templates</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="custom" className="space-y-4 mt-4">
+                      <div className="flex items-center justify-between flex-wrap gap-4">
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Custom Forms</h3>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Forms you have created and saved. Edit, share, or manage links below. Send one of your saved dynamic forms to a patient using a secure link.</p>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-                  </TabsContent>
-                  <TabsContent value="templates" className="space-y-4 mt-4">
-                    <div className="flex items-center justify-between flex-wrap gap-4">
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Form Templates</h3>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Pre-built templates. Use a template to load it into the builder—edit and save as a new Custom Form. Original templates are never modified. Search by name or category.</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">Auto synced</span>
+                          <span className="h-5 border-l border-gray-300 dark:border-gray-600" />
+                          <Button
+                            size="sm"
+                            variant={savedViewMode === "grid" ? "default" : "outline"}
+                            onClick={() => setSavedViewMode("grid")}
+                            className="px-3"
+                          >
+                            Grid
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={savedViewMode === "list" ? "default" : "outline"}
+                            onClick={() => setSavedViewMode("list")}
+                            className="px-3"
+                          >
+                            List
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant={templateViewMode === "grid" ? "default" : "outline"}
-                          onClick={() => setTemplateViewMode("grid")}
-                          className="px-3"
-                        >
-                          Grid
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={templateViewMode === "list" ? "default" : "outline"}
-                          onClick={() => setTemplateViewMode("list")}
-                          className="px-3"
-                        >
-                          List
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Search templates by name or category..."
-                        value={templateSearchQuery}
-                        onChange={(e) => setTemplateSearchQuery(e.target.value)}
-                        className="pl-9 max-w-md"
-                      />
-                    </div>
-                    {filteredFormTemplates.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">No templates match your search. Try a different name or category.</p>
-                    ) : templateViewMode === "list" ? (
-                  <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
-                    {templatesByCategory.map(({ category, templates }) => (
-                      <div key={category}>
-                        <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
-                          {category} ({templates.length})
-                        </h4>
+                      {formsLoading ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Loading saved forms…</p>
+                      ) : savedForms.length === 0 ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No forms saved yet. Create one above or use a template below to start sharing.</p>
+                      ) : savedViewMode === "list" ? (
                         <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden bg-white dark:bg-[#0b0c16]">
                           <div className="overflow-x-auto">
-                            <table className="w-full min-w-[700px] text-sm text-left border-collapse">
+                            <table className="w-full min-w-[880px] text-sm text-left border-collapse">
                               <thead className="bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
                                 <tr>
-                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Template Name</th>
-                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Category</th>
-                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Description</th>
-                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-20">Sections</th>
-                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-16">Fields</th>
-                                  <th className="px-3 py-2.5 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-32">Actions</th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Form ID</th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Form Name</th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Created At</th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Updated At</th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Status</th>
+                                  <th className="px-3 py-2.5 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-10"></th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Created By</th>
+                                  <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Share / View / Links</th>
+                                  <th className="px-3 py-2.5 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-12">Actions</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                {templates.map((template) => {
-                                  const fieldCount = template.sections.reduce((acc, s) => acc + s.fields.length, 0);
+                                {savedFormsToDisplay.map((form) => {
+                                  const creatorId =
+                                    form.createdBy ??
+                                    (form as any).metadata?.createdBy ??
+                                    (form as any).metadata?.created_by ??
+                                    (form as any).metadata?.userId;
+                                  const creator = creatorId ? creatorsById.get(Number(creatorId)) : undefined;
                                   return (
-                                    <tr key={template.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                                      <td className="px-3 py-2.5 font-semibold text-gray-900 dark:text-gray-100">{template.title}</td>
+                                    <tr key={form.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                      <td className="px-3 py-2.5 text-gray-700 dark:text-gray-300 font-mono text-xs">{form.id}</td>
+                                      <td className="px-3 py-2.5 font-semibold text-gray-900 dark:text-gray-100">{form.title}</td>
+                                      <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{form.createdAt ? new Date(form.createdAt).toLocaleString() : "—"}</td>
+                                      <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{form.updatedAt ? new Date(form.updatedAt).toLocaleString() : "—"}</td>
                                       <td className="px-3 py-2.5">
-                                        <Badge variant="secondary" className="text-[10px] font-normal bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200 border-0">{template.category}</Badge>
+                                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-0 text-xs capitalize">{(form.status || "saved").toLowerCase()}</Badge>
                                       </td>
-                                      <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs max-w-[240px] truncate" title={template.description}>{template.description}</td>
-                                      <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{template.sections.length}</td>
-                                      <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{fieldCount}</td>
+                                      <td className="px-3 py-2.5 text-center">
+                                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-gray-500 hover:text-gray-700" onClick={() => loadFormIntoBuilder(form)} title="Edit">
+                                          <Edit className="h-4 w-4" />
+                                        </Button>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{creator ? creator.name : "—"}</td>
                                       <td className="px-3 py-2.5">
-                                        <div className="flex items-center justify-center gap-1">
-                                          <Button variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => setTemplatePreview(template)}>
-                                            <Eye className="h-3.5 w-3.5 mr-1" />
-                                            Preview
+                                        <div className="flex items-center gap-1">
+                                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => openFormShareDialog(form)} title="Share" disabled={patientsLoading}>
+                                            <Share2 className="h-4 w-4" />
                                           </Button>
-                                          <Button size="sm" className="h-8 px-2 text-xs bg-[#4A7DFF] hover:bg-[#2563eb] text-white" onClick={() => loadTemplateIntoBuilder(template)}>
-                                            <FileText className="h-3.5 w-3.5 mr-1" />
-                                            Use Template
+                                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => handleViewFormResponses(form)} title="View responses">
+                                            <Eye className="h-4 w-4" />
+                                          </Button>
+                                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => openShareLinksDialog(form)} title="Links">
+                                            <Link className="h-4 w-4" />
                                           </Button>
                                         </div>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-center">
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                              <MoreVertical className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                                            </Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => loadFormIntoBuilder(form)}>
+                                              <Edit className="h-4 w-4 mr-2" />
+                                              Edit
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleViewFormResponses(form)}>
+                                              <Eye className="h-4 w-4 mr-2" />
+                                              View responses
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => openShareLinksDialog(form)}>
+                                              <Link className="h-4 w-4 mr-2" />
+                                              Links
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              className="text-red-600 dark:text-red-400 focus:text-red-600"
+                                              onClick={() => {
+                                                setFormToDelete(form);
+                                                setShowDeleteFormDialog(true);
+                                              }}
+                                              disabled={deleteFormMutation.isPending}
+                                            >
+                                              <Trash2 className="h-4 w-4 mr-2" />
+                                              Delete
+                                            </DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
                                       </td>
                                     </tr>
                                   );
@@ -6707,688 +6532,872 @@ const formIds = useMemo(
                             </table>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
-                    {templatesByCategory.map(({ category, templates }) => (
-                      <div key={category}>
-                        <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
-                          {category} ({templates.length})
-                        </h4>
-                        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                          {templates.map((template) => (
-                            <div
-                              key={template.id}
-                              className="flex flex-col justify-between gap-3 p-4 border rounded-lg bg-white dark:bg-[#0b0c16] border-gray-200 dark:border-gray-800"
-                            >
-                              <div className="space-y-1">
-                                <Badge variant="secondary" className="text-[10px] font-normal bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200 border-0">{template.category}</Badge>
-                                <p className="font-semibold text-gray-800 dark:text-gray-100">{template.title}</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-3">{template.description}</p>
-                                <p className="text-[11px] text-gray-400 dark:text-gray-500">{template.sections.length} section(s), {template.sections.reduce((acc, s) => acc + s.fields.length, 0)} field(s)</p>
+                      ) : (
+                        <div className="space-y-3 max-h-[770px] overflow-y-auto pr-2">
+                          {savedFormsToDisplay.map((form) => {
+                            const creatorId =
+                              form.createdBy ??
+                              form.metadata?.createdBy ??
+                              form.metadata?.created_by ??
+                              form.metadata?.userId;
+                            const creator = creatorId ? creatorsById.get(Number(creatorId)) : undefined;
+                            return (
+                              <div
+                                key={form.id}
+                                className="flex flex-col justify-between gap-4 p-4 border rounded-lg bg-white dark:bg-[#0b0c16] border-gray-200 dark:border-gray-800"
+                              >
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-semibold text-gray-800 dark:text-gray-100">{form.title}</p>
+                                  </div>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">{form.description || "No description provided."}</p>
+                                  <p className="text-xs text-gray-400">Created {new Date(form.createdAt).toLocaleDateString()}</p>
+                                  {creator && (
+                                    <p className="text-xs text-gray-400">
+                                      Created by {creator.name}
+                                      {creator.email ? ` (${creator.email})` : ""}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      size="sm"
+                                      className="px-3 py-1 rounded-md bg-gray-200 dark:bg-slate-700 text-black dark:text-white shadow-sm border border-transparent hover:bg-gray-300 dark:hover:bg-slate-600"
+                                      onClick={() => openFormShareDialog(form)}
+                                      disabled={patientsLoading}
+                                    >
+                                      Share
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      className="px-3 py-1 rounded-md bg-[#4A7DFF] text-white shadow-sm border border-transparent hover:bg-[#2563eb]"
+                                      onClick={() => handleViewFormResponses(form)}
+                                    >
+                                      View responses
+                                    </Button>
+
+                                    <Button
+                                      size="sm"
+                                      className="px-3 py-1 rounded-md bg-[#4A7DFF] text-white shadow-sm border border-transparent hover:bg-[#2563eb]"
+                                      onClick={() => openShareLinksDialog(form)}
+                                    >
+                                      Links
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      className="px-3 py-1 rounded-md bg-[#ef4444] text-white shadow-sm border border-transparent hover:bg-[#dc2626]"
+                                      onClick={() => {
+                                        setFormToDelete(form);
+                                        setShowDeleteFormDialog(true);
+                                      }}
+                                      disabled={deleteFormMutation.isPending}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => loadFormIntoBuilder(form)}
+                                    >
+                                      Edit
+                                    </Button>
+                                    {(!formSharesMap[form.id] || formSharesMap[form.id].length === 0) && user?.role === "patient" && (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={!latestLinks[form.id]}
+                                        asChild
+                                      >
+                                        <a
+                                          href={latestLinks[form.id]}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className={!latestLinks[form.id] ? "pointer-events-none opacity-60" : ""}
+                                        >
+                                          Open Form
+                                        </a>
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex flex-wrap gap-2 pt-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="flex-1 min-w-[100px]"
-                                  onClick={() => setTemplatePreview(template)}
-                                >
-                                  <Eye className="h-3.5 w-3.5 mr-1.5" />
-                                  Preview
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  className="flex-1 min-w-[100px] bg-[#4A7DFF] hover:bg-[#2563eb] text-white"
-                                  onClick={() => loadTemplateIntoBuilder(template)}
-                                >
-                                  <FileText className="h-3.5 w-3.5 mr-1.5" />
-                                  Use Template
-                                </Button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </TabsContent>
+                    <TabsContent value="templates" className="space-y-4 mt-4">
+                      <div className="flex items-center justify-between flex-wrap gap-4">
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Form Templates</h3>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Pre-built templates. Use a template to load it into the builder—edit and save as a new Custom Form. Original templates are never modified. Search by name or category.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant={templateViewMode === "grid" ? "default" : "outline"}
+                            onClick={() => setTemplateViewMode("grid")}
+                            className="px-3"
+                          >
+                            Grid
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={templateViewMode === "list" ? "default" : "outline"}
+                            onClick={() => setTemplateViewMode("list")}
+                            className="px-3"
+                          >
+                            List
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          placeholder="Search templates by name or category..."
+                          value={templateSearchQuery}
+                          onChange={(e) => setTemplateSearchQuery(e.target.value)}
+                          className="pl-9 max-w-md"
+                        />
+                      </div>
+                      {filteredFormTemplates.length === 0 ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">No templates match your search. Try a different name or category.</p>
+                      ) : templateViewMode === "list" ? (
+                        <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
+                          {templatesByCategory.map(({ category, templates }) => (
+                            <div key={category}>
+                              <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
+                                {category} ({templates.length})
+                              </h4>
+                              <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden bg-white dark:bg-[#0b0c16]">
+                                <div className="overflow-x-auto">
+                                  <table className="w-full min-w-[700px] text-sm text-left border-collapse">
+                                    <thead className="bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
+                                      <tr>
+                                        <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Template Name</th>
+                                        <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Category</th>
+                                        <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">Description</th>
+                                        <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-20">Sections</th>
+                                        <th className="px-3 py-2.5 font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-16">Fields</th>
+                                        <th className="px-3 py-2.5 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs w-32">Actions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                      {templates.map((template) => {
+                                        const fieldCount = template.sections.reduce((acc, s) => acc + s.fields.length, 0);
+                                        return (
+                                          <tr key={template.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                            <td className="px-3 py-2.5 font-semibold text-gray-900 dark:text-gray-100">{template.title}</td>
+                                            <td className="px-3 py-2.5">
+                                              <Badge variant="secondary" className="text-[10px] font-normal bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200 border-0">{template.category}</Badge>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs max-w-[240px] truncate" title={template.description}>{template.description}</td>
+                                            <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{template.sections.length}</td>
+                                            <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">{fieldCount}</td>
+                                            <td className="px-3 py-2.5">
+                                              <div className="flex items-center justify-center gap-1">
+                                                <Button variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => setTemplatePreview(template)}>
+                                                  <Eye className="h-3.5 w-3.5 mr-1" />
+                                                  Preview
+                                                </Button>
+                                                <Button size="sm" className="h-8 px-2 text-xs bg-[#4A7DFF] hover:bg-[#2563eb] text-white" onClick={() => loadTemplateIntoBuilder(template)}>
+                                                  <FileText className="h-3.5 w-3.5 mr-1" />
+                                                  Use Template
+                                                </Button>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
                             </div>
                           ))}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                  </TabsContent>
-                </Tabs>
-              </TabsContent>
-
-              <Dialog open={!!templatePreview} onOpenChange={(open) => !open && setTemplatePreview(null)}>
-                <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
-                  <DialogHeader>
-                    <DialogTitle>{templatePreview?.title}</DialogTitle>
-                    <DialogDescription>{templatePreview?.description}</DialogDescription>
-                  </DialogHeader>
-                  {templatePreview && (
-                    <div className="space-y-4 pt-2">
-                      {templatePreview.sections.map((section, idx) => (
-                        <div key={section.id} className="border border-gray-200 dark:border-gray-600 rounded-lg p-3">
-                          <p className="font-medium text-sm text-gray-800 dark:text-gray-200 mb-2">
-                            Section {idx + 1}: {section.title}
-                          </p>
-                          <ul className="list-disc list-inside space-y-1 text-xs text-gray-600 dark:text-gray-400">
-                            {section.fields.map((field) => (
-                              <li key={field.id}>
-                                {field.label}
-                                {field.required && <span className="text-red-500 ml-1">*</span>}
-                                <span className="text-gray-400 dark:text-gray-500"> ({field.type}{field.options?.length ? `: ${field.options.join(", ")}` : ""})</span>
-                              </li>
-                            ))}
-                          </ul>
+                      ) : (
+                        <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
+                          {templatesByCategory.map(({ category, templates }) => (
+                            <div key={category}>
+                              <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">
+                                {category} ({templates.length})
+                              </h4>
+                              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                                {templates.map((template) => (
+                                  <div
+                                    key={template.id}
+                                    className="flex flex-col justify-between gap-3 p-4 border rounded-lg bg-white dark:bg-[#0b0c16] border-gray-200 dark:border-gray-800"
+                                  >
+                                    <div className="space-y-1">
+                                      <Badge variant="secondary" className="text-[10px] font-normal bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200 border-0">{template.category}</Badge>
+                                      <p className="font-semibold text-gray-800 dark:text-gray-100">{template.title}</p>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-3">{template.description}</p>
+                                      <p className="text-[11px] text-gray-400 dark:text-gray-500">{template.sections.length} section(s), {template.sections.reduce((acc, s) => acc + s.fields.length, 0)} field(s)</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 pt-2">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="flex-1 min-w-[100px]"
+                                        onClick={() => setTemplatePreview(template)}
+                                      >
+                                        <Eye className="h-3.5 w-3.5 mr-1.5" />
+                                        Preview
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        className="flex-1 min-w-[100px] bg-[#4A7DFF] hover:bg-[#2563eb] text-white"
+                                        onClick={() => loadTemplateIntoBuilder(template)}
+                                      >
+                                        <FileText className="h-3.5 w-3.5 mr-1.5" />
+                                        Use Template
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                      <div className="flex justify-end gap-2 pt-2">
-                        <Button variant="outline" size="sm" onClick={() => setTemplatePreview(null)}>Close</Button>
-                        <Button size="sm" className="bg-[#4A7DFF] hover:bg-[#2563eb]" onClick={() => templatePreview && loadTemplateIntoBuilder(templatePreview)}>
-                          Use Template
-                        </Button>
+                      )}
+                    </TabsContent>
+                  </Tabs>
+                </TabsContent>
+
+                <Dialog open={!!templatePreview} onOpenChange={(open) => !open && setTemplatePreview(null)}>
+                  <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
+                    <DialogHeader>
+                      <DialogTitle>{templatePreview?.title}</DialogTitle>
+                      <DialogDescription>{templatePreview?.description}</DialogDescription>
+                    </DialogHeader>
+                    {templatePreview && (
+                      <div className="space-y-4 pt-2">
+                        {templatePreview.sections.map((section, idx) => (
+                          <div key={section.id} className="border border-gray-200 dark:border-gray-600 rounded-lg p-3">
+                            <p className="font-medium text-sm text-gray-800 dark:text-gray-200 mb-2">
+                              Section {idx + 1}: {section.title}
+                            </p>
+                            <ul className="list-disc list-inside space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                              {section.fields.map((field) => (
+                                <li key={field.id}>
+                                  {field.label}
+                                  {field.required && <span className="text-red-500 ml-1">*</span>}
+                                  <span className="text-gray-400 dark:text-gray-500"> ({field.type}{field.options?.length ? `: ${field.options.join(", ")}` : ""})</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        <div className="flex justify-end gap-2 pt-2">
+                          <Button variant="outline" size="sm" onClick={() => setTemplatePreview(null)}>Close</Button>
+                          <Button size="sm" className="bg-[#4A7DFF] hover:bg-[#2563eb]" onClick={() => templatePreview && loadTemplateIntoBuilder(templatePreview)}>
+                            Use Template
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-            </>
-          )}
-
-          {/* Document Editor tab content hidden */}
-          {false && !userIsPatient && (
-            <TabsContent
-              value="editor"
-              className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
-            >
-              {/* Top Header - Professional Medical Theme */}
-              <div className="px-6 py-4 flex-shrink-0 bg-white dark:bg-[hsl(var(--cura-midnight))] border-b-2 border-gray-200 dark:border-[hsl(var(--cura-steel))]">
-                <div className="flex items-center justify-between gap-8">
-                  <div className="flex items-center gap-4">
-                    <Button
-                      className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
-                      onClick={handlePreview}
-                    >
-                      Preview..
-                    </Button>
-                    <Button
-                      className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
-                      onClick={handleSaveAsDraft}
-                    >
-                      View Draft..
-                    </Button>
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    <Button
-                      className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
-                      onClick={() => setShowShareDialog(true)}
-                    >
-                      Share this...
-                    </Button>
-                    {user?.role === "patient" && (
-                      <>
-                        <div className="h-8 w-px bg-white/30 mx-1"></div>
-                        <Button
-                          className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
-                          onClick={() => setShowPatientTemplateDialog(true)}
-                        >
-                          Letters
-                        </Button>
-                      </>
                     )}
-                    {user?.role !== "patient" && (
-                      <>
-                        <div className="h-8 w-px bg-white/30 mx-1"></div>
-                        <Button
-                          className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
-                          onClick={() => setShowDoctorTemplateDialog(true)}
-                        >
-                          Doctor Templates
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
+                  </DialogContent>
+                </Dialog>
+              </>
+            )}
 
-              {/* Toolbar - medical theme colors */}
-              <div className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
-                <div className="flex justify-center items-center gap-1 flex-wrap">
-                  <Button
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
-                    onClick={() => setShowAllTemplatesDialog(true)}
-                  >
-                    Templates
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
-                    onClick={handleSave}
-                    data-testid="button-save-template"
-                  >
-                    Save Template
-                  </Button>
-                  <Button
-                    data-bluewave="true"
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5"
-                    onClick={handleDownload}
-                    data-testid="button-download"
-                  >
-                    <Download className="h-3 w-3 mr-1" />
-                  </Button>
-                  <Button
-                    data-bluewave="true"
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5"
-                    onClick={handlePrint}
-                    data-testid="button-print"
-                  >
-                    <Printer className="h-3 w-3 mr-1" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
-                    onClick={handleInsertLogo}
-                  >
-                    Logo
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
-                    onClick={handleClinicalHeader}
-                    data-testid="button-clinical-header"
-                  >
-                    Clinical Header
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
-                    onClick={() => setShowSavedTemplatesDialog(true)}
-                  >
-                    View Saved Templates
-                  </Button>
-                </div>
-     {/* Main formatting row */}
-     <div className="flex justify-center items-center gap-0.5 mb-2 mt-3">
-            {/* Font controls */}
-            <Select
-              value={textStyle}
-              onValueChange={(value) => {
-                console.log("Dropdown changed to:", value);
-                setTextStyle(value);
-                setTimeout(() => {
-                  if (value === "paragraph") {
-                    handleParagraph();
-                  } else if (value === "heading1") {
-                    handleH1();
-                  } else if (value === "heading2") {
-                    handleH2();
-                  } else if (value === "heading3") {
-                    handleH3();
-                  } else if (value === "heading4") {
-                    handleH4();
-                  } else if (value === "heading5") {
-                    handleH5();
-                  } else if (value === "heading6") {
-                    handleH6();
-                  }
-                }, 100);
-              }}
-            >
-              <SelectTrigger data-bluewave="true" className="w-90 h-6 p-3 text-xs bg-white dark:bg-gray-800 text-black dark:text-white border-gray-300 dark:border-gray-600">
-                <SelectValue placeholder="H2" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="paragraph">Paragraph</SelectItem>
-                <SelectItem value="heading1">H1</SelectItem>
-                <SelectItem value="heading2">H2</SelectItem>
-                <SelectItem value="heading3">H3</SelectItem>
-                <SelectItem value="heading4">H4</SelectItem>
-                <SelectItem value="heading5">H5</SelectItem>
-                <SelectItem value="heading6">H6</SelectItem>
-              </SelectContent>
-            </Select>
-
-
-            <Select
-              value={fontFamily}
-              onValueChange={(value) => {
-                setFontFamily(value);
-
-                // Apply font to editor for new text
-                if (textareaRef) {
-                  const fontFamilyCSS = getFontFamilyCSS(value);
-                  textareaRef.style.fontFamily = fontFamilyCSS;
-                }
-
-                // Also apply font family to selected text if any exists
-                const selection = window.getSelection();
-                if (
-                  selection &&
-                  selection.rangeCount > 0 &&
-                  selection.toString().trim()
-                ) {
-                  applyFontFamily(value);
-                }
-              }}
-            >
-              <SelectTrigger data-bluewave="true" className="w-150 h-5 p-3 text-xs bg-white dark:bg-gray-800 text-black dark:text-white border-gray-300 dark:border-gray-600">
-                <SelectValue placeholder="Verdana" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="arial">Arial</SelectItem>
-                <SelectItem value="calibri">Calibri</SelectItem>
-                <SelectItem value="cambria">Cambria</SelectItem>
-                <SelectItem value="comic-sans">Comic Sans MS</SelectItem>
-                <SelectItem value="consolas">Consolas</SelectItem>
-                <SelectItem value="courier">Courier New</SelectItem>
-                <SelectItem value="franklin">Franklin Gothic</SelectItem>
-                <SelectItem value="garamond">Garamond</SelectItem>
-                <SelectItem value="georgia">Georgia</SelectItem>
-                <SelectItem value="helvetica">Helvetica</SelectItem>
-                <SelectItem value="impact">Impact</SelectItem>
-                <SelectItem value="lato">Lato</SelectItem>
-                <SelectItem value="lucida">Lucida Console</SelectItem>
-                <SelectItem value="open-sans">Open Sans</SelectItem>
-                <SelectItem value="palatino">Palatino</SelectItem>
-                <SelectItem value="segoe">Segoe UI</SelectItem>
-                <SelectItem value="tahoma">Tahoma</SelectItem>
-                <SelectItem value="times">Times New Roman</SelectItem>
-                <SelectItem value="trebuchet">Trebuchet MS</SelectItem>
-                <SelectItem value="verdana">Verdana</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={fontSize}
-              onValueChange={(value) => {
-                setFontSize(value);
-                // Only apply font size if there's a valid selection
-                const selection = window.getSelection();
-                if (
-                  selection &&
-                  selection.rangeCount > 0 &&
-                  selection.toString().trim()
-                ) {
-                  applyFontSize(value);
-                }
-              }}
-            >
-              <SelectTrigger data-bluewave="true" className="w-90 p-3 h-5 text-xs bg-white dark:bg-gray-800 text-black dark:text-white border-gray-300 dark:border-gray-600">
-                <SelectValue placeholder="12pt" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="8pt">8pt</SelectItem>
-                <SelectItem value="9pt">9pt</SelectItem>
-                <SelectItem value="10pt">10pt</SelectItem>
-                <SelectItem value="11pt">11pt</SelectItem>
-                <SelectItem value="12pt">12pt</SelectItem>
-                <SelectItem value="14pt">14pt</SelectItem>
-                <SelectItem value="16pt">16pt</SelectItem>
-                <SelectItem value="18pt">18pt</SelectItem>
-                <SelectItem value="20pt">20pt</SelectItem>
-                <SelectItem value="22pt">22pt</SelectItem>
-                <SelectItem value="24pt">24pt</SelectItem>
-                <SelectItem value="26pt">26pt</SelectItem>
-                <SelectItem value="28pt">28pt</SelectItem>
-                <SelectItem value="36pt">36pt</SelectItem>
-                <SelectItem value="48pt">48pt</SelectItem>
-                <SelectItem value="72pt">72pt</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
-
-            {/* Text formatting - more visible */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleBold}
-            >
-              <Bold className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleItalic}
-            >
-              <Italic className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleUnderline}
-            >
-              <Underline className="h-3 w-3" />
-            </Button>
-
-            <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
-
-            {/* Lists */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleBulletList}
-            >
-              <List className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleNumberedList}
-            >
-              <ListOrdered className="h-3 w-3" />
-            </Button>
-
-            <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
-
-            {/* Alignment */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleAlignLeft}
-            >
-              <AlignLeft className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleAlignCenter}
-            >
-              <AlignCenter className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleAlignRight}
-            >
-              <AlignRight className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
-              onClick={handleAlignJustify}
-            >
-              <AlignJustify className="h-3 w-3" />
-            </Button>
-
-            <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
-
-            {/* Text color and tools */}
-            <div className="relative">
-              <Button
-                data-bluewave="true"
-                size="sm"
-                className="h-6 w-6 p-0"
-                onClick={() => setShowColorPicker(!showColorPicker)}
+            {/* Document Editor tab content hidden */}
+            {false && !userIsPatient && (
+              <TabsContent
+                value="editor"
+                className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
               >
-                <Type className="h-3 w-3" />
-              </Button>
-              {showColorPicker && (
-                <div className="absolute top-full left-0 mt-1 w-[180px] bg-white dark:bg-[hsl(var(--cura-midnight))] border border-[hsl(var(--cura-steel))] dark:border-[hsl(var(--cura-steel))] rounded shadow-lg p-3 z-50">
-                  <div className="grid grid-cols-8 gap-2">
-                    {[
-                      "#000000",
-                      "#FF0000",
-                      "#00FF00",
-                      "#0000FF",
-                      "#FFFF00",
-                      "#FF00FF",
-                      "#00FFFF",
-                      "#FFFFFF",
-                      "#808080",
-                      "#800000",
-                      "#008000",
-                      "#000080",
-                      "#808000",
-                      "#800080",
-                      "#008080",
-                      "#C0C0C0",
-                    ].map((color) => (
-                      <button
-                        key={color}
-                        className="w-5 h-5 border border-[hsl(var(--cura-steel))] rounded hover:scale-110 transition-transform"
-                        style={{ backgroundColor: color }}
-                        onClick={() => {
-                          const selection = window.getSelection();
-                          if (
-                            !selection ||
-                            selection.rangeCount === 0 ||
-                            selection.toString().trim() === ""
-                          ) {
-                            toast({
-                              title: "Select Text",
-                              description: "Please select text to apply color",
-                              duration: 3000,
-                            });
-                            setShowColorPicker(false);
-                            return;
-                          }
+                {/* Top Header - Professional Medical Theme */}
+                <div className="px-6 py-4 flex-shrink-0 bg-white dark:bg-[hsl(var(--cura-midnight))] border-b-2 border-gray-200 dark:border-[hsl(var(--cura-steel))]">
+                  <div className="flex items-center justify-between gap-8">
+                    <div className="flex items-center gap-4">
+                      <Button
+                        className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
+                        onClick={handlePreview}
+                      >
+                        Preview..
+                      </Button>
+                      <Button
+                        className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
+                        onClick={handleSaveAsDraft}
+                      >
+                        View Draft..
+                      </Button>
+                    </div>
 
-                          try {
-                            // Apply text color using document.execCommand
-                            document.execCommand("foreColor", false, color);
-
-                            // Update the document content state
-                            if (textareaRef) {
-                              setDocumentContent(textareaRef.innerHTML);
-                            }
-
-                            setTextColor(color);
-                            setShowColorPicker(false);
-
-                            toast({
-                              title: "✓ Text Color Applied",
-                              description: `Text color changed to ${color}`,
-                              duration: 2000,
-                            });
-                          } catch (error) {
-                            console.error("Text color error:", error);
-                            toast({
-                              title: "Error",
-                              description: "Failed to apply text color",
-                              duration: 3000,
-                            });
-                            setShowColorPicker(false);
-                          }
-                        }}
-                      />
-                    ))}
+                    <div className="flex items-center gap-4">
+                      <Button
+                        className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
+                        onClick={() => setShowShareDialog(true)}
+                      >
+                        Share this...
+                      </Button>
+                      {user?.role === "patient" && (
+                        <>
+                          <div className="h-8 w-px bg-white/30 mx-1"></div>
+                          <Button
+                            className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
+                            onClick={() => setShowPatientTemplateDialog(true)}
+                          >
+                            Letters
+                          </Button>
+                        </>
+                      )}
+                      {user?.role !== "patient" && (
+                        <>
+                          <div className="h-8 w-px bg-white/30 mx-1"></div>
+                          <Button
+                            className="h-10 px-5 text-sm font-medium shadow-lg transition-all duration-300 border-2 bg-white dark:bg-gray-800 text-black dark:text-white border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:-translate-y-0.5 rounded-[10px]"
+                            onClick={() => setShowDoctorTemplateDialog(true)}
+                          >
+                            Doctor Templates
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200"
-              style={{
-                backgroundColor: "white",
-                borderColor: "#e5e7eb",
-                color: "black",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#7279FB";
-                e.currentTarget.style.borderColor = "#7279FB";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "white";
-              }}
-              onClick={handleHighlight}
-            >
-              <Highlighter className="h-3 w-3" />
-            </Button>
+                {/* Toolbar - medical theme colors */}
+                <div className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex-shrink-0">
+                  <div className="flex justify-center items-center gap-1 flex-wrap">
+                    <Button
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
+                      onClick={() => setShowAllTemplatesDialog(true)}
+                    >
+                      Templates
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
+                      onClick={handleSave}
+                      data-testid="button-save-template"
+                    >
+                      Save Template
+                    </Button>
+                    <Button
+                      data-bluewave="true"
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5"
+                      onClick={handleDownload}
+                      data-testid="button-download"
+                    >
+                      <Download className="h-3 w-3 mr-1" />
+                    </Button>
+                    <Button
+                      data-bluewave="true"
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5"
+                      onClick={handlePrint}
+                      data-testid="button-print"
+                    >
+                      <Printer className="h-3 w-3 mr-1" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
+                      onClick={handleInsertLogo}
+                    >
+                      Logo
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
+                      onClick={handleClinicalHeader}
+                      data-testid="button-clinical-header"
+                    >
+                      Clinical Header
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="text-xs h-7 px-4 py-2 mt-5 bg-white dark:bg-gray-800 text-black dark:text-white border border-gray-400 dark:border-gray-600"
+                      onClick={() => setShowSavedTemplatesDialog(true)}
+                    >
+                      View Saved Templates
+                    </Button>
+                  </div>
+                  {/* Main formatting row */}
+                  <div className="flex justify-center items-center gap-0.5 mb-2 mt-3">
+                    {/* Font controls */}
+                    <Select
+                      value={textStyle}
+                      onValueChange={(value) => {
+                        console.log("Dropdown changed to:", value);
+                        setTextStyle(value);
+                        setTimeout(() => {
+                          if (value === "paragraph") {
+                            handleParagraph();
+                          } else if (value === "heading1") {
+                            handleH1();
+                          } else if (value === "heading2") {
+                            handleH2();
+                          } else if (value === "heading3") {
+                            handleH3();
+                          } else if (value === "heading4") {
+                            handleH4();
+                          } else if (value === "heading5") {
+                            handleH5();
+                          } else if (value === "heading6") {
+                            handleH6();
+                          }
+                        }, 100);
+                      }}
+                    >
+                      <SelectTrigger data-bluewave="true" className="w-90 h-6 p-3 text-xs bg-white dark:bg-gray-800 text-black dark:text-white border-gray-300 dark:border-gray-600">
+                        <SelectValue placeholder="H2" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="paragraph">Paragraph</SelectItem>
+                        <SelectItem value="heading1">H1</SelectItem>
+                        <SelectItem value="heading2">H2</SelectItem>
+                        <SelectItem value="heading3">H3</SelectItem>
+                        <SelectItem value="heading4">H4</SelectItem>
+                        <SelectItem value="heading5">H5</SelectItem>
+                        <SelectItem value="heading6">H6</SelectItem>
+                      </SelectContent>
+                    </Select>
 
-            <div className="h-4 w-px bg-[hsl(var(--cura-steel))] mx-1"></div>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200"
-              style={{
-                backgroundColor: "white",
-                borderColor: "white",
-                color: "black",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#7279FB";
-                e.currentTarget.style.borderColor = "#e5e7eb";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "white";
-              }}
-              onClick={handleClock}
-            >
-              <Clock className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200"
-              style={{
-                backgroundColor: "white",
-                borderColor: "white",
-                color: "black",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#7279FB";
-                e.currentTarget.style.borderColor = "#7279FB";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "white";
-              }}
-              onClick={handleTable}
-            >
-              <Table className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200"
-              style={{
-                backgroundColor: "white",
-                borderColor: "white",
-                color: "black",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#7279FB";
-                e.currentTarget.style.borderColor = "#e5e7eb";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "white";
-              }}
-              onClick={handleAttachFile}
-            >
-              <Paperclip className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200"
-              style={{
-                backgroundColor: "white",
-                borderColor: "white",
-                color: "black",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#7279FB";
-                e.currentTarget.style.borderColor = "#7279FB";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "white";
-              }}
-              onClick={handleImage}
-            >
-              <Image className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 border transition-all duration-200"
-              style={{
-                backgroundColor: "white",
-                borderColor: "white",
-                color: "black",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#7279FB";
-                e.currentTarget.style.borderColor = "#e5e7eb";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "white";
-              }}
-              onClick={handleLink}
-            >
-              <Link className="h-3 w-3" />
-            </Button>
-            <Button
-              data-bluewave="true"
-              size="sm"
-              className="h-6 w-6 p-0"
-              onClick={handleMore}
-            >
-              <MoreHorizontal className="h-3 w-3" />
-            </Button>
-          </div>
+                    <Select
+                      value={fontFamily}
+                      onValueChange={(value) => {
+                        setFontFamily(value);
 
-             
-              </div>
-              <div className="flex-1 bg-[hsl(var(--cura-mist))] dark:bg-[hsl(var(--cura-midnight))] overflow-y-auto min-h-0 mt-4">
-                    <div className="h-full flex items-start justify-center p-4">
-                      <div
-                        className="bg-white dark:bg-[hsl(var(--cura-midnight))] shadow-sm border border-white dark:border-[hsl(var(--cura-steel))] min-h-[600px] w-full max-w-[1200px] mx-auto"
-                        style={{ width: "700px", maxWidth: "700px" }}
+                        // Apply font to editor for new text
+                        if (textareaRef) {
+                          const fontFamilyCSS = getFontFamilyCSS(value);
+                          textareaRef.style.fontFamily = fontFamilyCSS;
+                        }
+
+                        // Also apply font family to selected text if any exists
+                        const selection = window.getSelection();
+                        if (
+                          selection &&
+                          selection.rangeCount > 0 &&
+                          selection.toString().trim()
+                        ) {
+                          applyFontFamily(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger data-bluewave="true" className="w-150 h-5 p-3 text-xs bg-white dark:bg-gray-800 text-black dark:text-white border-gray-300 dark:border-gray-600">
+                        <SelectValue placeholder="Verdana" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="arial">Arial</SelectItem>
+                        <SelectItem value="calibri">Calibri</SelectItem>
+                        <SelectItem value="cambria">Cambria</SelectItem>
+                        <SelectItem value="comic-sans">Comic Sans MS</SelectItem>
+                        <SelectItem value="consolas">Consolas</SelectItem>
+                        <SelectItem value="courier">Courier New</SelectItem>
+                        <SelectItem value="franklin">Franklin Gothic</SelectItem>
+                        <SelectItem value="garamond">Garamond</SelectItem>
+                        <SelectItem value="georgia">Georgia</SelectItem>
+                        <SelectItem value="helvetica">Helvetica</SelectItem>
+                        <SelectItem value="impact">Impact</SelectItem>
+                        <SelectItem value="lato">Lato</SelectItem>
+                        <SelectItem value="lucida">Lucida Console</SelectItem>
+                        <SelectItem value="open-sans">Open Sans</SelectItem>
+                        <SelectItem value="palatino">Palatino</SelectItem>
+                        <SelectItem value="segoe">Segoe UI</SelectItem>
+                        <SelectItem value="tahoma">Tahoma</SelectItem>
+                        <SelectItem value="times">Times New Roman</SelectItem>
+                        <SelectItem value="trebuchet">Trebuchet MS</SelectItem>
+                        <SelectItem value="verdana">Verdana</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={fontSize}
+                      onValueChange={(value) => {
+                        setFontSize(value);
+                        // Only apply font size if there's a valid selection
+                        const selection = window.getSelection();
+                        if (
+                          selection &&
+                          selection.rangeCount > 0 &&
+                          selection.toString().trim()
+                        ) {
+                          applyFontSize(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger data-bluewave="true" className="w-90 p-3 h-5 text-xs bg-white dark:bg-gray-800 text-black dark:text-white border-gray-300 dark:border-gray-600">
+                        <SelectValue placeholder="12pt" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="8pt">8pt</SelectItem>
+                        <SelectItem value="9pt">9pt</SelectItem>
+                        <SelectItem value="10pt">10pt</SelectItem>
+                        <SelectItem value="11pt">11pt</SelectItem>
+                        <SelectItem value="12pt">12pt</SelectItem>
+                        <SelectItem value="14pt">14pt</SelectItem>
+                        <SelectItem value="16pt">16pt</SelectItem>
+                        <SelectItem value="18pt">18pt</SelectItem>
+                        <SelectItem value="20pt">20pt</SelectItem>
+                        <SelectItem value="22pt">22pt</SelectItem>
+                        <SelectItem value="24pt">24pt</SelectItem>
+                        <SelectItem value="26pt">26pt</SelectItem>
+                        <SelectItem value="28pt">28pt</SelectItem>
+                        <SelectItem value="36pt">36pt</SelectItem>
+                        <SelectItem value="48pt">48pt</SelectItem>
+                        <SelectItem value="72pt">72pt</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
+
+                    {/* Text formatting - more visible */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleBold}
+                    >
+                      <Bold className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleItalic}
+                    >
+                      <Italic className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleUnderline}
+                    >
+                      <Underline className="h-3 w-3" />
+                    </Button>
+
+                    <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
+
+                    {/* Lists */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleBulletList}
+                    >
+                      <List className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleNumberedList}
+                    >
+                      <ListOrdered className="h-3 w-3" />
+                    </Button>
+
+                    <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
+
+                    {/* Alignment */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleAlignLeft}
+                    >
+                      <AlignLeft className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleAlignCenter}
+                    >
+                      <AlignCenter className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleAlignRight}
+                    >
+                      <AlignRight className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200 bg-white dark:bg-gray-800 border-white dark:border-gray-700 text-black dark:text-white hover:bg-[#7279FB] hover:border-[#7279FB]"
+                      onClick={handleAlignJustify}
+                    >
+                      <AlignJustify className="h-3 w-3" />
+                    </Button>
+
+                    <div className="h-4 w-px bg-[hsl(var(--cura-steel))] dark:bg-[hsl(var(--cura-steel))] mx-1"></div>
+
+                    {/* Text color and tools */}
+                    <div className="relative">
+                      <Button
+                        data-bluewave="true"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => setShowColorPicker(!showColorPicker)}
                       >
-                        <div className="p-6">
-                          <div
-                            ref={(el) => {
-                              if (el && el.innerHTML !== documentContent) {
-                                el.innerHTML = documentContent;
-                              }
-                              setTextareaRef(el as any);
-                            }}
-                            id="document-content-area"
-                            contentEditable
-                            onInput={(e) => setDocumentContent(e.currentTarget.innerHTML)}
-                            suppressContentEditableWarning
-                            data-placeholder="Start typing your document here..."
-                            className="w-full border-none outline-none text-[hsl(var(--cura-midnight))] dark:text-white leading-normal bg-transparent focus:outline-none [&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-gray-400"
-                            style={{
-                              fontSize: fontSize,
-                              lineHeight: "1.6",
-                              minHeight: "770px",
-                              maxWidth: "100%",
-                              fontFamily: fontFamily,
-                            }}
-                          />
+                        <Type className="h-3 w-3" />
+                      </Button>
+                      {showColorPicker && (
+                        <div className="absolute top-full left-0 mt-1 w-[180px] bg-white dark:bg-[hsl(var(--cura-midnight))] border border-[hsl(var(--cura-steel))] dark:border-[hsl(var(--cura-steel))] rounded shadow-lg p-3 z-50">
+                          <div className="grid grid-cols-8 gap-2">
+                            {[
+                              "#000000",
+                              "#FF0000",
+                              "#00FF00",
+                              "#0000FF",
+                              "#FFFF00",
+                              "#FF00FF",
+                              "#00FFFF",
+                              "#FFFFFF",
+                              "#808080",
+                              "#800000",
+                              "#008000",
+                              "#000080",
+                              "#808000",
+                              "#800080",
+                              "#008080",
+                              "#C0C0C0",
+                            ].map((color) => (
+                              <button
+                                key={color}
+                                className="w-5 h-5 border border-[hsl(var(--cura-steel))] rounded hover:scale-110 transition-transform"
+                                style={{ backgroundColor: color }}
+                                onClick={() => {
+                                  const selection = window.getSelection();
+                                  if (
+                                    !selection ||
+                                    selection.rangeCount === 0 ||
+                                    selection.toString().trim() === ""
+                                  ) {
+                                    toast({
+                                      title: "Select Text",
+                                      description: "Please select text to apply color",
+                                      duration: 3000,
+                                    });
+                                    setShowColorPicker(false);
+                                    return;
+                                  }
+
+                                  try {
+                                    // Apply text color using document.execCommand
+                                    document.execCommand("foreColor", false, color);
+
+                                    // Update the document content state
+                                    if (textareaRef) {
+                                      setDocumentContent(textareaRef.innerHTML);
+                                    }
+
+                                    setTextColor(color);
+                                    setShowColorPicker(false);
+
+                                    toast({
+                                      title: "✓ Text Color Applied",
+                                      description: `Text color changed to ${color}`,
+                                      duration: 2000,
+                                    });
+                                  } catch (error) {
+                                    console.error("Text color error:", error);
+                                    toast({
+                                      title: "Error",
+                                      description: "Failed to apply text color",
+                                      duration: 3000,
+                                    });
+                                    setShowColorPicker(false);
+                                  }
+                                }}
+                              />
+                            ))}
+                          </div>
                         </div>
+                      )}
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200"
+                      style={{
+                        backgroundColor: "white",
+                        borderColor: "#e5e7eb",
+                        color: "black",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#7279FB";
+                        e.currentTarget.style.borderColor = "#7279FB";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white";
+                        e.currentTarget.style.borderColor = "white";
+                      }}
+                      onClick={handleHighlight}
+                    >
+                      <Highlighter className="h-3 w-3" />
+                    </Button>
+
+                    <div className="h-4 w-px bg-[hsl(var(--cura-steel))] mx-1"></div>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200"
+                      style={{
+                        backgroundColor: "white",
+                        borderColor: "white",
+                        color: "black",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#7279FB";
+                        e.currentTarget.style.borderColor = "#e5e7eb";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white";
+                        e.currentTarget.style.borderColor = "white";
+                      }}
+                      onClick={handleClock}
+                    >
+                      <Clock className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200"
+                      style={{
+                        backgroundColor: "white",
+                        borderColor: "white",
+                        color: "black",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#7279FB";
+                        e.currentTarget.style.borderColor = "#7279FB";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white";
+                        e.currentTarget.style.borderColor = "white";
+                      }}
+                      onClick={handleTable}
+                    >
+                      <Table className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200"
+                      style={{
+                        backgroundColor: "white",
+                        borderColor: "white",
+                        color: "black",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#7279FB";
+                        e.currentTarget.style.borderColor = "#e5e7eb";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white";
+                        e.currentTarget.style.borderColor = "white";
+                      }}
+                      onClick={handleAttachFile}
+                    >
+                      <Paperclip className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200"
+                      style={{
+                        backgroundColor: "white",
+                        borderColor: "white",
+                        color: "black",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#7279FB";
+                        e.currentTarget.style.borderColor = "#7279FB";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white";
+                        e.currentTarget.style.borderColor = "white";
+                      }}
+                      onClick={handleImage}
+                    >
+                      <Image className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 border transition-all duration-200"
+                      style={{
+                        backgroundColor: "white",
+                        borderColor: "white",
+                        color: "black",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#7279FB";
+                        e.currentTarget.style.borderColor = "#e5e7eb";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white";
+                        e.currentTarget.style.borderColor = "white";
+                      }}
+                      onClick={handleLink}
+                    >
+                      <Link className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      data-bluewave="true"
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={handleMore}
+                    >
+                      <MoreHorizontal className="h-3 w-3" />
+                    </Button>
+                  </div>
+
+
+                </div>
+                <div className="flex-1 bg-[hsl(var(--cura-mist))] dark:bg-[hsl(var(--cura-midnight))] overflow-y-auto min-h-0 mt-4">
+                  <div className="h-full flex items-start justify-center p-4">
+                    <div
+                      className="bg-white dark:bg-[hsl(var(--cura-midnight))] shadow-sm border border-white dark:border-[hsl(var(--cura-steel))] min-h-[600px] w-full max-w-[1200px] mx-auto"
+                      style={{ width: "700px", maxWidth: "700px" }}
+                    >
+                      <div className="p-6">
+                        <div
+                          ref={(el) => {
+                            if (el && el.innerHTML !== documentContent) {
+                              el.innerHTML = documentContent;
+                            }
+                            setTextareaRef(el as any);
+                          }}
+                          id="document-content-area"
+                          contentEditable
+                          onInput={(e) => setDocumentContent(e.currentTarget.innerHTML)}
+                          suppressContentEditableWarning
+                          data-placeholder="Start typing your document here..."
+                          className="w-full border-none outline-none text-[hsl(var(--cura-midnight))] dark:text-white leading-normal bg-transparent focus:outline-none [&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-gray-400"
+                          style={{
+                            fontSize: fontSize,
+                            lineHeight: "1.6",
+                            minHeight: "770px",
+                            maxWidth: "100%",
+                            fontFamily: fontFamily,
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
+                </div>
 
 
-            </TabsContent>
-          )}
+              </TabsContent>
+            )}
 
             <TabsContent
               value="filled"
@@ -7424,76 +7433,76 @@ const formIds = useMemo(
               </div>
               {activeFormsTab === "filled" && (
                 <div className="flex flex-wrap items-end gap-3 mb-4">
-                <div className="flex-1 min-w-[220px] space-y-1">
-                  <Label className="text-[11px] uppercase text-gray-400">Form Name</Label>
-                  <div>
-                    <Command className="relative overflow-visible rounded-md border border-gray-200 bg-white">
-                      <CommandInput
-                        placeholder="Search forms"
-                        value={filterFormName}
-                        onValueChange={setFilterFormName}
-                        className="text-sm pr-10"
-                        onFocus={() => openDropdown("formName")}
-                        onBlur={() => closeDropdown("formName")}
-                      />
-                      <ChevronsUpDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                      {activeFilledDropdown === "formName" && (
-                        <CommandList className="absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg shadow-gray-400/10 max-h-60 overflow-auto">
-                          <CommandEmpty>No forms found</CommandEmpty>
-                          <CommandGroup>
-                            {formNames.map((name) => (
-                              <CommandItem
-                                key={name}
-                                value={name}
-                                onSelect={() => {
-                                  setFilterFormName(name);
-                                  closeCommandMenu();
-                                }}
-                              >
-                                {name}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      )}
-                    </Command>
+                  <div className="flex-1 min-w-[220px] space-y-1">
+                    <Label className="text-[11px] uppercase text-gray-400">Form Name</Label>
+                    <div>
+                      <Command className="relative overflow-visible rounded-md border border-gray-200 bg-white">
+                        <CommandInput
+                          placeholder="Search forms"
+                          value={filterFormName}
+                          onValueChange={setFilterFormName}
+                          className="text-sm pr-10"
+                          onFocus={() => openDropdown("formName")}
+                          onBlur={() => closeDropdown("formName")}
+                        />
+                        <ChevronsUpDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                        {activeFilledDropdown === "formName" && (
+                          <CommandList className="absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg shadow-gray-400/10 max-h-60 overflow-auto">
+                            <CommandEmpty>No forms found</CommandEmpty>
+                            <CommandGroup>
+                              {formNames.map((name) => (
+                                <CommandItem
+                                  key={name}
+                                  value={name}
+                                  onSelect={() => {
+                                    setFilterFormName(name);
+                                    closeCommandMenu();
+                                  }}
+                                >
+                                  {name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        )}
+                      </Command>
+                    </div>
                   </div>
-                </div>
-                <div className="flex-1 min-w-[220px] space-y-1">
-                  <Label className="text-[11px] uppercase text-gray-400">Form ID</Label>
-                  <div>
-                    <Command className="relative overflow-visible rounded-md border border-gray-200 bg-white">
-                      <CommandInput
-                        placeholder="Generated form ID"
-                        value={filterFormId}
-                        onValueChange={setFilterFormId}
-                        className="text-sm pr-10"
-                        onFocus={() => openDropdown("formId")}
-                        onBlur={() => closeDropdown("formId")}
-                      />
-                      <ChevronsUpDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                      {activeFilledDropdown === "formId" && (
-                        <CommandList className="absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg shadow-gray-400/10 max-h-60 overflow-auto">
-                          <CommandEmpty>No form IDs found</CommandEmpty>
-                          <CommandGroup>
-                            {formIds.map((id) => (
-                              <CommandItem
-                                key={id}
-                                value={id}
-                                onSelect={() => {
-                                  setFilterFormId(id);
-                                  closeCommandMenu();
-                                }}
-                              >
-                                {id}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      )}
-                    </Command>
+                  <div className="flex-1 min-w-[220px] space-y-1">
+                    <Label className="text-[11px] uppercase text-gray-400">Form ID</Label>
+                    <div>
+                      <Command className="relative overflow-visible rounded-md border border-gray-200 bg-white">
+                        <CommandInput
+                          placeholder="Generated form ID"
+                          value={filterFormId}
+                          onValueChange={setFilterFormId}
+                          className="text-sm pr-10"
+                          onFocus={() => openDropdown("formId")}
+                          onBlur={() => closeDropdown("formId")}
+                        />
+                        <ChevronsUpDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                        {activeFilledDropdown === "formId" && (
+                          <CommandList className="absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg shadow-gray-400/10 max-h-60 overflow-auto">
+                            <CommandEmpty>No form IDs found</CommandEmpty>
+                            <CommandGroup>
+                              {formIds.map((id) => (
+                                <CommandItem
+                                  key={id}
+                                  value={id}
+                                  onSelect={() => {
+                                    setFilterFormId(id);
+                                    closeCommandMenu();
+                                  }}
+                                >
+                                  {id}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        )}
+                      </Command>
+                    </div>
                   </div>
-                </div>
                   <div className="flex-1 min-w-[200px] space-y-1">
                     <Label className="text-[11px] uppercase text-gray-400">Date</Label>
                     <Input
@@ -7651,70 +7660,70 @@ const formIds = useMemo(
                 </Button>
               </DialogFooter>
             </DialogContent>
+          </Dialog>
+        </div>
+        <Dialog
+          open={showDeleteFilledFormDialog}
+          onOpenChange={(open) => {
+            if (!open) {
+              setFilledFormToDelete(null);
+            }
+            setShowDeleteFilledFormDialog(open);
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete filled form PDF</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete{" "}
+                <span className="font-semibold">
+                  {filledFormToDelete?.name || "this filled form"}
+                </span>
+                ? This action removes the stored PDF from the server.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="space-x-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDeleteFilledFormDialog(false);
+                  setFilledFormToDelete(null);
+                }}
+                disabled={deleteFilledFormMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDeleteFilledForm}
+                disabled={deleteFilledFormMutation.isPending}
+              >
+                {deleteFilledFormMutation.isPending ? "Deleting..." : "Delete PDF"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
-      </div>
-      <Dialog
-        open={showDeleteFilledFormDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            setFilledFormToDelete(null);
-          }
-          setShowDeleteFilledFormDialog(open);
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete filled form PDF</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete{" "}
-              <span className="font-semibold">
-                {filledFormToDelete?.name || "this filled form"}
-              </span>
-              ? This action removes the stored PDF from the server.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="space-x-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowDeleteFilledFormDialog(false);
-                setFilledFormToDelete(null);
-              }}
-              disabled={deleteFilledFormMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDeleteFilledForm}
-              disabled={deleteFilledFormMutation.isPending}
-            >
-              {deleteFilledFormMutation.isPending ? "Deleting..." : "Delete PDF"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={showFilledFormFileMissingDialog} onOpenChange={setShowFilledFormFileMissingDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>File not found</DialogTitle>
-            <DialogDescription>
-              The file does not exist on the server. It may have been deleted.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setShowFilledFormFileMissingDialog(false)}>OK</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={showFormShareDialog}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) {
-            closeFormShareDialog();
-          }
-        }}
-      >
+        <Dialog open={showFilledFormFileMissingDialog} onOpenChange={setShowFilledFormFileMissingDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>File not found</DialogTitle>
+              <DialogDescription>
+                The file does not exist on the server. It may have been deleted.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button onClick={() => setShowFilledFormFileMissingDialog(false)}>OK</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog
+          open={showFormShareDialog}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) {
+              closeFormShareDialog();
+            }
+          }}
+        >
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Share form with patient</DialogTitle>
@@ -7750,13 +7759,12 @@ const formIds = useMemo(
                   </SelectContent>
                 </Select>
                 <p
-                  className={`text-xs ${
-                    selectedFormPatientId && selectedPatient?.email
-                      ? "text-emerald-600"
-                      : selectedFormPatientId
+                  className={`text-xs ${selectedFormPatientId && selectedPatient?.email
+                    ? "text-emerald-600"
+                    : selectedFormPatientId
                       ? "text-orange-500"
                       : "text-slate-500"
-                  }`}
+                    }`}
                 >
                   {selectedFormPatientId
                     ? selectedPatient?.email
@@ -7773,189 +7781,189 @@ const formIds = useMemo(
                 >
                   Cancel
                 </Button>
+                <Button
+                  onClick={() => previewEmailMutation.mutate()}
+                  variant="outline"
+                  disabled={previewEmailMutation.isPending || !selectedFormPatientId || !selectedPatient?.email || !formSharedSuccessfully}
+                >
+                  {previewEmailMutation.isPending ? "Generating…" : "Preview email"}
+                </Button>
+                <Button
+                  onClick={() => shareFormMutation.mutate()}
+                  disabled={
+                    shareFormMutation.isPending ||
+                    !selectedFormPatientId ||
+                    !selectedPatient?.email
+                  }
+                >
+                  {shareFormMutation.isPending ? "Sending…" : "Send form"}
+                </Button>
+                {emailPreview?.link && (
                   <Button
-                    onClick={() => previewEmailMutation.mutate()}
-                    variant="outline"
-                    disabled={previewEmailMutation.isPending || !selectedFormPatientId || !selectedPatient?.email || !formSharedSuccessfully}
+                    size="sm"
+                    variant="secondary"
+                    asChild
                   >
-                    {previewEmailMutation.isPending ? "Generating…" : "Preview email"}
+                    <a href={emailPreview.link} target="_blank" rel="noreferrer">
+                      Open Form
+                    </a>
                   </Button>
-                  <Button
-                    onClick={() => shareFormMutation.mutate()}
-                    disabled={
-                      shareFormMutation.isPending ||
-                      !selectedFormPatientId ||
-                      !selectedPatient?.email
-                    }
-                  >
-                    {shareFormMutation.isPending ? "Sending…" : "Send form"}
-                  </Button>
-                  {emailPreview?.link && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      asChild
-                    >
-                      <a href={emailPreview.link} target="_blank" rel="noreferrer">
-                        Open Form
-                      </a>
-                    </Button>
-                  )}
+                )}
               </div>
             </div>
           </DialogContent>
         </Dialog>
 
-      {/* Share Form Error Modal */}
-      <Dialog open={showShareFormErrorModal} onOpenChange={setShowShareFormErrorModal}>
-        <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
-              <AlertTriangle className="h-5 w-5" />
-              Unable to Share Form
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              {shareFormErrorMessage}
-            </p>
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-              <p className="text-xs text-yellow-800 dark:text-yellow-200 font-medium mb-1">
-                What you can do:
+        {/* Share Form Error Modal */}
+        <Dialog open={showShareFormErrorModal} onOpenChange={setShowShareFormErrorModal}>
+          <DialogContent className="max-w-md dark:bg-slate-800 dark:border-gray-700">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                <AlertTriangle className="h-5 w-5" />
+                Unable to Share Form
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-2">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                {shareFormErrorMessage}
               </p>
-              <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside space-y-1">
-                <li>Try selecting a different patient</li>
-                <li>Refresh the page and try again</li>
-                <li>Contact support if the problem persists</li>
-              </ul>
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                <p className="text-xs text-yellow-800 dark:text-yellow-200 font-medium mb-1">
+                  What you can do:
+                </p>
+                <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside space-y-1">
+                  <li>Try selecting a different patient</li>
+                  <li>Refresh the page and try again</li>
+                  <li>Contact support if the problem persists</li>
+                </ul>
+              </div>
             </div>
-          </div>
-          <div className="flex justify-end gap-2 mt-6">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowShareFormErrorModal(false);
-                setShareFormErrorMessage("");
-              }}
-            >
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowShareFormErrorModal(false);
+                  setShareFormErrorMessage("");
+                }}
+              >
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
-    <Dialog
-      open={responseDialogOpen}
-      onOpenChange={(open) => {
-        if (!open) {
-          setResponseDialogOpen(false);
-          setSelectedFormForResponses(null);
-          setFormResponsesData(null);
-          setFormResponsesLoading(false);
-        }
-      }}
-    >
-      <DialogContent className="max-w-6xl max-h-[800px] overflow-y-auto">
-        <DialogHeader className="flex flex-col gap-2">
-          <DialogTitle className="flex-1 min-w-0">
-            Responses for {selectedFormForResponses?.title || formResponsesData?.formTitle || "form"}
-          </DialogTitle>
-          <p className="text-xs text-gray-500">
-            Created by{" "}
-            {selectedFormForResponses
-              ? creatorsById.get(resolveFormCreatorId(selectedFormForResponses) ?? 0)?.name ??
-                "Unknown creator"
-              : "Unknown"}
-          </p>
-          <p className="text-xs text-gray-500">
-            {formResponsesData?.responses.length ?? "0"} responses
-          </p>
-        </DialogHeader>
-        <div className="space-y-4">
-          {formResponsesLoading ? (
-            <p className="text-sm text-gray-500">Loading responses…</p>
-          ) : !formResponsesData?.responses.length ? (
-            <p className="text-sm text-gray-500">No responses have been collected yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full table-auto text-sm">
-                <thead className="text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Patient</th>
-                    <th className="px-3 py-2 text-left">Submitted at</th>
-                    {formResponsesData.fields.map((field) => (
-                      <th key={field.id} className="px-3 py-2 text-left">
-                        {field.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {formResponsesData.responses.map((response) => {
-                    const patient = response.patient;
-                    const submitted = response.submittedAt
-                      ? new Date(response.submittedAt).toLocaleString()
-                      : "—";
-                    const answerMap = new Map(
-                      response.answers.map((answer) => [answer.fieldId, answer]),
-                    );
-                    const renderCellValue = (value: any) => {
-                      if (value === null || value === undefined) return "—";
-                      if (typeof value === "object") return JSON.stringify(value);
-                      return String(value);
-                    };
-                    const patientName = patient
-                      ? `${patient.firstName ?? ""} ${patient.lastName ?? ""}`.trim() || "Unnamed patient"
-                      : "Unknown patient";
-                    return (
-                      <tr key={response.responseId} className="border-b border-gray-100">
-                        <td className="px-3 py-2 align-top">
-                          <p className="font-semibold text-gray-900">{patientName}</p>
-                          {patient?.email && (
-                            <p className="text-xs text-gray-500">{patient.email}</p>
-                          )}
-                          {patient?.phone && (
-                            <p className="text-xs text-gray-500">Phone: {patient.phone}</p>
-                          )}
-                          {patient?.nhsNumber && (
-                            <p className="text-xs text-gray-500">NHS: {patient.nhsNumber}</p>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 align-top text-gray-600">{submitted}</td>
-                        {formResponsesData.fields.map((field) => {
-                          const answer = answerMap.get(field.id);
-                          return (
-                            <td key={`${response.responseId}-${field.id}`} className="px-3 py-2 align-top">
-                              {answer ? renderCellValue(answer.value) : "—"}
-                            </td>
-                          );
-                        })}
+        <Dialog
+          open={responseDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setResponseDialogOpen(false);
+              setSelectedFormForResponses(null);
+              setFormResponsesData(null);
+              setFormResponsesLoading(false);
+            }
+          }}
+        >
+          <DialogContent className="max-w-6xl max-h-[800px] overflow-y-auto">
+            <DialogHeader className="flex flex-col gap-2">
+              <DialogTitle className="flex-1 min-w-0">
+                Responses for {selectedFormForResponses?.title || formResponsesData?.formTitle || "form"}
+              </DialogTitle>
+              <p className="text-xs text-gray-500">
+                Created by{" "}
+                {selectedFormForResponses
+                  ? creatorsById.get(resolveFormCreatorId(selectedFormForResponses) ?? 0)?.name ??
+                  "Unknown creator"
+                  : "Unknown"}
+              </p>
+              <p className="text-xs text-gray-500">
+                {formResponsesData?.responses.length ?? "0"} responses
+              </p>
+            </DialogHeader>
+            <div className="space-y-4">
+              {formResponsesLoading ? (
+                <p className="text-sm text-gray-500">Loading responses…</p>
+              ) : !formResponsesData?.responses.length ? (
+                <p className="text-sm text-gray-500">No responses have been collected yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full table-auto text-sm">
+                    <thead className="text-xs uppercase text-gray-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Patient</th>
+                        <th className="px-3 py-2 text-left">Submitted at</th>
+                        {formResponsesData.fields.map((field) => (
+                          <th key={field.id} className="px-3 py-2 text-left">
+                            {field.label}
+                          </th>
+                        ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {formResponsesData.responses.map((response) => {
+                        const patient = response.patient;
+                        const submitted = response.submittedAt
+                          ? new Date(response.submittedAt).toLocaleString()
+                          : "—";
+                        const answerMap = new Map(
+                          response.answers.map((answer) => [answer.fieldId, answer]),
+                        );
+                        const renderCellValue = (value: any) => {
+                          if (value === null || value === undefined) return "—";
+                          if (typeof value === "object") return JSON.stringify(value);
+                          return String(value);
+                        };
+                        const patientName = patient
+                          ? `${patient.firstName ?? ""} ${patient.lastName ?? ""}`.trim() || "Unnamed patient"
+                          : "Unknown patient";
+                        return (
+                          <tr key={response.responseId} className="border-b border-gray-100">
+                            <td className="px-3 py-2 align-top">
+                              <p className="font-semibold text-gray-900">{patientName}</p>
+                              {patient?.email && (
+                                <p className="text-xs text-gray-500">{patient.email}</p>
+                              )}
+                              {patient?.phone && (
+                                <p className="text-xs text-gray-500">Phone: {patient.phone}</p>
+                              )}
+                              {patient?.nhsNumber && (
+                                <p className="text-xs text-gray-500">NHS: {patient.nhsNumber}</p>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 align-top text-gray-600">{submitted}</td>
+                            {formResponsesData.fields.map((field) => {
+                              const answer = answerMap.get(field.id);
+                              return (
+                                <td key={`${response.responseId}-${field.id}`} className="px-3 py-2 align-top">
+                                  {answer ? renderCellValue(answer.value) : "—"}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="flex justify-end mt-4 gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={downloadResponsesCsv}
-            disabled={!formResponsesData}
-          >
-            Download responses
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setResponseDialogOpen(false)}
-          >
-            Close
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+            <div className="flex justify-end mt-4 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={downloadResponsesCsv}
+                disabled={!formResponsesData}
+              >
+                Download responses
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setResponseDialogOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
         <Dialog open={showShareLinksDialog} onOpenChange={(open) => !open && closeShareLinksDialog()}>
           <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
@@ -8062,9 +8070,9 @@ const formIds = useMemo(
           </DialogContent>
         </Dialog>
         {/* Top Header - Professional Medical Theme */}
-   
-    
-   
+
+
+
 
       </div>
 
@@ -8150,18 +8158,18 @@ const formIds = useMemo(
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Saved Templates removed*/}
-           
+
               {/* General Templates */}
-                  <div>
-                    <h4 className="font-semibold mb-2">General Letter Templates</h4>
-                    <div className="space-y-2">
-                      <Button
-                        variant="outline"
-                        className="w-full text-left justify-start h-auto p-4"
-                        onClick={() => {
-                          const template = {
-                            subject: "Appointment Confirmation",
-                            body: `Date: ${new Date().toLocaleDateString()}
+              <div>
+                <h4 className="font-semibold mb-2">General Letter Templates</h4>
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    className="w-full text-left justify-start h-auto p-4"
+                    onClick={() => {
+                      const template = {
+                        subject: "Appointment Confirmation",
+                        body: `Date: ${new Date().toLocaleDateString()}
 
 Dear [Patient Name],
 
@@ -8184,30 +8192,30 @@ We look forward to seeing you.
 
 Best regards,
 [Clinic Name]`
-                          };
-                          setPreviewTemplate(template);
-                          setPreviewTemplateName("Appointment Confirmation");
-                          setShowTemplateDialog(false);
-                          setShowTemplatePreviewDialog(true);
-                        }}
-                      >
-                        <div>
-                          <div className="font-medium">
-                            Appointment Confirmation
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            Patient appointment confirmation
-                          </div>
-                        </div>
-                      </Button>
+                      };
+                      setPreviewTemplate(template);
+                      setPreviewTemplateName("Appointment Confirmation");
+                      setShowTemplateDialog(false);
+                      setShowTemplatePreviewDialog(true);
+                    }}
+                  >
+                    <div>
+                      <div className="font-medium">
+                        Appointment Confirmation
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Patient appointment confirmation
+                      </div>
+                    </div>
+                  </Button>
 
-                      <Button
-                        variant="outline"
-                        className="w-full text-left justify-start h-auto p-4"
-                        onClick={() => {
-                          const template = {
-                            subject: "Treatment Plan",
-                            body: `Patient: [Patient Name]
+                  <Button
+                    variant="outline"
+                    className="w-full text-left justify-start h-auto p-4"
+                    onClick={() => {
+                      const template = {
+                        subject: "Treatment Plan",
+                        body: `Patient: [Patient Name]
 Date: ${new Date().toLocaleDateString()}
 
 Diagnosis: [Primary Diagnosis]
@@ -8224,37 +8232,37 @@ Treatment Plan:
 4. Follow-up: [Specify follow-up schedule]
 
 Next Review: [Date]`
-                          };
-                          setPreviewTemplate(template);
-                          setPreviewTemplateName("Treatment Plan");
-                          setShowTemplateDialog(false);
-                          setShowTemplatePreviewDialog(true);
-                        }}
-                      >
-                        <div>
-                          <div className="font-medium">Treatment Plan</div>
-                          <div className="text-sm text-gray-500">
-                            Comprehensive treatment planning template
-                          </div>
-                        </div>
-                      </Button>
+                      };
+                      setPreviewTemplate(template);
+                      setPreviewTemplateName("Treatment Plan");
+                      setShowTemplateDialog(false);
+                      setShowTemplatePreviewDialog(true);
+                    }}
+                  >
+                    <div>
+                      <div className="font-medium">Treatment Plan</div>
+                      <div className="text-sm text-gray-500">
+                        Comprehensive treatment planning template
+                      </div>
                     </div>
-                  </div>
+                  </Button>
                 </div>
-
-              
               </div>
-              {/* Medical Letter Templates */}
-              <div>
-                <h4 className="font-semibold mb-2">Medical Letter Templates</h4>
-                <div className="space-y-2">
-                  <Button
-                    variant="outline"
-                    className="w-full text-left justify-start h-auto p-4"
-                    onClick={() => {
-                      const template = {
-                        subject: "Referral Letter",
-                        body: `Date: ${new Date().toLocaleDateString()}
+            </div>
+
+
+          </div>
+          {/* Medical Letter Templates */}
+          <div>
+            <h4 className="font-semibold mb-2">Medical Letter Templates</h4>
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full text-left justify-start h-auto p-4"
+                onClick={() => {
+                  const template = {
+                    subject: "Referral Letter",
+                    body: `Date: ${new Date().toLocaleDateString()}
 
 Dear Colleague,
 
@@ -8278,28 +8286,28 @@ Yours sincerely,
 
 [Your Name]
 [Your Title]`
-                      };
-                      setPreviewTemplate(template);
-                      setPreviewTemplateName("Referral Letter");
-                      setShowTemplateDialog(false);
-                      setShowTemplatePreviewDialog(true);
-                    }}
-                  >
-                    <div>
-                      <div className="font-medium">Referral Letter</div>
-                      <div className="text-sm text-gray-500">
-                        Standard medical referral template
-                      </div>
-                    </div>
-                  </Button>
+                  };
+                  setPreviewTemplate(template);
+                  setPreviewTemplateName("Referral Letter");
+                  setShowTemplateDialog(false);
+                  setShowTemplatePreviewDialog(true);
+                }}
+              >
+                <div>
+                  <div className="font-medium">Referral Letter</div>
+                  <div className="text-sm text-gray-500">
+                    Standard medical referral template
+                  </div>
+                </div>
+              </Button>
 
-                  <Button
-                    variant="outline"
-                    className="w-full text-left justify-start h-auto p-4"
-                    onClick={() => {
-                      const template = {
-                        subject: "Discharge Summary",
-                        body: `Date of Admission: [Date]
+              <Button
+                variant="outline"
+                className="w-full text-left justify-start h-auto p-4"
+                onClick={() => {
+                  const template = {
+                    subject: "Discharge Summary",
+                    body: `Date of Admission: [Date]
 Date of Discharge: ${new Date().toLocaleDateString()}
 
 Patient: [Patient Name]
@@ -8321,28 +8329,28 @@ Follow-up Instructions:
 
 GP Actions Required:
 [Enter GP actions if any]`
-                      };
-                      setPreviewTemplate(template);
-                      setPreviewTemplateName("Discharge Summary");
-                      setShowTemplateDialog(false);
-                      setShowTemplatePreviewDialog(true);
-                    }}
-                  >
-                    <div>
-                      <div className="font-medium">Discharge Summary</div>
-                      <div className="text-sm text-gray-500">
-                        Hospital discharge summary template
-                      </div>
-                    </div>
-                  </Button>
+                  };
+                  setPreviewTemplate(template);
+                  setPreviewTemplateName("Discharge Summary");
+                  setShowTemplateDialog(false);
+                  setShowTemplatePreviewDialog(true);
+                }}
+              >
+                <div>
+                  <div className="font-medium">Discharge Summary</div>
+                  <div className="text-sm text-gray-500">
+                    Hospital discharge summary template
+                  </div>
+                </div>
+              </Button>
 
-                  <Button
-                    variant="outline"
-                    className="w-full text-left justify-start h-auto p-4"
-                    onClick={() => {
-                      const template = {
-                        subject: "Medical Certificate",
-                        body: `Date: ${new Date().toLocaleDateString()}
+              <Button
+                variant="outline"
+                className="w-full text-left justify-start h-auto p-4"
+                onClick={() => {
+                  const template = {
+                    subject: "Medical Certificate",
+                    body: `Date: ${new Date().toLocaleDateString()}
 
 Patient Name: [Patient Name]
 Date of Birth: [DOB]
@@ -8368,22 +8376,22 @@ Additional Comments:
 Dr. [Name]
 Medical Practitioner
 Registration No: [Number]`
-                      };
-                      setPreviewTemplate(template);
-                      setPreviewTemplateName("Medical Certificate");
-                      setShowTemplateDialog(false);
-                      setShowTemplatePreviewDialog(true);
-                    }}
-                  >
-                    <div>
-                      <div className="font-medium">Medical Certificate</div>
-                      <div className="text-sm text-gray-500">
-                        Fitness for work certificate
-                      </div>
-                    </div>
-                  </Button>
+                  };
+                  setPreviewTemplate(template);
+                  setPreviewTemplateName("Medical Certificate");
+                  setShowTemplateDialog(false);
+                  setShowTemplatePreviewDialog(true);
+                }}
+              >
+                <div>
+                  <div className="font-medium">Medical Certificate</div>
+                  <div className="text-sm text-gray-500">
+                    Fitness for work certificate
+                  </div>
                 </div>
-              </div>
+              </Button>
+            </div>
+          </div>
           <div className="flex justify-end">
             <Button
               variant="ghost"
@@ -8406,7 +8414,7 @@ Registration No: [Number]`
               Cancel
             </Button>
           </div>
-           
+
         </DialogContent>
       </Dialog>
 
@@ -8558,7 +8566,7 @@ Registration No: [Number]`
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Clinic Information Options */}
               <div>
-              
+
                 <div className="space-y-2">
                   <Button
                     variant="outline"
@@ -8865,7 +8873,7 @@ Registration No: [Number]`
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Patient Information Options */}
               <div>
-              
+
                 <div className="space-y-2">
                   <Button
                     variant="outline"
@@ -8999,7 +9007,7 @@ Registration No: [Number]`
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Recipient Information Options */}
               <div>
-               
+
                 <div className="space-y-2">
                   <Button
                     variant="outline"
@@ -9057,7 +9065,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-               
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9074,7 +9082,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                  
+
                   </div>
                 </div>
               </div>
@@ -9144,7 +9152,7 @@ Registration No: [Number]`
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Appointment Information Options */}
               <div>
-              
+
                 <div className="space-y-2">
                   <Button
                     variant="outline"
@@ -9279,7 +9287,7 @@ Registration No: [Number]`
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Lab Information Options */}
               <div>
-             
+
                 <div className="space-y-2">
                   <Button
                     variant="outline"
@@ -9419,7 +9427,7 @@ Registration No: [Number]`
             <div className="grid grid-cols-1 gap-4 max-h-96 overflow-y-auto">
               {/* Patient Records Options */}
               <div>
-              
+
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <Button
@@ -9437,7 +9445,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                  
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9453,7 +9461,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                   
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9470,7 +9478,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                   
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9487,7 +9495,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9504,7 +9512,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                
+
                   </div>
                 </div>
               </div>
@@ -9592,7 +9600,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                   
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9609,7 +9617,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                   
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9626,7 +9634,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                   
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9643,7 +9651,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                  
+
                   </div>
 
                   <div className="flex gap-2">
@@ -9660,7 +9668,7 @@ Registration No: [Number]`
                         </div>
                       </div>
                     </Button>
-                  
+
                   </div>
                 </div>
               </div>
@@ -9992,14 +10000,14 @@ Registration No: [Number]`
                     Created: {new Date(selectedSavedTemplate.createdAt).toLocaleDateString()}
                   </p>
                 </div>
-                
+
                 <div className="border rounded-lg p-4 bg-gray-50 max-h-96 overflow-y-auto">
-                  <div 
+                  <div
                     dangerouslySetInnerHTML={{ __html: selectedSavedTemplate.content }}
                     className="prose max-w-none"
                   />
                 </div>
-                
+
                 <div className="flex justify-end gap-2 pt-4 border-t">
                   <Button
                     variant="outline"
@@ -10115,7 +10123,7 @@ Registration No: [Number]`
           </DialogHeader>
           <div className="py-4">
             <div className="border rounded-lg p-4 bg-white min-h-96 max-h-96 overflow-y-auto">
-              <div 
+              <div
                 dangerouslySetInnerHTML={{ __html: documentContent }}
                 className="prose prose-sm max-w-none"
               />
@@ -10270,8 +10278,8 @@ Registration No: [Number]`
                     >
                       {shareFormData.doctor
                         ? doctors.find((doctor) => doctor.email === shareFormData.doctor)
-                            ? `Dr. ${doctors.find((doctor) => doctor.email === shareFormData.doctor)?.firstName} ${doctors.find((doctor) => doctor.email === shareFormData.doctor)?.lastName} (${shareFormData.doctor})`
-                            : shareFormData.doctor
+                          ? `Dr. ${doctors.find((doctor) => doctor.email === shareFormData.doctor)?.firstName} ${doctors.find((doctor) => doctor.email === shareFormData.doctor)?.lastName} (${shareFormData.doctor})`
+                          : shareFormData.doctor
                         : "Select doctor..."}
                       <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
@@ -10333,7 +10341,7 @@ Registration No: [Number]`
             {/* Create the Letter Section */}
             <div className="border-t pt-4 mt-6">
               <div className="text-center">
-               
+
                 <div className="flex justify-center gap-3">
                   <Button
                     variant="outline"
@@ -10348,7 +10356,7 @@ Registration No: [Number]`
                       // Save current letter as draft
                       if (!documentContent || documentContent.trim() === '') {
                         toast({
-                          title: "Error", 
+                          title: "Error",
                           description: "Please create document content before saving draft.",
                           variant: "destructive"
                         });
@@ -10400,7 +10408,7 @@ Registration No: [Number]`
                     className="px-6"
                     data-testid="button-drafts"
                   >
-                 Save Drafts
+                    Save Drafts
                   </Button>
                   <Button
                     onClick={async () => {
@@ -10415,7 +10423,7 @@ Registration No: [Number]`
 
                       if (!documentContent || documentContent.trim() === '') {
                         toast({
-                          title: "Error", 
+                          title: "Error",
                           description: "Please create document content before sending.",
                           variant: "destructive"
                         });
@@ -10442,7 +10450,7 @@ Registration No: [Number]`
                         });
 
                         const responseData = await response.json();
-                        
+
                         if (response.ok) {
                           if (responseData.success) {
                             // Email sent successfully
@@ -10562,8 +10570,8 @@ Registration No: [Number]`
               ))}
             </div>
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowCategoryOptionsDialog(false);
                   setShowPatientTemplateDialog(true);
@@ -10571,8 +10579,8 @@ Registration No: [Number]`
               >
                 Back to Categories
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setShowCategoryOptionsDialog(false)}
               >
                 Cancel
@@ -10633,8 +10641,8 @@ Registration No: [Number]`
               ))}
             </div>
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowDoctorCategoryOptionsDialog(false);
                   setShowDoctorTemplateDialog(true);
@@ -10642,8 +10650,8 @@ Registration No: [Number]`
               >
                 Back to Categories
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setShowDoctorCategoryOptionsDialog(false)}
               >
                 Cancel
@@ -10703,7 +10711,7 @@ Registration No: [Number]`
                     <span className="text-sm text-gray-700">Footer</span>
                   </label>
                 </div>
-                
+
                 {addLogo && selectedLogoTemplate && (
                   <div className="bg-white p-3 rounded border">
                     <h5 className="text-sm font-medium text-gray-700 mb-1">Selected Logo Template:</h5>
@@ -10753,7 +10761,7 @@ Registration No: [Number]`
                     </div>
                   </div>
                 )}
-                
+
                 {addClinicHeader && selectedClinicHeaderType && (
                   <div className="bg-white p-3 rounded border">
                     <h5 className="text-sm font-medium text-gray-700 mb-1">Selected Clinic Header:</h5>
@@ -11008,7 +11016,7 @@ Registration No: [Number]`
                           ) : (
                             <div className="flex-1"></div>
                           )}
-                          
+
                           {/* Center */}
                           {addClinicHeader ? (
                             <div className={`flex-2 ${clinicHeaderPosition === 'left' ? 'text-left' : clinicHeaderPosition === 'right' ? 'text-right' : 'text-center'}`}>
@@ -11085,7 +11093,7 @@ Registration No: [Number]`
                           ) : (
                             <div className="flex-2"></div>
                           )}
-                          
+
                           {/* Right side */}
                           {logoPosition === "right" && addLogo ? (
                             <div className="text-right">
@@ -11138,7 +11146,7 @@ Registration No: [Number]`
                       <hr className="mb-4 border-gray-300" />
                     </>
                   )}
-                  
+
                   {/* Template Content Preview */}
                   <div className="space-y-3">
                     <div>
@@ -11152,7 +11160,7 @@ Registration No: [Number]`
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Footer Preview */}
                   {addFooter && (
                     <div className="mt-8 pt-4 border-t border-gray-300 text-center text-xs text-gray-600">
@@ -11166,8 +11174,8 @@ Registration No: [Number]`
               </div>
             )}
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowTemplatePreviewDialog(false);
                   setAddLogo(false);
@@ -11181,7 +11189,7 @@ Registration No: [Number]`
               >
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={handleLoadTemplateFromPreview}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
@@ -11241,7 +11249,7 @@ Registration No: [Number]`
                   <span className="text-sm text-gray-700">Footer</span>
                 </label>
               </div>
-              
+
               {addLogo && selectedLogoTemplate && (
                 <div className="bg-white p-3 rounded border mt-3">
                   <h5 className="text-sm font-medium text-gray-700 mb-1">Selected Logo Template:</h5>
@@ -11289,7 +11297,7 @@ Registration No: [Number]`
                   </div>
                 </div>
               )}
-              
+
               {addClinicHeader && selectedClinicHeaderType && (
                 <div className="bg-white p-3 rounded border mt-3">
                   <h5 className="text-sm font-medium text-gray-700 mb-1">Selected Clinic Header:</h5>
@@ -11528,7 +11536,7 @@ Registration No: [Number]`
                           ) : (
                             <div className="flex-1"></div>
                           )}
-                          
+
                           {/* Center */}
                           {addClinicHeader ? (
                             <div className={`flex-2 ${clinicHeaderPosition === 'left' ? 'text-left' : clinicHeaderPosition === 'right' ? 'text-right' : 'text-center'}`}>
@@ -11605,7 +11613,7 @@ Registration No: [Number]`
                           ) : (
                             <div className="flex-2"></div>
                           )}
-                          
+
                           {/* Right side */}
                           {logoPosition === "right" && addLogo ? (
                             <div className="text-right">
@@ -11658,7 +11666,7 @@ Registration No: [Number]`
                       <hr className="mb-4 border-gray-300" />
                     </>
                   )}
-                  
+
                   {/* Template Content Preview */}
                   <div className="space-y-3">
                     <div>
@@ -11672,7 +11680,7 @@ Registration No: [Number]`
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Footer Preview */}
                   {addFooter && (
                     <div className="mt-8 pt-4 border-t border-gray-300 text-center text-xs text-gray-600">
@@ -11686,8 +11694,8 @@ Registration No: [Number]`
               </div>
             )}
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowOtherTemplatePreviewDialog(false);
                   setAddLogo(false);
@@ -11701,12 +11709,12 @@ Registration No: [Number]`
               >
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={() => {
                   // Load template with the same functionality as Patient Letter Templates
                   if (previewOtherTemplate) {
                     let finalHtml = '';
-                    
+
                     // Add header section with logo and clinic header if selected
                     if (addLogo || addClinicHeader) {
                       const getLogoContent = () => {
@@ -11817,14 +11825,14 @@ Registration No: [Number]`
                         `;
                       } else {
                         finalHtml += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">';
-                        
+
                         // Left side
                         if (logoPosition === "left" && addLogo) {
                           finalHtml += `<div style="text-align: left;">${logoContent}</div>`;
                         } else {
                           finalHtml += '<div style="flex: 1;"></div>';
                         }
-                        
+
                         // Center
                         if (addClinicHeader) {
                           finalHtml += `<div style="flex: 2;">${getClinicHeaderContent()}</div>`;
@@ -11833,24 +11841,24 @@ Registration No: [Number]`
                         } else {
                           finalHtml += '<div style="flex: 2;"></div>';
                         }
-                        
+
                         // Right side
                         if (logoPosition === "right" && addLogo) {
                           finalHtml += `<div style="text-align: right;">${logoContent}</div>`;
                         } else {
                           finalHtml += '<div style="flex: 1;"></div>';
                         }
-                        
+
                         finalHtml += '</div>';
                       }
-                      
+
                       finalHtml += '<hr style="margin: 20px 0; border: 1px solid #e5e7eb;">';
                     }
-                    
+
                     // Add the main template content
                     const templateHtml = `<p style="margin: 0 0 12px; line-height: 1.6;"><strong>Subject:</strong> ${previewOtherTemplate.subject}</p><div style="margin: 12px 0; line-height: 1.6; white-space: pre-wrap;">${previewOtherTemplate.body.replace(/\n/g, '<br>')}</div>`;
                     finalHtml += templateHtml;
-                    
+
                     // Add footer if selected
                     if (addFooter) {
                       finalHtml += `
@@ -11862,13 +11870,13 @@ Registration No: [Number]`
                         </div>
                       `;
                     }
-                    
+
                     // Load template into editor with proper HTML formatting
                     if (textareaRef) {
                       textareaRef.innerHTML = finalHtml;
                       setDocumentContent(finalHtml);
                     }
-                    
+
                     setShowOtherTemplatePreviewDialog(false);
                     setShowPatientDialog(false);
                     setShowAllTemplatesDialog(false);
@@ -11879,7 +11887,7 @@ Registration No: [Number]`
                     setAddFooter(false);
                     setClinicHeaderPosition("center");
                     setSelectedLogoTemplate("");
-                    
+
                     setSuccessMessage(`${previewOtherTemplateName} template has been loaded into the editor.`);
                     setShowSuccessModal(true);
                   }
@@ -11901,7 +11909,7 @@ Registration No: [Number]`
             <h2 className="text-2xl font-bold text-gray-800 mt-2">Clinic Logo Templates</h2>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4 mt-4">
-            <div 
+            <div
               className={`border rounded-lg p-4 hover:bg-gray-50 cursor-pointer ${selectedLogoTemplate === "modern-clinic" ? "bg-blue-50 border-blue-500" : ""}`}
               onClick={() => setSelectedLogoTemplate("modern-clinic")}
             >
@@ -11913,8 +11921,8 @@ Registration No: [Number]`
                 <p className="text-sm text-gray-600 text-center">Icon with clinic name</p>
               </div>
             </div>
-            
-            <div 
+
+            <div
               className={`border rounded-lg p-4 hover:bg-gray-50 cursor-pointer ${selectedLogoTemplate === "professional" ? "bg-blue-50 border-blue-500" : ""}`}
               onClick={() => setSelectedLogoTemplate("professional")}
             >
@@ -11926,8 +11934,8 @@ Registration No: [Number]`
                 <p className="text-sm text-gray-600 text-center">Boxed design</p>
               </div>
             </div>
-            
-            <div 
+
+            <div
               className={`border rounded-lg p-4 hover:bg-gray-50 cursor-pointer ${selectedLogoTemplate === "minimal" ? "bg-blue-50 border-blue-500" : ""}`}
               onClick={() => setSelectedLogoTemplate("minimal")}
             >
@@ -11939,8 +11947,8 @@ Registration No: [Number]`
                 <p className="text-sm text-gray-600 text-center">Clean typography</p>
               </div>
             </div>
-            
-            <div 
+
+            <div
               className={`border rounded-lg p-4 hover:bg-gray-50 cursor-pointer ${selectedLogoTemplate === "medical-cross" ? "bg-blue-50 border-blue-500" : ""}`}
               onClick={() => setSelectedLogoTemplate("medical-cross")}
             >
@@ -11952,8 +11960,8 @@ Registration No: [Number]`
                 <p className="text-sm text-gray-600 text-center">Classic red cross</p>
               </div>
             </div>
-            
-            <div 
+
+            <div
               className={`border rounded-lg p-4 hover:bg-gray-50 cursor-pointer ${selectedLogoTemplate === "health-plus" ? "bg-blue-50 border-blue-500" : ""}`}
               onClick={() => setSelectedLogoTemplate("health-plus")}
             >
@@ -11965,8 +11973,8 @@ Registration No: [Number]`
                 <p className="text-sm text-gray-600 text-center">Medical symbol</p>
               </div>
             </div>
-            
-            <div 
+
+            <div
               className={`border rounded-lg p-4 hover:bg-gray-50 cursor-pointer ${selectedLogoTemplate === "custom" ? "bg-blue-50 border-blue-500" : ""}`}
               onClick={() => {
                 const fileInput = document.getElementById('custom-logo-upload') as HTMLInputElement;
@@ -11982,7 +11990,7 @@ Registration No: [Number]`
               </div>
             </div>
           </div>
-          
+
           {/* Hidden file input for custom logo upload */}
           <input
             id="custom-logo-upload"
@@ -12001,12 +12009,12 @@ Registration No: [Number]`
               }
             }}
           />
-          
+
           <div className="flex justify-end gap-2 pt-4 border-t mt-6">
             <Button variant="outline" onClick={() => setShowLogoTemplatesDialog(false)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 setAddLogo(true);
                 setLogoPosition(tempLogoPosition);
@@ -12026,11 +12034,11 @@ Registration No: [Number]`
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Clinic Information Templates</DialogTitle>
-          
+
           </DialogHeader>
           <div className="space-y-4 mt-4">
-            <div 
-              className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer" 
+            <div
+              className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
               onClick={() => {
                 setTempClinicHeaderType("full-header");
                 setShowClinicPositionDialog(true);
@@ -12040,8 +12048,8 @@ Registration No: [Number]`
               <h6 className="font-semibold text-gray-800">Full Header</h6>
               <p className="text-sm text-gray-600">Complete clinic header with name, address, phone, email, and website</p>
             </div>
-            
-            <div 
+
+            <div
               className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
               onClick={() => {
                 setTempClinicHeaderType("letterhead");
@@ -12052,8 +12060,8 @@ Registration No: [Number]`
               <h6 className="font-semibold text-gray-800">Professional Letterhead</h6>
               <p className="text-sm text-gray-600">Formal letterhead design with clinic branding</p>
             </div>
-            
-            <div 
+
+            <div
               className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
               onClick={() => {
                 setTempClinicHeaderType("name-only");
@@ -12064,8 +12072,8 @@ Registration No: [Number]`
               <h6 className="font-semibold text-gray-800">Clinic Name Only</h6>
               <p className="text-sm text-gray-600">Just the clinic name in bold text</p>
             </div>
-            
-            <div 
+
+            <div
               className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
               onClick={() => {
                 setTempClinicHeaderType("contact-info");
@@ -12177,8 +12185,8 @@ Registration No: [Number]`
 
             {/* Action Buttons */}
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowClinicPositionDialog(false);
                   setShowClinicDialog(true);
@@ -12186,7 +12194,7 @@ Registration No: [Number]`
               >
                 Back
               </Button>
-              <Button 
+              <Button
                 onClick={handleInsertClinicHeader}
               >
                 OK
@@ -12260,7 +12268,7 @@ Registration No: [Number]`
                 <h6 className="font-semibold text-gray-800">Main Hospital</h6>
                 <p className="text-sm text-gray-600">Main hospital information and contact details</p>
               </div>
-              
+
               <div
                 className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
                 onClick={() => {
@@ -12279,7 +12287,7 @@ Registration No: [Number]`
                 <h6 className="font-semibold text-gray-800">Cardiology Department</h6>
                 <p className="text-sm text-gray-600">Cardiology department information and contact details</p>
               </div>
-              
+
               <div
                 className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
                 onClick={() => {
@@ -12298,7 +12306,7 @@ Registration No: [Number]`
                 <h6 className="font-semibold text-gray-800">Neurology Department</h6>
                 <p className="text-sm text-gray-600">Neurology department information and contact details</p>
               </div>
-              
+
               <div
                 className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
                 onClick={() => {
@@ -12317,7 +12325,7 @@ Registration No: [Number]`
                 <h6 className="font-semibold text-gray-800">Orthopedic Department</h6>
                 <p className="text-sm text-gray-600">Orthopedic department information and contact details</p>
               </div>
-              
+
               <div
                 className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
                 onClick={() => {
@@ -12336,7 +12344,7 @@ Registration No: [Number]`
                 <h6 className="font-semibold text-gray-800">Pediatrics Department</h6>
                 <p className="text-sm text-gray-600">Pediatrics department information and contact details</p>
               </div>
-              
+
               <div
                 className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
                 onClick={() => {
@@ -12712,8 +12720,8 @@ Registration No: [Number]`
                     Template Categories
                   </h4>
                   <p className="text-sm text-blue-700">
-                    Choose from various template categories to quickly insert formatted content 
-                    into your documents. Each template provides structured placeholders that can 
+                    Choose from various template categories to quickly insert formatted content
+                    into your documents. Each template provides structured placeholders that can
                     be easily replaced with actual data.
                   </p>
                 </div>
@@ -12820,7 +12828,7 @@ Registration No: [Number]`
                                   Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
                                 },
                               });
-                              
+
                               if (response.ok) {
                                 refetchDrafts();
                                 setSuccessMessage("Draft has been deleted successfully.");
@@ -12905,7 +12913,7 @@ Registration No: [Number]`
               </div>
               <div>
                 <Label>Content:</Label>
-                <div 
+                <div
                   className="border rounded-lg p-4 mt-2 max-h-96 overflow-y-auto bg-gray-50"
                   dangerouslySetInnerHTML={{ __html: selectedDraft.documentContent }}
                 />
@@ -12951,7 +12959,7 @@ Registration No: [Number]`
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-green-600">Success</DialogTitle>
           </DialogHeader>
-          
+
           <div className="py-4">
             <p className="text-gray-700">{successMessage}</p>
           </div>

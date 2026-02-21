@@ -3,7 +3,9 @@ import { storage } from "../storage";
 import type { Patient, MedicalRecord } from "@shared/schema";
 
 // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key"
+});
 
 export interface ClinicalAlert {
   id: string;
@@ -41,7 +43,7 @@ export interface DiagnosticSuggestion {
 }
 
 export class ClinicalDecisionSupport {
-  
+
   /**
    * Analyzes patient medications for potential drug interactions
    */
@@ -91,7 +93,7 @@ Analyze for drug interactions and provide clinical alerts in this JSON format:
       });
 
       const result = JSON.parse(response.choices[0].message.content || '{"alerts": []}');
-      
+
       return result.alerts.map((alert: any, index: number) => ({
         id: `alert_${Date.now()}_${index}`,
         ...alert,
@@ -105,10 +107,6 @@ Analyze for drug interactions and provide clinical alerts in this JSON format:
     }
   }
 
-  /**
-   * Generates AI analysis for a pair of medications (for Add Drug Interaction form).
-   * Returns severity, description, warnings, recommendations, and notes.
-   */
   async generateDrugInteractionAnalysis(
     medication1: { name: string; dosage?: string; frequency?: string },
     medication2: { name: string; dosage?: string; frequency?: string }
@@ -121,22 +119,50 @@ Analyze for drug interactions and provide clinical alerts in this JSON format:
   }> {
     const med1Str = [medication1.name, medication1.dosage, medication1.frequency].filter(Boolean).join(", ");
     const med2Str = [medication2.name, medication2.dosage, medication2.frequency].filter(Boolean).join(", ");
+
     try {
+      if (!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY_ENV_VAR) {
+        throw new Error("OpenAI API key is missing. Please configure it in your environment variables.");
+      }
+
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
           {
             role: "system",
-            content: `You are a clinical pharmacist AI. Analyze the drug interaction between two medications. Return a single JSON object with: severity (one of "low", "medium", "high"), description (plain text paragraph), warnings (array of strings, one per line), recommendations (array of strings, clinical recommendations one per line), notes (optional additional clinical notes string). Be concise and clinically accurate.`
+            content: "You are a clinical pharmacist AI. Analyze the drug interaction between two medications. Your response must be a single JSON object."
           },
           {
             role: "user",
-            content: `Medication 1: ${med1Str}\nMedication 2: ${med2Str}\n\nAnalyze the potential drug interaction and return JSON only in this exact format:\n{\n  "severity": "low" or "medium" or "high",\n  "description": "Full paragraph describing the interaction.",\n  "warnings": ["Warning 1", "Warning 2"],\n  "recommendations": ["Recommendation 1", "Recommendation 2"],\n  "notes": "Any additional clinical notes."\n}`
+            content: `Medication 1: ${med1Str}
+Medication 2: ${med2Str}
+
+Analyze the potential drug interaction and return JSON only in this exact format:
+{
+  "severity": "low" | "medium" | "high",
+  "description": "Full paragraph describing the interaction.",
+  "warnings": ["Warning 1", "Warning 2"],
+  "recommendations": ["Recommendation 1", "Recommendation 2"],
+  "notes": "Any additional clinical notes."
+}`
           }
         ],
         response_format: { type: "json_object" }
       });
-      const result = JSON.parse(response.choices[0].message.content || "{}");
+
+      const content = response.choices[0]?.message?.content || "{}";
+      let result;
+      try {
+        result = JSON.parse(content);
+      } catch (e) {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          result = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("Failed to parse AI response as JSON");
+        }
+      }
+
       const severityMap: Record<string, "low" | "medium" | "high"> = {
         low: "low",
         moderate: "medium",
@@ -144,16 +170,18 @@ Analyze for drug interactions and provide clinical alerts in this JSON format:
         high: "high",
         critical: "high"
       };
-      const severity = severityMap[String(result.severity).toLowerCase()] || "medium";
+
+      const severity = severityMap[String(result.severity || "").toLowerCase()] || "medium";
+
       return {
         severity,
-        description: result.description || "No description generated.",
-        warnings: Array.isArray(result.warnings) ? result.warnings : [result.warnings].filter(Boolean),
-        recommendations: Array.isArray(result.recommendations) ? result.recommendations : [result.recommendations].filter(Boolean),
+        description: result.description || "No interaction description generated.",
+        warnings: Array.isArray(result.warnings) ? result.warnings : (result.warnings ? [result.warnings] : []),
+        recommendations: Array.isArray(result.recommendations) ? result.recommendations : (result.recommendations ? [result.recommendations] : []),
         notes: result.notes || ""
       };
-    } catch (error) {
-      console.error("Error generating drug interaction analysis:", error);
+    } catch (error: any) {
+      console.error("[ClinicalDecisionSupport] AI Error:", error);
       throw error;
     }
   }
@@ -164,7 +192,7 @@ Analyze for drug interactions and provide clinical alerts in this JSON format:
   async performRiskAssessment(patientId: number, organizationId: number): Promise<RiskAssessment> {
     const patient = await storage.getPatient(patientId, organizationId);
     const records = await storage.getMedicalRecordsByPatient(patientId, organizationId);
-    
+
     if (!patient) throw new Error("Patient not found");
 
     const age = this.calculateAge(patient.dateOfBirth);
@@ -204,7 +232,7 @@ Provide risk assessment in JSON format:
       });
 
       const result = JSON.parse(response.choices[0].message.content || '{}');
-      
+
       const nextReviewDate = new Date();
       nextReviewDate.setMonth(nextReviewDate.getMonth() + (result.nextReviewMonths || 6));
 
@@ -236,8 +264,8 @@ Provide risk assessment in JSON format:
    * Generates diagnostic suggestions based on symptoms and clinical data
    */
   async generateDiagnosticSuggestions(
-    symptoms: string[], 
-    patientId: number, 
+    symptoms: string[],
+    patientId: number,
     organizationId: number,
     clinicalFindings?: string
   ): Promise<DiagnosticSuggestion[]> {
@@ -408,11 +436,11 @@ Provide diagnostic suggestions in JSON format:
     const birth = new Date(birthDate);
     let age = today.getFullYear() - birth.getFullYear();
     const monthDiff = today.getMonth() - birth.getMonth();
-    
+
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
       age--;
     }
-    
+
     return age;
   }
 }
