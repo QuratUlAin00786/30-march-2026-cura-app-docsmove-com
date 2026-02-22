@@ -16,7 +16,7 @@ import { useTenant } from "@/hooks/use-tenant";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
-import { Settings as SettingsIcon, Globe, Shield, Palette, Save, Check, Upload, X, Link as LinkIcon, User, Plus, Lock, Eye, EyeOff, FileText, Image, Bold, Italic, Underline, Edit, CheckCircle } from "lucide-react";
+import { Settings as SettingsIcon, Globe, Shield, Palette, Save, Check, Upload, X, Link as LinkIcon, User, Plus, Lock, Eye, EyeOff, FileText, Image, Bold, Italic, Underline, Edit, CheckCircle, CreditCard, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import type { Organization } from "@/types";
@@ -92,6 +92,60 @@ const getFontFamilyFromValue = (fontValue: string) => {
   };
   return fontMap[fontValue] || 'Verdana, Geneva, "DejaVu Sans", sans-serif';
 };
+
+// Stripe Dashboard Button Component
+function StripeDashboardButton({ organizationId }: { organizationId: number }) {
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleOpenStripeDashboard = async () => {
+    setIsLoading(true);
+    try {
+      const response = await apiRequest('POST', '/api/organization/stripe-login-link');
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create login link');
+      }
+
+      const data = await response.json();
+      
+      if (data.url) {
+        // Open Stripe Dashboard in new tab
+        window.open(data.url, '_blank');
+        toast({
+          title: "Stripe Dashboard",
+          description: "Opening Stripe Dashboard in a new tab...",
+          variant: "default",
+        });
+      } else {
+        throw new Error('No login URL received');
+      }
+    } catch (error: any) {
+      console.error('Stripe login link error:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Unable to access Stripe Dashboard. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <Button
+      onClick={handleOpenStripeDashboard}
+      disabled={isLoading}
+      className="w-full sm:w-auto"
+      variant="outline"
+    >
+      <CreditCard className="h-4 w-4 mr-2" />
+      {isLoading ? "Generating Link..." : "View Stripe Dashboard"}
+      <ExternalLink className="h-4 w-4 ml-2" />
+    </Button>
+  );
+}
 
 export default function Settings() {
   const { canView, canEdit: canEditPermission } = useRolePermissions();
@@ -1285,6 +1339,29 @@ export default function Settings() {
               )}
             </CardContent>
           </Card>
+
+          {/* Stripe Dashboard Access */}
+          {organization?.stripeAccountId && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <CreditCard className="h-5 w-5" />
+                  <span>Stripe Dashboard Access</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Access your Stripe Express Dashboard to view payments, payouts, refunds, and manage your account settings.
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500">
+                    The login link is temporary and secure. It will expire after use or within 1 hour.
+                  </p>
+                </div>
+                <StripeDashboardButton organizationId={organization.id} />
+              </CardContent>
+            </Card>
+          )}
 
           {/* User Details and Change Password in a row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

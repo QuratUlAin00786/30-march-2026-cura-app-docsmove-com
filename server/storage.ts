@@ -675,6 +675,8 @@ export class DatabaseStorage implements IStorage {
         features: organizations.features,
         accessLevel: organizations.accessLevel,
         subscriptionStatus: organizations.subscriptionStatus,
+        stripeAccountId: organizations.stripeAccountId,
+        stripeStatus: organizations.stripeStatus,
         createdAt: organizations.createdAt,
         updatedAt: organizations.updatedAt,
       })
@@ -752,6 +754,8 @@ export class DatabaseStorage implements IStorage {
           features: organizations.features,
           accessLevel: organizations.accessLevel,
           subscriptionStatus: organizations.subscriptionStatus,
+          stripeAccountId: organizations.stripeAccountId,
+          stripeStatus: organizations.stripeStatus,
           createdAt: organizations.createdAt,
           updatedAt: organizations.updatedAt,
         });
@@ -6429,6 +6433,41 @@ export class DatabaseStorage implements IStorage {
         throw new Error(`Admin email '${customerData.adminEmail}' is already in use. Please use a different email address.`);
       }
 
+      // Create Stripe Express account first
+      let stripeAccountId: string | null = null;
+      let stripeStatus: string = 'active';
+      
+      try {
+        const Stripe = (await import('stripe')).default;
+        const stripe = process.env.STRIPE_SECRET_KEY
+          ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+              apiVersion: '2025-07-30.basil',
+            })
+          : null;
+        
+        if (stripe) {
+          console.log('💳 [CUSTOMER-CREATE] Creating Stripe Express account...');
+          const stripeAccount = await stripe.accounts.create({
+            type: "express",
+            email: customerData.adminEmail,
+            country: "IN",
+            metadata: {
+              organization_name: customerData.name,
+              subdomain: customerData.subdomain,
+            },
+          });
+          stripeAccountId = stripeAccount.id;
+          stripeStatus = 'active';
+          console.log('✅ [CUSTOMER-CREATE] Stripe Express account created:', stripeAccountId);
+        } else {
+          console.warn('⚠️ [CUSTOMER-CREATE] Stripe not configured, skipping account creation');
+        }
+      } catch (stripeError: any) {
+        console.error('❌ [CUSTOMER-CREATE] Failed to create Stripe account:', stripeError?.message || stripeError);
+        // Don't fail organization creation if Stripe account creation fails
+        stripeStatus = 'disconnected';
+      }
+
       // Create organization - match database column names (snake_case)
       console.log('🏢 [CUSTOMER-CREATE] Creating organization...');
       const [organization] = await db.insert(organizations)
@@ -6440,7 +6479,9 @@ export class DatabaseStorage implements IStorage {
           region: 'UK',
           subscriptionStatus: customerData.billingPackageId ? 'active' : 'trial',
           features: customerData.features || {},
-          accessLevel: customerData.accessLevel || 'full'
+          accessLevel: customerData.accessLevel || 'full',
+          stripeAccountId: stripeAccountId,
+          stripeStatus: stripeStatus
         })
         .returning();
       
@@ -6952,6 +6993,8 @@ export class DatabaseStorage implements IStorage {
           ELSE NULL
         END
       `.as('daysLeft'),
+      stripeAccountId: organizations.stripeAccountId,
+      stripeStatus: organizations.stripeStatus,
     })
     .from(organizations)
     .leftJoin(users, eq(organizations.id, users.organizationId))
@@ -6966,6 +7009,8 @@ export class DatabaseStorage implements IStorage {
       organizations.paymentStatus,
       organizations.createdAt,
       organizations.features,
+      organizations.stripeAccountId,
+      organizations.stripeStatus,
       saasSubscriptions.paymentStatus,
       saasSubscriptions.currentPeriodStart,
       saasSubscriptions.currentPeriodEnd,

@@ -171,6 +171,8 @@ export interface Organization {
     features?: { aiEnabled?: boolean; billingEnabled?: boolean };
   };
   subscriptionStatus: "trial" | "active" | "suspended" | "cancelled";
+  stripeAccountId?: string | null;
+  stripeStatus?: string | null;
   createdAt: string;
 }
 

@@ -20,6 +20,13 @@ import {
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { saasApiRequest } from '@/lib/saasQueryClient';
 import { useToast } from '@/hooks/use-toast';
@@ -34,7 +41,8 @@ import {
   CreditCard,
   Settings,
   Trash2,
-  CheckCircle
+  CheckCircle,
+  MoreVertical
 } from 'lucide-react';
 
 const formatLocalDateTime = (date: Date) => {
@@ -239,6 +247,39 @@ export default function SaaSCustomers() {
     return () => clearTimeout(debounce);
   }, [searchInput]);
 
+  // Handle Stripe onboarding callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const stripeSuccess = params.get('stripe_success');
+    const stripeRefresh = params.get('stripe_refresh');
+    const organizationId = params.get('organization_id');
+
+    if (stripeSuccess === 'true' || stripeRefresh === 'true') {
+      // Remove query parameters from URL
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+
+      // Invalidate queries to refresh organization data
+      queryClient.invalidateQueries({ queryKey: ['/api/saas/customers'] });
+
+      if (stripeSuccess === 'true') {
+        toast({
+          title: "Stripe Onboarding Complete",
+          description: organizationId 
+            ? `Organization ${organizationId} has completed Stripe onboarding. Please verify the account status.`
+            : "Stripe onboarding completed successfully.",
+          variant: "default",
+        });
+      } else if (stripeRefresh === 'true') {
+        toast({
+          title: "Stripe Onboarding Incomplete",
+          description: "The onboarding process was not completed. You can try again by clicking 'Create Stripe'.",
+          variant: "default",
+        });
+      }
+    }
+  }, [queryClient, toast]);
+
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!searchInput.trim()) return;
@@ -387,6 +428,75 @@ export default function SaaSCustomers() {
       expiresAt: normalizedExpiresAt,
     });
   };
+
+  const connectStripeMutation = useMutation({
+    mutationFn: async (organizationId: number) => {
+      const response = await saasApiRequest('POST', `/api/saas/organizations/${organizationId}/connect-stripe`);
+      if (!response.ok) {
+        const error = await response.json();
+        // Preserve the full error object for better error handling
+        const errorWithDetails = new Error(error.message || 'Failed to connect Stripe');
+        (errorWithDetails as any).details = error;
+        throw errorWithDetails;
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/saas/customers'] });
+      
+      // If onboarding URL is provided, redirect to Stripe onboarding
+      if (data.onboardingUrl) {
+        toast({
+          title: "Redirecting to Stripe",
+          description: "Please complete the Stripe onboarding process to enable payments.",
+          variant: "default",
+        });
+        // Redirect to Stripe onboarding page
+        window.location.href = data.onboardingUrl;
+      } else {
+        toast({
+          title: "Success",
+          description: data.message || "Stripe account created successfully",
+          variant: "default",
+        });
+      }
+    },
+    onError: (error: any) => {
+      const errorDetails = error.details || {};
+      let errorMessage = error.message || "Failed to connect Stripe account";
+      let errorTitle = "Error";
+      
+      // Show more helpful message if Stripe Connect is not enabled
+      if (errorDetails.error === "Stripe Connect not enabled" || 
+          error.message?.includes("Connect") || 
+          error.message?.includes("signed up for Connect")) {
+        errorTitle = "Stripe Connect Not Enabled";
+        errorMessage = errorDetails.message || "Stripe Connect is not enabled. Please enable Stripe Connect in your Stripe Dashboard.";
+        
+        // Add detailed instructions if available
+        if (errorDetails.steps && Array.isArray(errorDetails.steps)) {
+          errorMessage += "\n\nSteps to enable:\n" + errorDetails.steps.map((step: string, i: number) => `${i + 1}. ${step}`).join("\n");
+        }
+        
+        // Add help URL if available
+        if (errorDetails.helpUrl) {
+          errorMessage += `\n\nVisit: ${errorDetails.helpUrl}`;
+        }
+      }
+      
+      // Check if organization already has a Stripe account
+      if (errorDetails.message?.includes("already has a Stripe account")) {
+        errorMessage = errorDetails.message || "Organization already has a Stripe account";
+      }
+      
+      toast({
+        title: errorTitle,
+        description: errorMessage,
+        variant: "destructive",
+        duration: 12000, // Show longer for important errors
+      });
+    },
+  });
 
   const updateCustomerMutation = useMutation({
     mutationFn: async (customerData: any) => {
@@ -645,9 +755,9 @@ export default function SaaSCustomers() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center space-x-2">
               <Building2 className="h-5 w-5 text-blue-600" />
@@ -684,11 +794,11 @@ export default function SaaSCustomers() {
                   <DialogHeader>
                     <DialogTitle>Add New Customer Organization</DialogTitle>
                   </DialogHeader>
-                  <div className="space-y-6">
+                  <div className="space-y-4">
                     {/* Organization Details */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <h3 className="font-semibold text-sm text-gray-700">Organization Details</h3>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label htmlFor="name">Organization Name *</Label>
                           <Input 
@@ -717,7 +827,7 @@ export default function SaaSCustomers() {
                       {newCustomer.subdomain && (
                         <div>
                           <Label>Title</Label>
-                          <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                          <div className="mt-1.5 p-2 bg-gray-50 border border-gray-200 rounded-md">
                             <code className="text-sm font-medium text-gray-800">
                               {newCustomer.subdomain}
                             </code>
@@ -727,9 +837,9 @@ export default function SaaSCustomers() {
                     </div>
 
                     {/* Admin User Details */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <h3 className="font-semibold text-sm text-gray-700">Administrator Account</h3>
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-3 gap-3">
                         <div>
                           <Label htmlFor="adminFirstName">First Name *</Label>
                           <Input 
@@ -767,7 +877,7 @@ export default function SaaSCustomers() {
                     </div>
 
                     {/* Subscription Section */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <h3 className="font-semibold text-sm text-gray-700">Subscription</h3>
                       
                       <div>
@@ -885,7 +995,7 @@ export default function SaaSCustomers() {
                         
                         {/* Display package details when a package is selected */}
                         {selectedPackageDetails && (
-                          <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                          <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
                             <div className="space-y-2">
                               <div>
                                 <span className="text-sm font-semibold text-gray-700">
@@ -944,7 +1054,7 @@ export default function SaaSCustomers() {
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label>Subscription Status</Label>
                           <select 
@@ -987,7 +1097,7 @@ export default function SaaSCustomers() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label>Details</Label>
                           <Input
@@ -1011,9 +1121,9 @@ export default function SaaSCustomers() {
                     </div>
 
                     {/* Access Level */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <h3 className="font-semibold text-sm text-gray-700">Access Level</h3>
-                      <div className="space-y-2">
+                      <div className="space-y-1.5">
                         <div className="flex items-center space-x-2">
                           <input 
                             type="radio" 
@@ -1042,9 +1152,9 @@ export default function SaaSCustomers() {
                     </div>
 
                     {/* Feature Controls */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <h3 className="font-semibold text-sm text-gray-700">Feature Configuration</h3>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label htmlFor="maxUsers">Maximum Users</Label>
                           <Input 
@@ -1073,7 +1183,7 @@ export default function SaaSCustomers() {
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <div className="flex items-center justify-between">
                           <Label htmlFor="aiEnabled">AI Features</Label>
                           <input 
@@ -1152,10 +1262,10 @@ export default function SaaSCustomers() {
           </div>
         </CardHeader>
         
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-3 overflow-x-hidden p-4">
           {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4 items-end">
-            <form onSubmit={handleSearchSubmit} className="flex-1 flex gap-4">
+          <div className="flex flex-col sm:flex-row gap-3 items-end">
+            <form onSubmit={handleSearchSubmit} className="flex-1 flex gap-3">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
@@ -1203,97 +1313,124 @@ export default function SaaSCustomers() {
           </div>
 
           {/* Customers Table */}
-          <div className="border rounded-lg overflow-hidden relative">
+          <div className="border rounded-lg overflow-hidden relative w-full">
             {isLoading && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90">
                 <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
               </div>
             )}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Organization</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Users</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Org Pay</TableHead>
-                  <TableHead>Package</TableHead>
-                  <TableHead>Subscription Start</TableHead>
-                  <TableHead>Expires At</TableHead>
-                  <TableHead>Days Active</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {customers?.map((customer: any) => (
-                  <TableRow key={customer.id}>
-                    <TableCell>
+            <div className="w-full">
+              <Table className="w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[200px]">Organization</TableHead>
+                    <TableHead className="hidden lg:table-cell w-[100px]">Title</TableHead>
+                    <TableHead className="w-[70px]">Users</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="hidden xl:table-cell w-[90px]">Org Pay</TableHead>
+                    <TableHead className="hidden md:table-cell w-[130px]">Package</TableHead>
+                    <TableHead className="hidden 2xl:table-cell w-[150px]">Start</TableHead>
+                    <TableHead className="hidden xl:table-cell w-[150px]">Expires</TableHead>
+                    <TableHead className="hidden lg:table-cell w-[100px]">Days</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {customers?.map((customer: any) => (
+                    <TableRow key={customer.id}>
+                    <TableCell className="w-[200px]">
                       <div>
-                        <div className="font-medium">{customer.name}</div>
-                        <div className="text-sm text-gray-500">{customer.brandName}</div>
-                        {customer.adminEmail && (
-                          <div className="text-sm text-gray-500">{customer.adminEmail}</div>
-                        )}
+                        <div className="font-medium truncate">{customer.name}</div>
+                        <div className="text-xs text-gray-500 truncate">{customer.brandName}</div>
+                        <div className="hidden lg:block">
+                          {customer.adminEmail && (
+                            <div className="text-xs text-gray-400 truncate">{customer.adminEmail}</div>
+                          )}
+                          <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded mt-1 inline-block truncate max-w-full">
+                            {customer.subdomain}
+                          </code>
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <code className="text-sm bg-gray-100 px-2 py-1 rounded">
+                    <TableCell className="hidden lg:table-cell w-[100px]">
+                      <code className="text-sm bg-gray-100 px-2 py-1 rounded truncate block">
                         {customer.subdomain}
                       </code>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-[70px]">
                       <div className="flex items-center space-x-1">
-                        <Users className="h-4 w-4 text-gray-400" />
-                        <span>{customer.userCount || 0}</span>
+                        <Users className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                        <span className="text-sm">{customer.userCount || 0}</span>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusBadgeColor(customer.computedSubscriptionStatus || customer.subscriptionStatus)}>
-                        {customer.computedSubscriptionStatus || customer.subscriptionStatus}
-                      </Badge>
+                    <TableCell className="w-[100px]">
+                      <div className="flex flex-col gap-1">
+                        <Badge className={`${getStatusBadgeColor(customer.computedSubscriptionStatus || customer.subscriptionStatus)} text-xs`}>
+                          {customer.computedSubscriptionStatus || customer.subscriptionStatus}
+                        </Badge>
+                        <Badge className={`hidden xl:inline-flex text-xs ${getPaymentBadgeColor(customer.organizationPaymentStatus)}`}>
+                          {customer.organizationPaymentStatus || 'trial'}
+                        </Badge>
+                      </div>
                     </TableCell>
-                    <TableCell>
-                      <Badge className={getPaymentBadgeColor(customer.organizationPaymentStatus)}>
+                    <TableCell className="hidden xl:table-cell w-[90px]">
+                      <Badge className={`${getPaymentBadgeColor(customer.organizationPaymentStatus)} text-xs`}>
                         {customer.organizationPaymentStatus || 'trial'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {customer.packageName || 'No Package'}
+                    <TableCell className="hidden md:table-cell w-[130px] text-sm">
+                      <div className="truncate" title={customer.packageName || 'No Package'}>
+                        {customer.packageName || 'No Package'}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {formatDateTime(customer.subscriptionStart)}
+                    <TableCell className="hidden 2xl:table-cell w-[150px] text-xs">
+                      <div className="truncate">
+                        {formatDateTime(customer.subscriptionStart)}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {formatDateTime(customer.expiresAt)}
+                    <TableCell className="hidden xl:table-cell w-[150px] text-xs">
+                      <div className="truncate">
+                        {formatDateTime(customer.expiresAt)}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-sm">
+                    <TableCell className="hidden lg:table-cell w-[100px] text-sm">
                       <div className="flex flex-col gap-1">
                         <span>{formatDaysActive(customer.daysActive)}</span>
                         {getExpiryAlertBadge(customer.expiryAlertLevel)}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        {/* View Details Button */}
-                        <Dialog
-                          onOpenChange={(open) => {
-                            if (!open) {
-                              setViewingCustomer(null);
-                              setIsViewCustomerLoading(false);
-                            }
-                          }}
-                        >
-                          <DialogTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewCustomerDetails(customer.id)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
+                    <TableCell className="w-[140px]">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {/* View Details */}
+                          <Dialog
+                            onOpenChange={(open) => {
+                              if (!open) {
+                                setViewingCustomer(null);
+                                setIsViewCustomerLoading(false);
+                              }
+                            }}
+                          >
+                            <DialogTrigger asChild>
+                              <DropdownMenuItem onSelect={(e) => {
+                                e.preventDefault();
+                                handleViewCustomerDetails(customer.id);
+                              }}>
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Details
+                              </DropdownMenuItem>
+                            </DialogTrigger>
                           <DialogContent className="max-w-2xl">
-                            <DialogHeader className="flex items-start justify-between gap-4 flex-shrink-0">
+                            <DialogHeader className="flex items-start justify-between gap-3 flex-shrink-0">
                               <DialogTitle>Customer Details - {customer.name}</DialogTitle>
                               <DialogClose asChild>
                                 <button
@@ -1310,12 +1447,12 @@ export default function SaaSCustomers() {
                               </div>
                             ) : viewingCustomer ? (
                               <div className="h-[550px] overflow-y-auto pr-2">
-                              <div className="space-y-6 text-sm text-gray-700">
-                                <section className="space-y-2">
+                              <div className="space-y-4 text-sm text-gray-700">
+                                <section className="space-y-1.5">
                                   <p className="text-xs uppercase tracking-wide text-gray-500">
                                     Organization summary
                                   </p>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <p className="text-xs text-gray-500">Name</p>
                                       <p className="font-semibold text-gray-900">{normalizeValue(viewingCustomer.name)}</p>
@@ -1367,7 +1504,7 @@ export default function SaaSCustomers() {
                                   <p className="text-xs uppercase tracking-wide text-gray-500">
                                     Subscription & Billing
                                   </p>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <p className="text-xs text-gray-500">Package</p>
                                       <p className="font-semibold text-gray-900">
@@ -1456,7 +1593,7 @@ export default function SaaSCustomers() {
                                   <p className="text-xs uppercase tracking-wide text-gray-500">
                                     Administrator
                                   </p>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <p className="text-xs text-gray-500">First Name</p>
                                       <p className="font-semibold text-gray-900">{normalizeValue(viewingCustomer.adminFirstName)}</p>
@@ -1480,7 +1617,7 @@ export default function SaaSCustomers() {
                                   <p className="text-xs uppercase tracking-wide text-gray-500">
                                     Feature configuration
                                   </p>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     {viewingFeatureFlags.map((flag) => (
                                       <div key={flag.label}>
                                         <p className="text-xs text-gray-500">{flag.label}</p>
@@ -1490,7 +1627,7 @@ export default function SaaSCustomers() {
                                       </div>
                                     ))}
                                   </div>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <p className="text-xs text-gray-500">Maximum Users</p>
                                       <p className="font-semibold text-gray-900">
@@ -1514,89 +1651,79 @@ export default function SaaSCustomers() {
                             )}
                           </DialogContent>
                         </Dialog>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            console.log('🗑️ DELETE button clicked for customer:', customer.id, customer.name);
-                            handlePrepareDelete(customer);
-                          }}
-                          title="Delete customer"
-                          className={isPopupOpen ? 'opacity-0 pointer-events-none' : ''}
-                          disabled={deleteCustomerMutation.isPending}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
-                        {/* Edit Customer Button */}
-                        <Dialog open={editingCustomer?.id === customer.id} onOpenChange={(open) => {
-                          if (!open) {
-                            setEditingCustomer(null);
-                            setOriginalCustomerValues(null);
-                          }
-                        }}>
-                          <DialogTrigger asChild>
-                            <Button size="sm" variant="outline" onClick={async () => {
-                            try {
-                              const response = await saasApiRequest('GET', `/api/saas/customers/${customer.id}`);
-                              const customerDetails = await response.json();
-                              
-                              // Get billingPackageId from either billingPackageId or packageId field
-                              const packageId = customerDetails.billingPackageId || customerDetails.packageId;
-                              
-                              setEditingCustomer({
-                                id: customerDetails.id,
-                                name: customerDetails.name,
-                                brandName: customerDetails.brandName,
-                                subdomain: customerDetails.subdomain,
-                                adminEmail: customerDetails.adminEmail || '',
-                                adminFirstName: customerDetails.adminFirstName || '',
-                                adminLastName: customerDetails.adminLastName || '',
-                                accessLevel: customerDetails.accessLevel || 'full',
-                                subscriptionStatus: customerDetails.subscriptionStatus || 'trial',
-                                paymentStatus: customerDetails.paymentStatus || customerDetails.subscriptionPaymentStatus || 'trial',
-                                organizationPaymentStatus: customerDetails.organizationPaymentStatus || 'trial',
-                                subscriptionPaymentStatus: customerDetails.subscriptionPaymentStatus || customerDetails.paymentStatus || 'trial',
-                                billingPackageId: packageId ? String(packageId) : '',
-                                packageName: customerDetails.packageName || '',
-                                packagePrice: customerDetails.packagePrice || null,
-                                packageBillingCycle: customerDetails.packageBillingCycle || '',
-                                packageDescription: customerDetails.packageDescription || '',
-                                packageFeatures: customerDetails.packageFeatures || customerDetails.features || {},
-                                details: customerDetails.details || '',
-                                expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
-                                features: customerDetails.features ? (typeof customerDetails.features === 'string' ? JSON.parse(customerDetails.features) : customerDetails.features) : {
-                                  maxUsers: 10,
-                                  maxPatients: 100,
-                                  aiEnabled: true,
-                                  telemedicineEnabled: true,
-                                  billingEnabled: true,
-                                  analyticsEnabled: true,
-                                }
-                              });
-                              // Get billingPackageId from either billingPackageId or packageId field for original values
-                              const originalPackageId = customerDetails.billingPackageId || customerDetails.packageId;
-                              
-                              setOriginalCustomerValues({
-                                subscriptionStatus: customerDetails.subscriptionStatus || 'trial',
-                                paymentStatus: customerDetails.paymentStatus || customerDetails.subscriptionPaymentStatus || 'trial',
-                                organizationPaymentStatus: customerDetails.organizationPaymentStatus || 'trial',
-                                subscriptionPaymentStatus: customerDetails.subscriptionPaymentStatus || customerDetails.paymentStatus || 'trial',
-                                billingPackageId: originalPackageId ? String(originalPackageId) : '',
-                                details: customerDetails.details || '',
-                                expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
-                              });
-                            } catch (error) {
-                              console.error('Error fetching customer details:', error);
-                              toast({
-                                title: "Error",
-                                description: "Failed to load customer details",
-                                variant: "destructive",
-                              });
+                          <DropdownMenuSeparator />
+                          {/* Edit Customer */}
+                          <Dialog open={editingCustomer?.id === customer.id} onOpenChange={(open) => {
+                            if (!open) {
+                              setEditingCustomer(null);
+                              setOriginalCustomerValues(null);
                             }
                           }}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
+                            <DialogTrigger asChild>
+                              <DropdownMenuItem onSelect={async (e) => {
+                                e.preventDefault();
+                                try {
+                                  const response = await saasApiRequest('GET', `/api/saas/customers/${customer.id}`);
+                                  const customerDetails = await response.json();
+                                  
+                                  // Get billingPackageId from either billingPackageId or packageId field
+                                  const packageId = customerDetails.billingPackageId || customerDetails.packageId;
+                                  
+                                  setEditingCustomer({
+                                    id: customerDetails.id,
+                                    name: customerDetails.name,
+                                    brandName: customerDetails.brandName,
+                                    subdomain: customerDetails.subdomain,
+                                    adminEmail: customerDetails.adminEmail || '',
+                                    adminFirstName: customerDetails.adminFirstName || '',
+                                    adminLastName: customerDetails.adminLastName || '',
+                                    accessLevel: customerDetails.accessLevel || 'full',
+                                    subscriptionStatus: customerDetails.subscriptionStatus || 'trial',
+                                    paymentStatus: customerDetails.paymentStatus || customerDetails.subscriptionPaymentStatus || 'trial',
+                                    organizationPaymentStatus: customerDetails.organizationPaymentStatus || 'trial',
+                                    subscriptionPaymentStatus: customerDetails.subscriptionPaymentStatus || customerDetails.paymentStatus || 'trial',
+                                    billingPackageId: packageId ? String(packageId) : '',
+                                    packageName: customerDetails.packageName || '',
+                                    packagePrice: customerDetails.packagePrice || null,
+                                    packageBillingCycle: customerDetails.packageBillingCycle || '',
+                                    packageDescription: customerDetails.packageDescription || '',
+                                    packageFeatures: customerDetails.packageFeatures || customerDetails.features || {},
+                                    details: customerDetails.details || '',
+                                    expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
+                                    features: customerDetails.features ? (typeof customerDetails.features === 'string' ? JSON.parse(customerDetails.features) : customerDetails.features) : {
+                                      maxUsers: 10,
+                                      maxPatients: 100,
+                                      aiEnabled: true,
+                                      telemedicineEnabled: true,
+                                      billingEnabled: true,
+                                      analyticsEnabled: true,
+                                    }
+                                  });
+                                  // Get billingPackageId from either billingPackageId or packageId field for original values
+                                  const originalPackageId = customerDetails.billingPackageId || customerDetails.packageId;
+                                  
+                                  setOriginalCustomerValues({
+                                    subscriptionStatus: customerDetails.subscriptionStatus || 'trial',
+                                    paymentStatus: customerDetails.paymentStatus || customerDetails.subscriptionPaymentStatus || 'trial',
+                                    organizationPaymentStatus: customerDetails.organizationPaymentStatus || 'trial',
+                                    subscriptionPaymentStatus: customerDetails.subscriptionPaymentStatus || customerDetails.paymentStatus || 'trial',
+                                    billingPackageId: originalPackageId ? String(originalPackageId) : '',
+                                    details: customerDetails.details || '',
+                                    expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
+                                  });
+                                } catch (error) {
+                                  console.error('Error fetching customer details:', error);
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to load customer details",
+                                    variant: "destructive",
+                                  });
+                                }
+                              }}>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                            </DialogTrigger>
                           <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto z-[9999]">
                           <DialogHeader>
                             <DialogTitle>Edit Organization - {customer.name}</DialogTitle>
@@ -1606,7 +1733,7 @@ export default function SaaSCustomers() {
                               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
                                 Current values from the database
                               </p>
-                              <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <dl className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                 <div>
                                   <dt className="text-[11px] text-gray-500">Billing Package</dt>
                                   <dd className="font-semibold">
@@ -1649,11 +1776,11 @@ export default function SaaSCustomers() {
                             </div>
                           )}
                             {editingCustomer && (
-                              <div className="space-y-6">
+                              <div className="space-y-4">
                                 {/* Organization Details */}
-                                <div className="space-y-4">
+                                <div className="space-y-3">
                                   <h3 className="font-semibold text-sm text-gray-700">Organization Details</h3>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <Label>Organization Name</Label>
                                       <Input 
@@ -1681,9 +1808,9 @@ export default function SaaSCustomers() {
                                 </div>
 
                                 {/* Administrator Account */}
-                                <div className="space-y-4">
+                                <div className="space-y-3">
                                   <h3 className="font-semibold text-sm text-gray-700">Administrator Account</h3>
-                                  <div className="grid grid-cols-3 gap-4">
+                                  <div className="grid grid-cols-3 gap-3">
                                     <div>
                                       <Label>First Name</Label>
                                       <Input 
@@ -1710,7 +1837,7 @@ export default function SaaSCustomers() {
                                 </div>
 
                                 {/* Subscription Section */}
-                                <div className="space-y-4">
+                                <div className="space-y-3">
                                   <h3 className="font-semibold text-sm text-gray-700">Subscription</h3>
                                   
                                   <div>
@@ -1818,7 +1945,7 @@ export default function SaaSCustomers() {
                                     )}
                                   </div>
 
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <Label>Subscription Status</Label>
                                       <select 
@@ -1897,7 +2024,7 @@ export default function SaaSCustomers() {
                                     </div>
                                   </div>
 
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <Label>Details</Label>
                                       <Input
@@ -1920,9 +2047,9 @@ export default function SaaSCustomers() {
                                 </div>
 
                                 {/* Access Level */}
-                                <div className="space-y-4">
+                                <div className="space-y-3">
                                   <h3 className="font-semibold text-sm text-gray-700">Access Level</h3>
-                                  <div className="space-y-2">
+                                  <div className="space-y-1.5">
                                     <div className="flex items-center space-x-2">
                                       <input 
                                         type="radio" 
@@ -1951,9 +2078,9 @@ export default function SaaSCustomers() {
                                 </div>
 
                                 {/* Feature Configuration */}
-                                <div className="space-y-4">
+                                <div className="space-y-3">
                                   <h3 className="font-semibold text-sm text-gray-700">Feature Configuration</h3>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div>
                                       <Label>Maximum Users</Label>
                                       <Input 
@@ -1980,7 +2107,7 @@ export default function SaaSCustomers() {
                                     </div>
                                   </div>
                                   
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-2 gap-3">
                                     <div className="flex items-center justify-between">
                                       <Label>AI Features</Label>
                                       <input 
@@ -2051,13 +2178,44 @@ export default function SaaSCustomers() {
                             )}
                           </DialogContent>
                         </Dialog>
-
-                      </div>
+                          {/* Create Stripe - Show only if organization doesn't have Stripe account */}
+                          {!customer.stripeAccountId && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  connectStripeMutation.mutate(customer.id);
+                                }}
+                                disabled={connectStripeMutation.isPending}
+                              >
+                                <CreditCard className="h-4 w-4 mr-2" />
+                                {connectStripeMutation.isPending ? 'Creating...' : 'Create Stripe'}
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          {/* Delete */}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              console.log('🗑️ DELETE button clicked for customer:', customer.id, customer.name);
+                              handlePrepareDelete(customer);
+                            }}
+                            disabled={deleteCustomerMutation.isPending || isPopupOpen}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            </div>
           </div>
 
           {customers?.length === 0 && (

@@ -4539,6 +4539,40 @@ export default function BillingPage() {
       setActiveTab(tab);
     }
   }, []);
+
+  // Handle Stripe Checkout success/cancel redirects
+  useEffect(() => {
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    const status = params.get("status");
+    const sessionId = params.get("session_id");
+    const invoiceId = params.get("invoice_id");
+
+    if (status === "success" && sessionId && invoiceId) {
+      // Payment successful - update invoice status
+      toast({
+        title: "Payment Successful",
+        description: "Your payment has been processed successfully.",
+        variant: "default",
+      });
+      
+      // Invalidate queries to refresh invoice list
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (status === "cancelled" && invoiceId) {
+      // Payment cancelled
+      toast({
+        title: "Payment Cancelled",
+        description: "Payment was cancelled. You can try again later.",
+        variant: "default",
+      });
+      
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [toast, queryClient]);
   const [isInvoiceSaved, setIsInvoiceSaved] = useState(false);
   const [clinicHeader, setClinicHeader] = useState<any>(null);
   const [clinicFooter, setClinicFooter] = useState<any>(null);
@@ -4928,8 +4962,82 @@ export default function BillingPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
 
       if (invoicePaymentMethod === "Online Payment") {
-        setInvoiceToPay(createdInvoice);
-        setShowPaymentModal(true);
+        // Create Stripe Checkout session and redirect
+        try {
+          // Use fetch directly to have better control over error handling
+          const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+          const apiUrl = buildUrl('/api/billing/create-checkout-session');
+          const token = localStorage.getItem('auth_token');
+          
+          const checkoutResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': token ? `Bearer ${token}` : '',
+              'X-Tenant-Subdomain': subdomain,
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              invoiceId: createdInvoice.id,
+              patientId: selectedPatient
+            })
+          });
+          
+          // Check content type before parsing
+          const contentType = checkoutResponse.headers.get('content-type') || '';
+          
+          if (!checkoutResponse.ok) {
+            let errorMessage = 'Failed to create payment session';
+            
+            if (contentType.includes('application/json')) {
+              try {
+                const errorData = await checkoutResponse.json();
+                errorMessage = errorData.error || errorData.message || errorMessage;
+              } catch (e) {
+                // If JSON parsing fails, use status text
+                errorMessage = `Server error (${checkoutResponse.status}): ${checkoutResponse.statusText}`;
+              }
+            } else {
+              // If not JSON, it's likely an HTML error page
+              const text = await checkoutResponse.text();
+              console.error('Non-JSON error response:', text.substring(0, 200));
+              if (checkoutResponse.status === 404) {
+                errorMessage = 'Payment endpoint not found. Please contact support.';
+              } else if (checkoutResponse.status === 401 || checkoutResponse.status === 403) {
+                errorMessage = 'Authentication failed. Please log in again.';
+              } else {
+                errorMessage = `Server error (${checkoutResponse.status}): ${checkoutResponse.statusText}. Please check if Stripe is configured and the organization has a Stripe account.`;
+              }
+            }
+            
+            throw new Error(errorMessage);
+          }
+
+          if (!contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response. Please check server configuration.');
+          }
+
+          const checkoutData = await checkoutResponse.json();
+          
+          if (checkoutData.url) {
+            // Redirect to Stripe Checkout
+            window.location.href = checkoutData.url;
+          } else {
+            throw new Error('No checkout URL received from server');
+          }
+        } catch (error: any) {
+          console.error('Stripe Checkout error:', error);
+          const errorMessage = error.message || "Unable to set up online payment. Please try again or use a different payment method.";
+          toast({
+            title: "Payment Setup Failed",
+            description: errorMessage,
+            variant: "destructive",
+            duration: 8000
+          });
+          // Still show success modal for invoice creation
+          setCreatedInvoiceNumber(createdInvoice.invoiceNumber || "");
+          setShowSuccessModal(true);
+        }
       } else {
         setCreatedInvoiceNumber(createdInvoice.invoiceNumber || "");
         setShowSuccessModal(true);

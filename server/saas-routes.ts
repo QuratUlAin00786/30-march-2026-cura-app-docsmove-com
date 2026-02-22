@@ -1601,6 +1601,185 @@ The Cura EMR Team`,
     },
   );
 
+  app.post(
+    "/api/saas/organizations/:id/connect-stripe",
+    verifySaaSToken,
+    async (req: Request, res: Response) => {
+      try {
+        const organizationId = parseInt(req.params.id);
+        
+        if (isNaN(organizationId)) {
+          return res.status(400).json({ message: "Invalid organization ID" });
+        }
+
+        // Get organization details from database
+        const organization = await storage.getOrganization(organizationId);
+        if (!organization) {
+          return res.status(404).json({ message: "Organization not found" });
+        }
+
+        // Initialize Stripe first (needed for both new and existing accounts)
+        const Stripe = (await import('stripe')).default;
+        const stripe = process.env.STRIPE_SECRET_KEY
+          ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+              apiVersion: '2025-07-30.basil',
+            })
+          : null;
+
+        if (!stripe) {
+          return res.status(500).json({ message: "Stripe is not configured" });
+        }
+
+        // Check if organization already has a Stripe account in the database
+        console.log('💳 [STRIPE-CONNECT] Checking existing Stripe account for organization:', organizationId, 'Current stripeAccountId:', organization.stripeAccountId);
+        
+        // If organization already has a Stripe account, generate a new onboarding link
+        if (organization.stripeAccountId) {
+          console.log('⚠️ [STRIPE-CONNECT] Organization already has a Stripe account:', organization.stripeAccountId);
+          
+          // Generate a fresh onboarding link for existing account
+          const baseUrl = process.env.FRONTEND_URL || req.protocol + '://' + req.get('host');
+          const accountLink = await stripe.accountLinks.create({
+            account: organization.stripeAccountId,
+            refresh_url: `${baseUrl}/saas/customers?stripe_refresh=true&organization_id=${organizationId}`,
+            return_url: `${baseUrl}/saas/customers?stripe_success=true&organization_id=${organizationId}`,
+            type: "account_onboarding",
+          });
+
+          console.log('🔗 [STRIPE-CONNECT] Onboarding link generated for existing account:', organization.stripeAccountId);
+
+          return res.json({
+            success: true,
+            stripeAccountId: organization.stripeAccountId,
+            stripeStatus: organization.stripeStatus || 'pending',
+            onboardingUrl: accountLink.url, // Return onboarding URL for immediate redirect
+            message: 'Onboarding link generated. Please complete Stripe setup.'
+          });
+        }
+
+        console.log('💳 [STRIPE-CONNECT] Creating Stripe Express account for organization:', organizationId);
+        console.log('💳 [STRIPE-CONNECT] Stripe client initialized:', !!stripe);
+        console.log('💳 [STRIPE-CONNECT] STRIPE_SECRET_KEY exists:', !!process.env.STRIPE_SECRET_KEY);
+        console.log('💳 [STRIPE-CONNECT] STRIPE_SECRET_KEY prefix:', process.env.STRIPE_SECRET_KEY?.substring(0, 7));
+        
+        try {
+          const stripeAccount = await stripe.accounts.create({
+            type: "express",
+            email: organization.email,
+            country: "IN",
+            metadata: {
+              organization_name: organization.name,
+              subdomain: organization.subdomain,
+              organization_id: organizationId.toString(),
+            },
+          });
+          
+          console.log('✅ [STRIPE-CONNECT] Account created successfully:', stripeAccount.id);
+
+          // Update organization with Stripe account ID and status
+          await db.update(organizations)
+            .set({
+              stripeAccountId: stripeAccount.id,
+              stripeStatus: 'pending', // Set to pending until onboarding is complete
+              updatedAt: new Date(),
+            })
+            .where(eq(organizations.id, organizationId));
+
+          console.log('✅ [STRIPE-CONNECT] Stripe account created and linked:', stripeAccount.id);
+
+          // Generate onboarding link for the organization to complete Stripe setup
+          const baseUrl = process.env.FRONTEND_URL || req.protocol + '://' + req.get('host');
+          const accountLink = await stripe.accountLinks.create({
+            account: stripeAccount.id,
+            refresh_url: `${baseUrl}/saas/customers?stripe_refresh=true&organization_id=${organizationId}`,
+            return_url: `${baseUrl}/saas/customers?stripe_success=true&organization_id=${organizationId}`,
+            type: "account_onboarding",
+          });
+
+          console.log('🔗 [STRIPE-CONNECT] Onboarding link generated for account:', stripeAccount.id);
+
+          res.json({
+            success: true,
+            stripeAccountId: stripeAccount.id,
+            stripeStatus: 'pending',
+            onboardingUrl: accountLink.url, // Return onboarding URL for immediate redirect
+            message: 'Stripe account created successfully. Please complete onboarding.'
+          });
+        } catch (stripeError: any) {
+          console.error("❌ [STRIPE-CONNECT] Full error details:", {
+            message: stripeError.message,
+            type: stripeError.type,
+            code: stripeError.code,
+            statusCode: stripeError.statusCode,
+            rawError: JSON.stringify(stripeError, Object.getOwnPropertyNames(stripeError), 2)
+          });
+          
+          // Check if error is SPECIFICALLY about Connect not being enabled
+          // Only flag as "Connect not enabled" for very specific error messages
+          const isConnectNotEnabledError = 
+            stripeError.message?.includes('signed up for Connect') ||
+            stripeError.message?.includes('You can only create new accounts if you\'ve signed up for Connect') ||
+            (stripeError.code === 'account_invalid' && 
+             stripeError.message?.includes('Connect') && 
+             !stripeError.message?.includes('restricted') &&
+             !stripeError.message?.includes('verification'));
+          
+          if (isConnectNotEnabledError) {
+            console.error('❌ [STRIPE-CONNECT] Stripe Connect not enabled. Error details:', {
+              message: stripeError.message,
+              type: stripeError.type,
+              code: stripeError.code,
+            });
+            return res.status(400).json({ 
+              message: "Stripe Connect is not enabled. Please enable Stripe Connect in your Stripe Dashboard.",
+              error: "Stripe Connect not enabled",
+              errorCode: stripeError.code || stripeError.type,
+              helpUrl: "https://dashboard.stripe.com/settings/connect",
+              documentationUrl: "https://stripe.com/docs/connect",
+              details: "To enable Stripe Connect:\n1. Go to https://dashboard.stripe.com/settings/connect\n2. Click 'Get started' or 'Activate Connect'\n3. Complete the onboarding process\n4. Once enabled, you can create Express accounts via API\n\nNote: Stripe Connect must be enabled on your main Stripe account (the one with your API keys) before you can create connected accounts for organizations.",
+              steps: [
+                "Visit https://dashboard.stripe.com/settings/connect",
+                "Click 'Get started' or 'Activate Connect'",
+                "Complete the Stripe Connect onboarding",
+                "Return here and try creating the Stripe account again"
+              ],
+              stripeError: stripeError.message
+            });
+          }
+          
+          // Generic error handling - return actual error for debugging
+          console.error('❌ [STRIPE-CONNECT] Generic/other error (not Connect-related):', {
+            message: stripeError.message,
+            type: stripeError.type,
+            code: stripeError.code,
+            statusCode: stripeError.statusCode,
+          });
+          
+          // Return the actual error so user can see what went wrong
+          // This helps debug issues when Connect IS enabled but something else fails
+          res.status(500).json({ 
+            message: "Failed to create Stripe account",
+            error: stripeError.message || String(stripeError),
+            errorCode: stripeError.code || stripeError.type,
+            stripeError: stripeError.message,
+            debugInfo: {
+              type: stripeError.type,
+              code: stripeError.code,
+              statusCode: stripeError.statusCode,
+              note: "Check server console logs for full error details. If you see accounts in Stripe Dashboard, Connect is enabled and this is a different issue."
+            }
+          });
+        }
+      } catch (error: any) {
+        console.error("Error connecting Stripe:", error);
+        res.status(500).json({ 
+          message: "Failed to connect Stripe account",
+          error: error.message || String(error)
+        });
+      }
+    },
+  );
+
   app.delete(
     "/api/saas/customers/:id",
     verifySaaSToken,
@@ -2579,5 +2758,82 @@ Attached is invoice ${payment.invoiceNumber} for ${payment.organizationName}.`,
         res.status(500).json({ error: "Failed to share invoice" });
       }
     },
+  );
+
+  // Check Stripe Connect status
+  app.get(
+    "/api/saas/stripe/connect-status",
+    verifySaaSToken,
+    async (req: Request, res: Response) => {
+      try {
+        const Stripe = (await import('stripe')).default;
+        const stripe = process.env.STRIPE_SECRET_KEY
+          ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+              apiVersion: '2025-07-30.basil',
+            })
+          : null;
+
+        if (!stripe) {
+          return res.status(500).json({ 
+            enabled: false,
+            message: "Stripe is not configured",
+            error: "STRIPE_SECRET_KEY environment variable is not set"
+          });
+        }
+
+        // Try to retrieve the main account to check if Connect is available
+        try {
+          const account = await stripe.accounts.retrieve();
+          
+          // Try to list connected accounts (this will fail if Connect is not enabled)
+          try {
+            await stripe.accounts.list({ limit: 1 });
+            return res.json({
+              enabled: true,
+              message: "Stripe Connect is enabled",
+              accountId: account.id,
+              accountType: account.type
+            });
+          } catch (listError: any) {
+            // If listing fails with Connect-related error, Connect is not enabled
+            if (listError.message?.includes('Connect') || 
+                listError.code === 'account_invalid' ||
+                listError.type === 'invalid_request_error') {
+              return res.json({
+                enabled: false,
+                message: "Stripe Connect is not enabled",
+                error: listError.message,
+                helpUrl: "https://dashboard.stripe.com/settings/connect",
+                steps: [
+                  "Visit https://dashboard.stripe.com/settings/connect",
+                  "Click 'Get started' or 'Activate Connect'",
+                  "Complete the Stripe Connect onboarding"
+                ]
+              });
+            }
+            // If it's a different error, Connect might be enabled but there's another issue
+            return res.json({
+              enabled: true,
+              message: "Stripe Connect appears to be enabled (but encountered an error)",
+              accountId: account.id,
+              warning: listError.message
+            });
+          }
+        } catch (accountError: any) {
+          return res.status(500).json({
+            enabled: false,
+            message: "Failed to retrieve Stripe account",
+            error: accountError.message
+          });
+        }
+      } catch (error: any) {
+        console.error("Error checking Stripe Connect status:", error);
+        return res.status(500).json({
+          enabled: false,
+          message: "Failed to check Stripe Connect status",
+          error: error.message || String(error)
+        });
+      }
+    }
   );
 }

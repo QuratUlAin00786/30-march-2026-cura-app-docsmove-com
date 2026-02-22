@@ -2657,6 +2657,43 @@ The Cura EMR Team`,
   });
 
   // Organization settings endpoint (requires authentication)
+  // Generate Stripe Dashboard login link for organization
+  app.post("/api/organization/stripe-login-link", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      // Get organization details
+      const organization = await storage.getOrganization(req.tenant!.id);
+      if (!organization) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+
+      // Check if organization has Stripe account
+      if (!organization.stripeAccountId) {
+        return res.status(400).json({ 
+          error: "Organization has not connected Stripe. Please connect Stripe account first." 
+        });
+      }
+
+      // Create login link for Stripe Express account
+      const loginLink = await stripe.accounts.createLoginLink(
+        organization.stripeAccountId
+      );
+
+      console.log('✅ [STRIPE-LOGIN] Login link created for organization:', req.tenant!.id, 'Account:', organization.stripeAccountId);
+
+      res.json({ url: loginLink.url });
+    } catch (error: any) {
+      console.error("Error creating Stripe login link:", error);
+      res.status(500).json({ 
+        error: "Failed to create Stripe login link",
+        message: error.message || String(error)
+      });
+    }
+  });
+
   app.patch("/api/organization/settings", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       if (!req.tenant || !req.tenant.id) {
@@ -3688,7 +3725,38 @@ The Cura EMR Team`,
         .where(eq(saasPayments.organizationId, organizationId))
         .orderBy(desc(saasPayments.paymentDate));
 
-      res.json(payments);
+      // Format dates as UTC ISO strings to ensure no timezone conversion
+      const formattedPayments = payments.map(payment => ({
+        ...payment,
+        paymentDate: payment.paymentDate 
+          ? (payment.paymentDate instanceof Date 
+              ? payment.paymentDate.toISOString() 
+              : new Date(payment.paymentDate).toISOString())
+          : null,
+        dueDate: payment.dueDate 
+          ? (payment.dueDate instanceof Date 
+              ? payment.dueDate.toISOString() 
+              : new Date(payment.dueDate).toISOString())
+          : null,
+        periodStart: payment.periodStart 
+          ? (payment.periodStart instanceof Date 
+              ? payment.periodStart.toISOString() 
+              : new Date(payment.periodStart).toISOString())
+          : null,
+        periodEnd: payment.periodEnd 
+          ? (payment.periodEnd instanceof Date 
+              ? payment.periodEnd.toISOString() 
+              : new Date(payment.periodEnd).toISOString())
+          : null,
+        createdAt: payment.createdAt instanceof Date 
+          ? payment.createdAt.toISOString() 
+          : payment.createdAt,
+        updatedAt: payment.updatedAt instanceof Date 
+          ? payment.updatedAt.toISOString() 
+          : payment.updatedAt,
+      }));
+
+      res.json(formattedPayments);
     } catch (error) {
       console.error("Billing history fetch error:", error);
       res.status(500).json({ error: "Failed to fetch billing history" });
@@ -10274,12 +10342,44 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             apiAccess: true,
             whiteLabel: false,
           },
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         };
         return res.json(defaultSubscription);
       }
-      res.json(subscription);
+      
+      // Format dates as UTC ISO strings to ensure no timezone conversion
+      const formattedSubscription = {
+        ...subscription,
+        currentPeriodStart: subscription.currentPeriodStart 
+          ? (subscription.currentPeriodStart instanceof Date 
+              ? subscription.currentPeriodStart.toISOString() 
+              : new Date(subscription.currentPeriodStart).toISOString())
+          : null,
+        nextBillingAt: subscription.nextBillingAt 
+          ? (subscription.nextBillingAt instanceof Date 
+              ? subscription.nextBillingAt.toISOString() 
+              : new Date(subscription.nextBillingAt).toISOString())
+          : null,
+        expiresAt: subscription.expiresAt 
+          ? (subscription.expiresAt instanceof Date 
+              ? subscription.expiresAt.toISOString() 
+              : new Date(subscription.expiresAt).toISOString())
+          : null,
+        trialEndsAt: subscription.trialEndsAt 
+          ? (subscription.trialEndsAt instanceof Date 
+              ? subscription.trialEndsAt.toISOString() 
+              : new Date(subscription.trialEndsAt).toISOString())
+          : null,
+        createdAt: subscription.createdAt instanceof Date 
+          ? subscription.createdAt.toISOString() 
+          : subscription.createdAt,
+        updatedAt: subscription.updatedAt instanceof Date 
+          ? subscription.updatedAt.toISOString() 
+          : subscription.updatedAt,
+      };
+      
+      res.json(formattedSubscription);
     } catch (error) {
       console.error("Subscription fetch error:", error);
       res.status(500).json({ error: "Failed to fetch subscription" });
@@ -29032,6 +29132,129 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Invoice creation error:", error);
       res.status(500).json({ error: "Failed to create invoice" });
+    }
+  });
+
+  // Create Stripe Checkout session for invoice payment
+  app.post("/api/billing/create-checkout-session", tenantMiddleware, authMiddleware, requireRole(["admin", "doctor", "nurse", "receptionist", "patient"]), async (req: TenantRequest, res) => {
+    try {
+      const { invoiceId, patientId } = z.object({
+        invoiceId: z.number().int().positive(),
+        patientId: z.string().min(1)
+      }).parse(req.body);
+
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      // Get organization details
+      const organization = await storage.getOrganization(req.tenant!.id);
+      if (!organization) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+
+      // Check if organization has Stripe account
+      if (!organization.stripeAccountId) {
+        return res.status(400).json({ 
+          error: "Organization has not connected Stripe. Please connect Stripe account first." 
+        });
+      }
+
+      // Get invoice details
+      const invoice = await storage.getInvoice(invoiceId, req.tenant!.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      // Verify invoice belongs to the patient
+      if (invoice.patientId !== patientId) {
+        return res.status(403).json({ error: "Invoice does not belong to this patient" });
+      }
+
+      // Build line items for Stripe Checkout
+      const lineItems = invoice.items.map((item: any) => ({
+        price_data: {
+          currency: 'inr', // INR as per user requirement
+          product_data: {
+            name: item.description || 'Service',
+            description: `${organization.name} - ${item.description || 'Service'}`,
+          },
+          unit_amount: Math.round(item.total * 100), // Convert to paise (smallest currency unit)
+        },
+        quantity: item.quantity || 1,
+      }));
+
+      // If invoice has a single total, use that instead
+      if (lineItems.length === 0 && invoice.totalAmount) {
+        lineItems.push({
+          price_data: {
+            currency: 'inr',
+            product_data: {
+              name: `Invoice ${invoice.invoiceNumber}`,
+              description: `${organization.name} - Invoice Payment`,
+            },
+            unit_amount: Math.round(parseFloat(String(invoice.totalAmount)) * 100),
+          },
+          quantity: 1,
+        });
+      }
+
+      // Get base URL for success/cancel URLs
+      const baseUrl = process.env.FRONTEND_URL || req.protocol + '://' + req.get('host');
+
+      // Create Stripe Checkout session
+      const session = await stripe.checkout.sessions.create(
+        {
+          payment_method_types: ['card'],
+          line_items: lineItems,
+          mode: 'payment',
+          success_url: `${baseUrl}/billing?session_id={CHECKOUT_SESSION_ID}&invoice_id=${invoiceId}&status=success`,
+          cancel_url: `${baseUrl}/billing?invoice_id=${invoiceId}&status=cancelled`,
+          metadata: {
+            organization_id: String(organization.id),
+            invoice_id: String(invoiceId),
+            patient_id: patientId,
+            invoice_number: invoice.invoiceNumber || String(invoiceId),
+          },
+        },
+        {
+          // Charge on organization's Stripe account
+          stripeAccount: organization.stripeAccountId,
+        }
+      );
+
+      console.log('✅ [STRIPE-CHECKOUT] Session created:', session.id, 'for invoice:', invoiceId);
+
+      res.json({ 
+        url: session.url,
+        sessionId: session.id 
+      });
+    } catch (error: any) {
+      console.error("❌ [STRIPE-CHECKOUT] Error creating Stripe Checkout session:", error);
+      
+      // Ensure we always return JSON, not HTML
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: "Invalid request data", 
+          details: error.errors,
+          message: "Please provide valid invoice ID and patient ID"
+        });
+      }
+      
+      // Handle Stripe-specific errors
+      if (error.type && error.type.startsWith('Stripe')) {
+        return res.status(400).json({ 
+          error: "Stripe error",
+          message: error.message || "Failed to create payment session",
+          stripeError: error.message
+        });
+      }
+      
+      // Generic error - always return JSON
+      return res.status(500).json({ 
+        error: "Failed to create payment session",
+        message: error.message || String(error)
+      });
     }
   });
 
