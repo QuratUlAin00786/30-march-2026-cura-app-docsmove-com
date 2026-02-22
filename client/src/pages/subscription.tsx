@@ -79,12 +79,13 @@ const getCountdown = (target?: string | Date | null) => {
 const parseDateParts = (value?: string | Date | null) => {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // Use UTC methods to display time as stored in database (UTC) without timezone conversion
     return {
-      year: value.getFullYear(),
-      month: value.getMonth(),
-      day: value.getDate(),
-      hour: value.getHours(),
-      minute: value.getMinutes(),
+      year: value.getUTCFullYear(),
+      month: value.getUTCMonth(),
+      day: value.getUTCDate(),
+      hour: value.getUTCHours(),
+      minute: value.getUTCMinutes(),
     };
   }
   const str = String(value);
