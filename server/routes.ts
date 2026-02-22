@@ -20088,17 +20088,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       throw new Error("Missing context to persist Stripe subscription");
     }
 
-    // Convert timestamps to UTC Date objects
-    const currentPeriodStart = stripeSubscription.current_period_start
+    // Convert Stripe timestamps (already UTC) directly to Date objects without timezone conversion
+    // Stripe timestamps are Unix timestamps in UTC, so multiply by 1000 to get milliseconds
+    const currentPeriodStartUTC = stripeSubscription.current_period_start
       ? new Date(stripeSubscription.current_period_start * 1000)
       : new Date();
-    const currentPeriodEnd = stripeSubscription.current_period_end
+    const currentPeriodEndUTC = stripeSubscription.current_period_end
       ? new Date(stripeSubscription.current_period_end * 1000)
       : new Date();
-    
-    // Ensure dates are in UTC
-    const currentPeriodStartUTC = new Date(currentPeriodStart.toISOString());
-    const currentPeriodEndUTC = new Date(currentPeriodEnd.toISOString());
 
     const payload: InsertSaaSSubscription = {
       organizationId,
@@ -20141,18 +20138,19 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           });
 
           if (stripeInvoice && stripeInvoice.status === 'paid') {
-            // Convert invoice timestamps to UTC
+            // Convert Stripe invoice timestamps (already UTC) directly to Date objects without timezone conversion
+            // Stripe timestamps are Unix timestamps in UTC, so multiply by 1000 to get milliseconds
             const periodStart = stripeInvoice.period_start
-              ? new Date(new Date(stripeInvoice.period_start * 1000).toISOString())
+              ? new Date(stripeInvoice.period_start * 1000)
               : currentPeriodStartUTC;
             const periodEnd = stripeInvoice.period_end
-              ? new Date(new Date(stripeInvoice.period_end * 1000).toISOString())
+              ? new Date(stripeInvoice.period_end * 1000)
               : currentPeriodEndUTC;
             const paymentDate = stripeInvoice.status_transitions?.paid_at
-              ? new Date(new Date(stripeInvoice.status_transitions.paid_at * 1000).toISOString())
+              ? new Date(stripeInvoice.status_transitions.paid_at * 1000)
               : new Date();
             const dueDate = stripeInvoice.due_date
-              ? new Date(new Date(stripeInvoice.due_date * 1000).toISOString())
+              ? new Date(stripeInvoice.due_date * 1000)
               : new Date();
 
             // Create payment record in saas_payments
@@ -20195,7 +20193,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               amount: ((stripeInvoice.total || 0) / 100).toFixed(2),
               currency: (stripeInvoice.currency || "gbp").toUpperCase(),
               status: "paid",
-              issueDate: stripeInvoice.created ? new Date(new Date(stripeInvoice.created * 1000).toISOString()) : new Date(),
+              issueDate: stripeInvoice.created ? new Date(stripeInvoice.created * 1000) : new Date(),
               dueDate: dueDate,
               paidDate: paymentDate,
               periodStart: periodStart,
@@ -20283,8 +20281,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         amount: ((invoice.total || 0) / 100).toFixed(2),
         currency: (invoice.currency || "gbp").toUpperCase(),
         status: "paid",
-        issueDate: new Date(),
+        issueDate: invoice.created ? new Date(invoice.created * 1000) : new Date(),
         dueDate: invoice.due_date ? new Date(invoice.due_date * 1000) : new Date(),
+        paidDate: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000) : new Date(),
         periodStart,
         periodEnd,
         lineItems,

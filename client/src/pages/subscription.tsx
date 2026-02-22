@@ -78,26 +78,54 @@ const getCountdown = (target?: string | Date | null) => {
 
 const parseDateParts = (value?: string | Date | null) => {
   if (!value) return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    // Use UTC methods to display time as stored in database (UTC) without timezone conversion
-    return {
-      year: value.getUTCFullYear(),
-      month: value.getUTCMonth(),
-      day: value.getUTCDate(),
-      hour: value.getUTCHours(),
-      minute: value.getUTCMinutes(),
-    };
+  
+  // Convert to Date object if it's a string, then use UTC methods
+  let date: Date;
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    // Parse string - always treat as UTC to match database storage
+    const str = String(value).trim();
+    
+    // Check if string ends with Z (UTC indicator) or has timezone offset
+    const hasTimezone = /[Z+-]\d{2}:?\d{2}$/.test(str);
+    
+    if (hasTimezone) {
+      // Has timezone info, parse normally
+      date = new Date(str);
+    } else {
+      // No timezone indicator - parse manually and treat as UTC
+      // Extract date/time components and create UTC date
+      const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?/);
+      if (isoMatch) {
+        const [, y, mo, d, hh, mm, ss, ms] = isoMatch;
+        // Use Date.UTC to create date in UTC timezone (treating input values as UTC)
+        date = new Date(Date.UTC(
+          Number(y),
+          Number(mo) - 1,
+          Number(d),
+          Number(hh),
+          Number(mm),
+          ss ? Number(ss) : 0,
+          ms ? Number(ms.substring(0, 3)) : 0
+        ));
+      } else {
+        // Fallback: try standard parsing
+        date = new Date(str);
+      }
+    }
   }
-  const str = String(value);
-  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
-  if (!isoMatch) return null;
-  const [, y, mo, d, hh, mm] = isoMatch;
+  
+  if (Number.isNaN(date.getTime())) return null;
+  
+  // Always use UTC methods to display time as stored in database (UTC) without timezone conversion
+  // This ensures "6:09 am UTC" displays as "6:09 am" regardless of user's timezone
   return {
-    year: Number(y),
-    month: Number(mo) - 1,
-    day: Number(d),
-    hour: Number(hh),
-    minute: Number(mm),
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth(),
+    day: date.getUTCDate(),
+    hour: date.getUTCHours(),
+    minute: date.getUTCMinutes(),
   };
 };
 
