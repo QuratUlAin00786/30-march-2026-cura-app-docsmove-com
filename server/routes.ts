@@ -20088,17 +20088,25 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       throw new Error("Missing context to persist Stripe subscription");
     }
 
+    // Convert timestamps to UTC Date objects
+    const currentPeriodStart = stripeSubscription.current_period_start
+      ? new Date(stripeSubscription.current_period_start * 1000)
+      : new Date();
+    const currentPeriodEnd = stripeSubscription.current_period_end
+      ? new Date(stripeSubscription.current_period_end * 1000)
+      : new Date();
+    
+    // Ensure dates are in UTC
+    const currentPeriodStartUTC = new Date(currentPeriodStart.toISOString());
+    const currentPeriodEndUTC = new Date(currentPeriodEnd.toISOString());
+
     const payload: InsertSaaSSubscription = {
       organizationId,
       packageId,
       status: stripeSubscription.status,
       paymentStatus: ["active", "trialing"].includes(stripeSubscription.status) ? "paid" : "pending",
-      currentPeriodStart: stripeSubscription.current_period_start
-        ? new Date(stripeSubscription.current_period_start * 1000)
-        : new Date(),
-      currentPeriodEnd: stripeSubscription.current_period_end
-        ? new Date(stripeSubscription.current_period_end * 1000)
-        : new Date(),
+      currentPeriodStart: currentPeriodStartUTC,
+      currentPeriodEnd: currentPeriodEndUTC,
       cancelAtPeriodEnd: Boolean(stripeSubscription.cancel_at_period_end),
       stripeSubscriptionId: stripeSubscription.id,
       metadata: {
@@ -20117,6 +20125,94 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
     const created = await storage.createSaaSSubscription(payload);
     await storage.updateOrganizationStatus(organizationId, "active");
+
+    // After successfully creating subscription, if payment is successful, create payment and invoice records
+    const isPaymentSuccessful = ["active", "trialing"].includes(stripeSubscription.status);
+    if (isPaymentSuccessful && stripeSubscription.latest_invoice) {
+      try {
+        // Fetch the Stripe invoice
+        const invoiceId = typeof stripeSubscription.latest_invoice === "string"
+          ? stripeSubscription.latest_invoice
+          : stripeSubscription.latest_invoice.id;
+        
+        if (invoiceId && stripe) {
+          const stripeInvoice = await stripe.invoices.retrieve(invoiceId, {
+            expand: ['lines']
+          });
+
+          if (stripeInvoice && stripeInvoice.status === 'paid') {
+            // Convert invoice timestamps to UTC
+            const periodStart = stripeInvoice.period_start
+              ? new Date(new Date(stripeInvoice.period_start * 1000).toISOString())
+              : currentPeriodStartUTC;
+            const periodEnd = stripeInvoice.period_end
+              ? new Date(new Date(stripeInvoice.period_end * 1000).toISOString())
+              : currentPeriodEndUTC;
+            const paymentDate = stripeInvoice.status_transitions?.paid_at
+              ? new Date(new Date(stripeInvoice.status_transitions.paid_at * 1000).toISOString())
+              : new Date();
+            const dueDate = stripeInvoice.due_date
+              ? new Date(new Date(stripeInvoice.due_date * 1000).toISOString())
+              : new Date();
+
+            // Create payment record in saas_payments
+            await storage.createSaasPayment({
+              organizationId: created.organizationId,
+              subscriptionId: created.id,
+              invoiceNumber: stripeInvoice.number || stripeInvoice.id,
+              amount: ((stripeInvoice.amount_paid ?? stripeInvoice.total ?? 0) / 100).toFixed(2),
+              currency: (stripeInvoice.currency || "gbp").toUpperCase(),
+              paymentMethod: "stripe",
+              paymentStatus: "completed",
+              paymentDate: paymentDate,
+              dueDate: dueDate,
+              periodStart: periodStart,
+              periodEnd: periodEnd,
+              paymentProvider: "stripe",
+              providerTransactionId: stripeInvoice.payment_intent?.toString() || stripeInvoice.charge?.toString(),
+              metadata: {
+                stripeInvoiceId: stripeInvoice.id,
+                stripeSubscriptionId: stripeSubscription.id,
+                stripeCheckoutSessionId: stripeInvoice.checkout_session?.toString(),
+              },
+              description: stripeInvoice.description || `Stripe invoice ${stripeInvoice.number || stripeInvoice.id}`,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+
+            // Create invoice record in saas_invoices with Stripe invoice ID
+            const lineItems = stripeInvoice.lines.data.map(line => ({
+              description: line.description || "Subscription Service",
+              quantity: line.quantity || 1,
+              rate: line.price?.unit_amount ? line.price.unit_amount / 100 : (line.amount / 100),
+              amount: line.amount / 100
+            }));
+
+            await storage.createInvoice({
+              organizationId: created.organizationId,
+              subscriptionId: created.id,
+              invoiceNumber: stripeInvoice.number || `INV-${stripeInvoice.id}`,
+              amount: ((stripeInvoice.total || 0) / 100).toFixed(2),
+              currency: (stripeInvoice.currency || "gbp").toUpperCase(),
+              status: "paid",
+              issueDate: stripeInvoice.created ? new Date(new Date(stripeInvoice.created * 1000).toISOString()) : new Date(),
+              dueDate: dueDate,
+              paidDate: paymentDate,
+              periodStart: periodStart,
+              periodEnd: periodEnd,
+              lineItems: lineItems,
+              notes: `Stripe Invoice ID: ${stripeInvoice.id}. Thank you for your business.`
+            });
+
+            console.log(`[STRIPE] Created payment and invoice records for subscription ${created.id}, invoice ${stripeInvoice.id}`);
+          }
+        }
+      } catch (invoiceErr: any) {
+        console.error("[STRIPE] Failed to create payment/invoice records after subscription creation:", invoiceErr?.message || invoiceErr);
+        // Don't throw - subscription was created successfully, payment/invoice records are secondary
+      }
+    }
+
     return created;
   }
 
