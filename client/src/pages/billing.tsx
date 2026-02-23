@@ -77,6 +77,8 @@ interface Invoice {
   status: 'unpaid' | 'sent' | 'paid' | 'overdue' | 'cancelled';
   totalAmount: number;
   paidAmount: number;
+  paymentMethod?: string;
+  paidDate?: string;
   items: Array<{
     code: string;
     description: string;
@@ -4540,27 +4542,160 @@ export default function BillingPage() {
     }
   }, []);
 
-  // Handle Stripe Checkout success/cancel redirects
+  // Handle Stripe Checkout success/cancel redirects and onboarding completion
   useEffect(() => {
     const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-    const status = params.get("status");
+    const stripeSuccess = params.get("stripe_success");
+    const stripeCancelled = params.get("stripe_cancelled");
+    const stripeRefresh = params.get("stripe_refresh");
+    const status = params.get("status"); // Legacy support
     const sessionId = params.get("session_id");
     const invoiceId = params.get("invoice_id");
 
-    if (status === "success" && sessionId && invoiceId) {
-      // Payment successful - update invoice status
+    // Handle onboarding refresh (user needs to complete more steps)
+    if (stripeRefresh === "true" && invoiceId) {
       toast({
-        title: "Payment Successful",
-        description: "Your payment has been processed successfully.",
+        title: "Onboarding Incomplete",
+        description: "Please complete all required Stripe onboarding steps to enable payments.",
         variant: "default",
       });
       
-      // Invalidate queries to refresh invoice list
-      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      // Clean up URL
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      const cleanPath = `/${subdomain}/billing`;
+      window.history.replaceState({}, document.title, cleanPath);
+      return;
+    }
+
+    // Handle new format: stripe_success=true
+    if (stripeSuccess === "true" && invoiceId) {
+      if (sessionId) {
+        // We have session_id - this is a payment completion
+        const confirmPayment = async () => {
+          try {
+            // We have session_id, confirm payment with Stripe
+            const response = await apiRequest('POST', '/api/billing/confirm-payment', {
+              sessionId: sessionId,
+              invoiceId: parseInt(invoiceId)
+            });
+            
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || 'Failed to confirm payment');
+            }
+
+            const data = await response.json();
+            
+            toast({
+              title: "Payment Successful",
+              description: "Your payment has been processed and invoice updated successfully.",
+              variant: "default",
+            });
+            
+            // Invalidate queries to refresh invoice list
+            queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+            
+            // Wait a moment for database to update, then refetch the invoice
+            setTimeout(async () => {
+              try {
+                const invoiceResponse = await apiRequest('GET', `/api/billing/invoices/${invoiceId}`);
+                if (invoiceResponse.ok) {
+                  const updatedInvoice = await invoiceResponse.json();
+                  // Open the invoice view dialog with updated invoice data
+                  setSelectedInvoice(updatedInvoice);
+                }
+              } catch (err) {
+                console.error('Error fetching updated invoice:', err);
+              }
+            }, 500);
+          } catch (error: any) {
+            console.error('Error confirming payment:', error);
+            toast({
+              title: "Payment Processed",
+              description: "Payment was successful, but there was an error updating the invoice. Please contact support.",
+              variant: "destructive",
+            });
+          } finally {
+            // Clean up URL - redirect to billing page with subdomain
+            const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+            const cleanPath = `/${subdomain}/billing`;
+            window.history.replaceState({}, document.title, cleanPath);
+          }
+        };
+        
+        confirmPayment();
+      } else {
+        // No session_id - this is likely onboarding completion, not a payment
+        toast({
+          title: "Stripe Onboarding Completed",
+          description: "Your Stripe account setup is complete. You can now accept payments.",
+          variant: "default",
+        });
+        
+        // Invalidate queries to refresh data
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+        
+        // Clean up URL - redirect to billing page with subdomain
+        const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+        const cleanPath = `/${subdomain}/billing`;
+        window.history.replaceState({}, document.title, cleanPath);
+      }
+    } else if (stripeCancelled === "true" && invoiceId) {
+      // Payment cancelled
+      toast({
+        title: "Payment Cancelled",
+        description: "Payment was cancelled. You can try again later.",
+        variant: "default",
+      });
       
       // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      const cleanPath = `/${subdomain}/billing`;
+      window.history.replaceState({}, document.title, cleanPath);
+    } else if (status === "success" && sessionId && invoiceId) {
+      // Legacy format support
+      // Payment successful - confirm payment and update invoice status
+      const confirmPayment = async () => {
+        try {
+          const response = await apiRequest('POST', '/api/billing/confirm-payment', {
+            sessionId: sessionId,
+            invoiceId: parseInt(invoiceId)
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to confirm payment');
+          }
+
+          const data = await response.json();
+          
+          toast({
+            title: "Payment Successful",
+            description: "Your payment has been processed and invoice updated successfully.",
+            variant: "default",
+          });
+          
+          // Invalidate queries to refresh invoice list
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+        } catch (error: any) {
+          console.error('Error confirming payment:', error);
+          toast({
+            title: "Payment Processed",
+            description: "Payment was successful, but there was an error updating the invoice. Please contact support.",
+            variant: "destructive",
+          });
+        } finally {
+          // Clean up URL
+          const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+          const cleanPath = `/${subdomain}/billing`;
+          window.history.replaceState({}, document.title, cleanPath);
+        }
+      };
+      
+      confirmPayment();
     } else if (status === "cancelled" && invoiceId) {
       // Payment cancelled
       toast({
@@ -4925,6 +5060,9 @@ export default function BillingPage() {
       const responseBody = await response.json();
       const createdInvoice = responseBody.invoice || responseBody;
 
+      // Store the original payment method before resetting state
+      const originalPaymentMethod = invoicePaymentMethod;
+
       setShowNewInvoice(false);
       setSelectedPatient("");
       setServiceDate(new Date().toISOString().split('T')[0]);
@@ -4961,7 +5099,8 @@ export default function BillingPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
 
-      if (invoicePaymentMethod === "Online Payment") {
+      // Check the original payment method before it was reset
+      if (originalPaymentMethod === "Online Payment") {
         // Create Stripe Checkout session and redirect
         try {
           // Use fetch directly to have better control over error handling
@@ -4992,26 +5131,54 @@ export default function BillingPage() {
             if (contentType.includes('application/json')) {
               try {
                 const errorData = await checkoutResponse.json();
+                console.error('❌ [BILLING] Checkout error details:', errorData);
+                
+                // If onboarding URL is provided, handle onboarding redirect first
+                if (errorData.onboardingUrl) {
+                  const shouldRedirect = window.confirm(
+                    'Your Stripe account needs to complete onboarding to accept payments.\n\n' +
+                    'Would you like to complete the onboarding process now?\n\n' +
+                    'Click OK to go to Stripe onboarding, or Cancel to see error details.'
+                  );
+                  
+                  if (shouldRedirect) {
+                    // Redirect to onboarding - show toast first, then redirect
+                    toast({
+                      title: "Redirecting to Stripe",
+                      description: "Please complete the onboarding process to enable payments.",
+                      variant: "default",
+                    });
+                    // Use setTimeout to allow toast to show before redirect
+                    setTimeout(() => {
+                      window.location.href = errorData.onboardingUrl;
+                    }, 500);
+                    // Exit early - don't throw error if redirecting
+                    return;
+                  }
+                }
+                
                 // Show the actual error message from Stripe or server
-                errorMessage = errorData.error || errorData.message || errorData.stripeError || errorMessage;
+                errorMessage = errorData.message || errorData.error || errorData.stripeError || errorMessage;
+                
                 // Include details if available
                 if (errorData.details) {
                   errorMessage += `\n\n${errorData.details}`;
                 }
-                // If onboarding URL is provided, suggest completing onboarding
-                if (errorData.onboardingUrl) {
-                  errorMessage += `\n\nPlease complete Stripe onboarding to enable payments.`;
-                  // Optionally redirect to onboarding
-                  const shouldRedirect = confirm('Your Stripe account needs to complete onboarding. Would you like to complete it now?');
-                  if (shouldRedirect) {
-                    window.location.href = errorData.onboardingUrl;
-                    return; // Exit early if redirecting
+                
+                // Include account status if available
+                if (errorData.accountStatus) {
+                  const status = errorData.accountStatus;
+                  errorMessage += `\n\nAccount Status:\n`;
+                  errorMessage += `- Charges Enabled: ${status.chargesEnabled ? 'Yes' : 'No'}\n`;
+                  errorMessage += `- Card Payments: ${status.cardPaymentsCapability || 'Not set'}\n`;
+                  if (status.requirements) {
+                    errorMessage += `- Requirements: Check Stripe Dashboard for pending requirements`;
                   }
                 }
-                console.error('❌ [BILLING] Checkout error details:', errorData);
               } catch (e) {
                 // If JSON parsing fails, use status text
                 errorMessage = `Server error (${checkoutResponse.status}): ${checkoutResponse.statusText}`;
+                console.error('❌ [BILLING] Failed to parse error response:', e);
               }
             } else {
               // If not JSON, it's likely an HTML error page
@@ -5042,14 +5209,30 @@ export default function BillingPage() {
             throw new Error('No checkout URL received from server');
           }
         } catch (error: any) {
+          // Check if we're in the middle of redirecting (don't show error if redirecting)
+          // The return statement above should prevent this, but check just in case
+          if (error.message?.includes('onboarding') && error.message?.includes('redirect')) {
+            return; // Already handled redirect, exit silently
+          }
+          
           console.error('Stripe Checkout error:', error);
-          const errorMessage = error.message || "Unable to set up online payment. Please try again or use a different payment method.";
+          
+          // If error message contains newlines, use first part for toast
+          let errorMessage = error.message || "Unable to set up online payment. Please try again or use a different payment method.";
+          const firstLine = errorMessage.split('\n\n')[0];
+          
           toast({
             title: "Payment Setup Failed",
-            description: errorMessage,
+            description: firstLine,
             variant: "destructive",
-            duration: 8000
+            duration: 12000 // Show longer for important errors
           });
+          
+          // Log full error details for debugging
+          if (errorMessage.includes('\n\n')) {
+            console.warn('Full error details:', errorMessage);
+          }
+          
           // Still show success modal for invoice creation
           setCreatedInvoiceNumber(createdInvoice.invoiceNumber || "");
           setShowSuccessModal(true);
@@ -11436,6 +11619,14 @@ export default function BillingPage() {
                     <div><strong>Total Amount:</strong> £{parseFloat(selectedInvoice.totalAmount.toString()).toFixed(2)}</div>
                     <div><strong>Paid Amount:</strong> £{parseFloat(selectedInvoice.paidAmount.toString()).toFixed(2)}</div>
                     <div><strong>Outstanding:</strong> £{(parseFloat(selectedInvoice.totalAmount.toString()) - parseFloat(selectedInvoice.paidAmount.toString())).toFixed(2)}</div>
+                    {selectedInvoice.paymentMethod && (
+                      <div className="flex items-center gap-2">
+                        <strong>Payment Method:</strong>
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+                          {selectedInvoice.paymentMethod}
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -11498,7 +11689,23 @@ export default function BillingPage() {
                 <div className="text-sm text-gray-600 dark:text-gray-300">
                   {(typeof selectedInvoice.paidAmount === 'string' ? parseFloat(selectedInvoice.paidAmount) : selectedInvoice.paidAmount) > 0 ? (
                     <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-gray-900 dark:text-gray-100">
-                      Payment of £{(typeof selectedInvoice.paidAmount === 'string' ? parseFloat(selectedInvoice.paidAmount) : selectedInvoice.paidAmount).toFixed(2)} received on {format(new Date(selectedInvoice.invoiceDate), 'MMM d, yyyy')}
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-semibold">Payment Received</span>
+                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">
+                          Paid
+                        </Badge>
+                      </div>
+                      <div className="space-y-1">
+                        <div><strong>Amount:</strong> £{(typeof selectedInvoice.paidAmount === 'string' ? parseFloat(selectedInvoice.paidAmount) : selectedInvoice.paidAmount).toFixed(2)}</div>
+                        {selectedInvoice.paymentMethod && (
+                          <div><strong>Payment Method:</strong> {selectedInvoice.paymentMethod}</div>
+                        )}
+                        {selectedInvoice.paidDate ? (
+                          <div><strong>Payment Date:</strong> {format(new Date(selectedInvoice.paidDate), 'MMM d, yyyy')}</div>
+                        ) : (
+                          <div><strong>Payment Date:</strong> {format(new Date(selectedInvoice.invoiceDate), 'MMM d, yyyy')}</div>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-gray-100">

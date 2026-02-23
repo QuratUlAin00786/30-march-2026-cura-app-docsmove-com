@@ -29180,16 +29180,39 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
         // Check if card_payments capability is active
         const cardPaymentsStatus = accountCapabilities?.card_payments;
-        if (cardPaymentsStatus !== 'active' || !chargesEnabled) {
+        
+        // If account has details_submitted and charges_enabled, it's ready even if capability shows pending
+        // This can happen when Stripe is still processing the capability activation after onboarding
+        const isAccountReady = (connectedAccount.details_submitted && chargesEnabled) || 
+                               (cardPaymentsStatus === 'active' && chargesEnabled);
+        
+        // If capability is pending but account appears ready (details submitted, charges enabled), allow checkout
+        if (cardPaymentsStatus === 'pending' && isAccountReady) {
+          console.log('✅ [STRIPE-CHECKOUT] Account appears ready (details submitted, charges enabled), allowing checkout despite pending capability');
+          // Continue - account is ready, capability status might just be delayed
+        } else if (cardPaymentsStatus === 'pending' && !isAccountReady) {
+          console.warn('⚠️ [STRIPE-CHECKOUT] Account capability is pending and account not fully ready, but allowing checkout attempt:', {
+            accountId: organization.stripeAccountId,
+            status: cardPaymentsStatus,
+            chargesEnabled: chargesEnabled,
+            detailsSubmitted: connectedAccount.details_submitted
+          });
+          // Continue - let Stripe handle it if there's an issue
+        } else if (cardPaymentsStatus !== 'active' || !chargesEnabled) {
+          // Only block if capability is inactive or unrequested
           const baseUrl = process.env.FRONTEND_URL || req.protocol + '://' + req.get('host');
           
           // Generate onboarding link if account needs setup
           let onboardingUrl = null;
           try {
+            // Get subdomain for redirect URLs
+            const subdomain = organization.subdomain || 'demo';
+            const organizationSubdomainUrl = `${baseUrl}/${subdomain}`;
+            
             const accountLink = await stripe.accountLinks.create({
               account: organization.stripeAccountId,
-              refresh_url: `${baseUrl}/billing?stripe_refresh=true&invoice_id=${invoiceId}`,
-              return_url: `${baseUrl}/billing?stripe_success=true&invoice_id=${invoiceId}`,
+              refresh_url: `${organizationSubdomainUrl}/billing?stripe_refresh=true&invoice_id=${invoiceId}`,
+              return_url: `${organizationSubdomainUrl}/billing?stripe_success=true&invoice_id=${invoiceId}`,
               type: "account_onboarding",
             });
             onboardingUrl = accountLink.url;
@@ -29200,7 +29223,6 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
           const statusMessages: Record<string, string> = {
             'inactive': 'Card payments capability is not enabled. Please complete Stripe onboarding.',
-            'pending': 'Card payments capability is pending review. Please wait for Stripe to activate it.',
             'unrequested': 'Card payments capability has not been requested. Please complete Stripe onboarding.'
           };
 
@@ -29385,9 +29407,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Get base URL for success/cancel URLs
       const baseUrl = process.env.FRONTEND_URL || req.protocol + '://' + req.get('host');
+      
+      // Get subdomain for redirect URL and construct organization subdomain URL
+      const subdomain = organization.subdomain || 'demo';
+      const organizationSubdomainUrl = `${baseUrl}/${subdomain}`;
+      // Include session_id in URL - Stripe will replace {CHECKOUT_SESSION_ID} with actual session ID
+      const successUrl = `${organizationSubdomainUrl}/billing?stripe_success=true&invoice_id=${invoiceId}&session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${organizationSubdomainUrl}/billing?stripe_cancelled=true&invoice_id=${invoiceId}`;
 
       // Create Stripe Checkout session
       console.log('🔗 [STRIPE-CHECKOUT] Creating session for account:', organization.stripeAccountId);
+      console.log('🔗 [STRIPE-CHECKOUT] Success URL:', successUrl);
       
       try {
         const session = await stripe.checkout.sessions.create(
@@ -29395,8 +29425,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             payment_method_types: ['card'],
             line_items: lineItems,
             mode: 'payment',
-            success_url: `${baseUrl}/billing?session_id={CHECKOUT_SESSION_ID}&invoice_id=${invoiceId}&status=success`,
-            cancel_url: `${baseUrl}/billing?invoice_id=${invoiceId}&status=cancelled`,
+            success_url: successUrl,
+            cancel_url: cancelUrl,
             metadata: {
               organization_id: String(organization.id),
               invoice_id: String(invoiceId),
@@ -29432,13 +29462,6 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           details: "Check server logs for full error details"
         });
       }
-
-      console.log('✅ [STRIPE-CHECKOUT] Session created:', session.id, 'for invoice:', invoiceId);
-
-      res.json({ 
-        url: session.url,
-        sessionId: session.id 
-      });
     } catch (error: any) {
       console.error("❌ [STRIPE-CHECKOUT] Error creating Stripe Checkout session:", error);
       
@@ -29471,6 +29494,112 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Generic error - always return JSON
       return res.status(500).json({ 
         error: "Failed to create payment session",
+        message: error.message || String(error)
+      });
+    }
+  });
+
+  // Handle Stripe Checkout success - update invoice payment status
+  app.post("/api/billing/confirm-payment", tenantMiddleware, authMiddleware, requireRole(["admin", "doctor", "nurse", "receptionist", "patient"]), async (req: TenantRequest, res) => {
+    try {
+      const { sessionId, invoiceId } = z.object({
+        sessionId: z.string().min(1),
+        invoiceId: z.number().int().positive()
+      }).parse(req.body);
+
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      // Get organization to check if we need to use connected account
+      const organization = await storage.getOrganization(req.tenant!.id);
+      if (!organization) {
+        return res.status(404).json({ error: "Organization not found" });
+      }
+
+      // Retrieve the checkout session to verify payment
+      // If organization has a connected account, retrieve session with stripeAccount parameter
+      let session;
+      if (organization.stripeAccountId) {
+        try {
+          session = await stripe.checkout.sessions.retrieve(sessionId, {
+            stripeAccount: organization.stripeAccountId
+          });
+        } catch (error: any) {
+          // If retrieval fails with connected account, try without it (might be platform account session)
+          console.warn('⚠️ [STRIPE-CHECKOUT] Failed to retrieve session with connected account, trying platform account:', error.message);
+          session = await stripe.checkout.sessions.retrieve(sessionId);
+        }
+      } else {
+        session = await stripe.checkout.sessions.retrieve(sessionId);
+      }
+      
+      console.log('📊 [STRIPE-CHECKOUT] Session payment status:', session.payment_status, 'Session ID:', sessionId);
+      
+      if (session.payment_status !== 'paid') {
+        return res.status(400).json({ 
+          error: "Payment not completed",
+          message: `Payment status is ${session.payment_status}, not paid.`
+        });
+      }
+
+      // Get invoice details
+      const invoice = await storage.getInvoice(invoiceId, req.tenant!.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      // Update invoice payment status to paid
+      // Check invoice schema - it uses 'status' field, not 'paymentStatus'
+      const updateResult = await db.update(invoices)
+        .set({
+          status: 'paid', // Invoice status field
+          paymentMethod: 'Online Payment',
+          paidAmount: invoice.totalAmount,
+          paidDate: new Date(),
+          updatedAt: new Date()
+        })
+        .where(and(
+          eq(invoices.id, invoiceId),
+          eq(invoices.organizationId, req.tenant!.id)
+        ))
+        .returning();
+
+      if (updateResult.length === 0) {
+        console.error('❌ [STRIPE-CHECKOUT] Invoice update failed - no rows updated. Invoice ID:', invoiceId, 'Organization ID:', req.tenant!.id);
+        return res.status(404).json({ 
+          error: "Invoice not found or does not belong to this organization",
+          invoiceId: invoiceId,
+          organizationId: req.tenant!.id
+        });
+      }
+
+      console.log('✅ [STRIPE-CHECKOUT] Invoice marked as paid successfully:', {
+        invoiceId: invoiceId,
+        status: updateResult[0].status,
+        paymentMethod: updateResult[0].paymentMethod,
+        paidAmount: updateResult[0].paidAmount
+      });
+
+      console.log('✅ [STRIPE-CHECKOUT] Invoice marked as paid:', invoiceId, 'Session:', sessionId);
+
+      res.json({ 
+        success: true,
+        message: "Invoice payment confirmed and updated",
+        invoiceId: invoiceId
+      });
+    } catch (error: any) {
+      console.error("❌ [STRIPE-CHECKOUT] Error confirming payment:", error);
+      
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: "Invalid request data", 
+          details: error.errors
+        });
+      }
+      
+      return res.status(500).json({ 
+        error: "Failed to confirm payment",
         message: error.message || String(error)
       });
     }
