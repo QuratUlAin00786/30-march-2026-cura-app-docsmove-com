@@ -1678,10 +1678,19 @@ The Cura EMR Team`,
         console.log('💳 [STRIPE-CONNECT] STRIPE_SECRET_KEY prefix:', process.env.STRIPE_SECRET_KEY?.substring(0, 7));
         
         try {
+          console.log('🔧 [STRIPE-CONNECT] Creating account with capabilities:', {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          });
+          
           const stripeAccount = await stripe.accounts.create({
             type: "express",
             email: organization.email,
             country: platformCountry, // Use platform's country to avoid cross-border restrictions
+            capabilities: {
+              card_payments: { requested: true },
+              transfers: { requested: true },
+            },
             metadata: {
               organization_name: organization.name,
               subdomain: organization.subdomain,

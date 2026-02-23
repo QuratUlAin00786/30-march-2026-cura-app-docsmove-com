@@ -4863,7 +4863,7 @@ export default function ImagingPage() {
                                         <Button
                                           variant="outline"
                                           size="sm"
-                                          className="h-6 px-2 text-xs"
+                                          className="h-6 px-2 text-xs border-yellow-200 text-yellow-600 hover:bg-yellow-50 hover:border-yellow-300 dark:border-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-900/20"
                                           onClick={async () => {
                                             try {
                                               const token = localStorage.getItem("auth_token");
@@ -4881,6 +4881,18 @@ export default function ImagingPage() {
                                                 throw new Error("Invalid prescription file path");
                                               }
 
+                                              // Get organizationId and patientId
+                                              const organizationId = user?.organizationId || study.organizationId;
+                                              const patientId = study.patientId;
+
+                                              if (!organizationId) {
+                                                throw new Error("Organization ID is missing. Cannot open prescription.");
+                                              }
+
+                                              if (!patientId) {
+                                                throw new Error("Patient ID is missing. Cannot open prescription.");
+                                              }
+
                                               const response = await fetch(`/api/imaging/generate-prescription-token`, {
                                                 method: "POST",
                                                 headers: {
@@ -4889,8 +4901,8 @@ export default function ImagingPage() {
                                                   "Authorization": `Bearer ${token}`,
                                                 },
                                                 body: JSON.stringify({
-                                                  organizationId: user?.organizationId || study.organizationId,
-                                                  patientId: study.patientId,
+                                                  organizationId: organizationId,
+                                                  patientId: patientId,
                                                   fileName: fileName
                                                 }),
                                               });
@@ -4901,7 +4913,12 @@ export default function ImagingPage() {
                                               }
 
                                               const data = await response.json();
-                                              const prescriptionUrl = `/api/imaging/view-prescription/${study.organizationId}/${study.patientId}/${fileName}?token=${data.token}`;
+
+                                              if (!data.token) {
+                                                throw new Error("Failed to generate access token. Token not received.");
+                                              }
+
+                                              const prescriptionUrl = `/api/imaging/view-prescription/${organizationId}/${patientId}/${fileName}?token=${data.token}`;
                                               window.open(prescriptionUrl, '_blank');
 
                                               toast({
@@ -4918,7 +4935,7 @@ export default function ImagingPage() {
                                             }
                                           }}
                                         >
-                                          <FileText className="h-3 w-3 mr-1" />
+                                          <Save className="h-3 w-3 mr-1 text-yellow-600 dark:text-yellow-400" />
                                           View Image Prescription
                                         </Button>
                                       )}

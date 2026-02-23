@@ -7979,9 +7979,9 @@ Coverage Details: [Insurance Coverage]`;
                   </p>
                 ) : (
                   shareLinks.map((entry: any) => (
-                    <Card key={entry.id} className="border border-dashed">
+                    <Card key={entry.id} className="border border-dashed border-gray-200 dark:border-gray-700">
                       <CardContent className="gap-2 space-y-1 p-3">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground dark:text-gray-400">
                           <span>
                             Patient: {entry.patientFirstName || "Unknown"} {entry.patientLastName || ""} (
                             {entry.patientEmail || "no email"})
@@ -7990,14 +7990,14 @@ Coverage Details: [Insurance Coverage]`;
                             {new Date(entry.createdAt).toLocaleString()}
                           </span>
                         </div>
-                        <div className="flex flex-col gap-1 text-[11px] text-slate-600">
-                          <a href={entry.link} target="_blank" rel="noreferrer" className="text-primary underline">
+                        <div className="flex flex-col gap-1 text-[11px] text-slate-600 dark:text-gray-300">
+                          <a href={entry.link} target="_blank" rel="noreferrer" className="text-primary dark:text-blue-400 underline">
                             {entry.link}
                           </a>
                           <span>Email delivered: {entry.emailSent ? "Yes" : "No"}</span>
                           {entry.emailSubject && <span>Subject: {entry.emailSubject}</span>}
                           {entry.emailError && (
-                            <span className="text-[11px] text-rose-500">
+                            <span className="text-[11px] text-rose-500 dark:text-rose-400">
                               Error: {entry.emailError}
                             </span>
                           )}
@@ -8038,27 +8038,27 @@ Coverage Details: [Insurance Coverage]`;
               <p className="text-sm text-muted-foreground">
                 This is the exact email that will be sent to {selectedPatient?.email} once shared.
               </p>
-              <Card className="border border-dashed border-slate-200 shadow-none">
+              <Card className="border border-dashed border-slate-200 dark:border-slate-700 shadow-none">
                 <CardContent className="p-4">
                   {emailPreview?.html ? (
-                    <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: emailPreview.html }} />
+                    <div className="prose max-w-none dark:prose-invert prose-headings:text-gray-900 dark:prose-headings:text-gray-100 prose-p:text-gray-700 dark:prose-p:text-gray-300 prose-a:text-blue-600 dark:prose-a:text-blue-400" dangerouslySetInnerHTML={{ __html: emailPreview.html }} />
                   ) : (
                     <p className="text-xs text-muted-foreground">No preview available.</p>
                   )}
                 </CardContent>
               </Card>
-              <div className="space-y-2 rounded-lg border bg-white p-3 text-xs text-muted-foreground">
+              <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-xs text-muted-foreground dark:text-gray-300">
                 <div>
-                  <span className="font-semibold">Subject:</span> {emailPreview?.subject}
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">Subject:</span> <span className="text-gray-700 dark:text-gray-300">{emailPreview?.subject}</span>
                 </div>
                 <div>
-                  <span className="font-semibold">Link:</span>{" "}
-                  <a href={emailPreview?.link} target="_blank" rel="noreferrer" className="underline text-primary">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">Link:</span>{" "}
+                  <a href={emailPreview?.link} target="_blank" rel="noreferrer" className="underline text-primary dark:text-blue-400">
                     {emailPreview?.link}
                   </a>
                 </div>
                 <div>
-                  <span className="font-semibold">Text version:</span> {emailPreview?.text}
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">Text version:</span> <span className="text-gray-700 dark:text-gray-300">{emailPreview?.text}</span>
                 </div>
               </div>
               <div className="flex justify-end">

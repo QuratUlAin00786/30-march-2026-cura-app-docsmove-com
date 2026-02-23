@@ -6461,10 +6461,19 @@ export class DatabaseStorage implements IStorage {
             }
           }
           
+          console.log('🔧 [CUSTOMER-CREATE] Creating account with capabilities:', {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          });
+          
           const stripeAccount = await stripe.accounts.create({
             type: "express",
             email: customerData.adminEmail,
             country: platformCountry, // Use platform's country to avoid cross-border restrictions
+            capabilities: {
+              card_payments: { requested: true },
+              transfers: { requested: true },
+            },
             metadata: {
               organization_name: customerData.name,
               subdomain: customerData.subdomain,

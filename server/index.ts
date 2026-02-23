@@ -27,6 +27,33 @@ app.use(
     credentials: true,
   }),
 );
+
+// Content Security Policy for Stripe Connect support
+// This allows Stripe Connect onboarding to work properly
+app.use((req, res, next) => {
+  // Only set CSP for HTML pages, not API routes
+  if (!req.path.startsWith('/api/') && req.accepts('text/html')) {
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://connect-js.stripe.com https://*.stripe.com https://cdnjs.cloudflare.com",
+        "connect-src 'self' https://api.stripe.com https://connect.stripe.com https://connect-js.stripe.com https://*.stripe.com https://*.hcaptcha.com https://c.increment.com https://c.stripe.dev https://c.stripe.global https://c.stripe.partners https://edge-api.stripe.com https://edge-billing.stripe.com https://edge-connect.stripe.com https://edge-dashboard.stripe.com https://edge-docs.stripe.com https://edge-marketplace.stripe.com https://edge-site-admin.stripe.com https://edge-support.stripe.com https://issuing-key.stripe.com https://t.stripe.com https://b.stripecdn.com https://billing.stripe.com https://dashboard.stripe.com https://dataconnectors-dashboard-upload-us-west-2-prod.s3.us-west-2.amazonaws.com https://docs.stripe.com https://edge-support-conversations.stripe.com https://edge.stripe.com https://errors.stripe.com https://files.stripe.com https://hcaptcha.com https://marketplace.stripe.com https://qr.stripe.com https://r.stripe.com https://sourcemaps.corp.stripe.com https://site-admin.stripe.com https://stripe.com https://support-conversations.stripe.com https://support.stripe.com https://access.stripe.com wss://stripe-cli-ws-nw.stripe.com wss://stripe-cli.stripe.com wss://stripecli-ws-nw.stripe.com wss://stripecli.stripe.com wss://*.glance.net:*",
+        "frame-src 'self' https://js.stripe.com https://connect.stripe.com https://*.stripe.com",
+        "frame-ancestors 'self' https://app.contentful.com",
+        "img-src 'self' data: https: blob:",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
+        "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self' https://*.stripe.com",
+        "upgrade-insecure-requests"
+      ].join('; ')
+    );
+  }
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 

@@ -1364,14 +1364,9 @@ export default function SaaSCustomers() {
                       </div>
                     </TableCell>
                     <TableCell className="w-[100px]">
-                      <div className="flex flex-col gap-1">
-                        <Badge className={`${getStatusBadgeColor(customer.computedSubscriptionStatus || customer.subscriptionStatus)} text-xs`}>
-                          {customer.computedSubscriptionStatus || customer.subscriptionStatus}
-                        </Badge>
-                        <Badge className={`hidden xl:inline-flex text-xs ${getPaymentBadgeColor(customer.organizationPaymentStatus)}`}>
-                          {customer.organizationPaymentStatus || 'trial'}
-                        </Badge>
-                      </div>
+                      <Badge className={`${getStatusBadgeColor(customer.computedSubscriptionStatus || customer.subscriptionStatus)} text-xs`}>
+                        {customer.computedSubscriptionStatus || customer.subscriptionStatus}
+                      </Badge>
                     </TableCell>
                     <TableCell className="hidden xl:table-cell w-[90px]">
                       <Badge className={`${getPaymentBadgeColor(customer.organizationPaymentStatus)} text-xs`}>

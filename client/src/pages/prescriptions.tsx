@@ -2305,7 +2305,18 @@ export default function PrescriptionsPage() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    
+    // Clear canvas and set background
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Set white background for canvas (works for both themes - dark theme container provides dark background)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Set stroke color based on theme
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+    ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+    
     setSignature("");
     setSignatureSaved(false);
   };
@@ -2336,11 +2347,31 @@ export default function PrescriptionsPage() {
             const ctx = canvas.getContext("2d");
             if (!ctx) return;
             
-            // Clear canvas first
+            // Clear canvas and set white background
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             // Draw the signature image onto canvas
             ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+            
+            // If dark theme, invert the signature to make it white
+            if (isSignatureDarkTheme()) {
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const data = imageData.data;
+              for (let i = 0; i < data.length; i += 4) {
+                // Invert RGB values (keep alpha channel)
+                data[i] = 255 - data[i];     // R
+                data[i + 1] = 255 - data[i + 1]; // G
+                data[i + 2] = 255 - data[i + 2]; // B
+              }
+              ctx.putImageData(imageData, 0, 0);
+            }
+            
+            // Set stroke color for future drawing
+            ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+            ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+            
             setSignature(prescriptionData.signature.doctorSignature);
           };
           signatureImage.onerror = () => {
@@ -2366,8 +2397,31 @@ export default function PrescriptionsPage() {
           const ctx = canvas.getContext("2d");
           if (!ctx) return;
           
+          // Clear canvas and set white background
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw the signature image onto canvas
           ctx.drawImage(signatureImage, 0, 0, canvas.width, canvas.height);
+          
+          // If dark theme, invert the signature to make it white
+          if (isSignatureDarkTheme()) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+              // Invert RGB values (keep alpha channel)
+              data[i] = 255 - data[i];     // R
+              data[i + 1] = 255 - data[i + 1]; // G
+              data[i + 2] = 255 - data[i + 2]; // B
+            }
+            ctx.putImageData(imageData, 0, 0);
+          }
+          
+          // Set stroke color for future drawing
+          ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+          ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+          
           setSignature(selectedPrescription.signature.doctorSignature);
         };
         signatureImage.src = selectedPrescription.signature.doctorSignature;
@@ -2376,6 +2430,23 @@ export default function PrescriptionsPage() {
       }
     }
   };
+
+  // Initialize canvas with proper background and stroke color when dialog opens
+  useEffect(() => {
+    if (showESignDialog && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      
+      // Set white background for canvas (container provides dark background in dark theme)
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Set stroke color based on theme - white in dark theme, black in light theme
+      ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+    }
+  }, [showESignDialog]);
 
   // Load signature when dialog opens
   useEffect(() => {
@@ -5072,7 +5143,10 @@ export default function PrescriptionsPage() {
                                 <img
                                   src={prescription.signature.doctorSignature}
                                   alt="Doctor Signature"
-                                  className="h-full w-full object-contain dark:invert object-left"
+                                  className="h-full w-full object-contain object-left"
+                                  style={{
+                                    filter: isSignatureDarkTheme() ? 'invert(1)' : 'none'
+                                  }}
                                 />
                               </div>
                               <p className="text-xs text-green-600 dark:text-green-400 mt-1">
@@ -9011,44 +9085,44 @@ export default function PrescriptionsPage() {
 
                 {/* Signature Analytics */}
                 <div className="space-y-4">
-                  <div className="bg-gray-50 p-4 rounded-lg border">
-                    <h5 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-600" />
+                  <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <h5 className="font-medium text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                       Signature Quality Analysis
                     </h5>
-                    <div className="space-y-2 text-sm">
+                    <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
                       <div className="flex justify-between">
-                        <span>Stroke Consistency:</span>
-                        <span className="text-green-600 font-medium">
+                        <span className="text-gray-600 dark:text-gray-400">Stroke Consistency:</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
                           Excellent
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Pressure Variation:</span>
-                        <span className="text-green-600 font-medium">
+                        <span className="text-gray-600 dark:text-gray-400">Pressure Variation:</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
                           Natural
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Speed Analysis:</span>
-                        <span className="text-green-600 font-medium">
+                        <span className="text-gray-600 dark:text-gray-400">Speed Analysis:</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
                           Consistent
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Uniqueness Score:</span>
-                        <span className="text-green-600 font-medium">
+                        <span className="text-gray-600 dark:text-gray-400">Uniqueness Score:</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
                           98.7%
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                    <h5 className="font-medium text-blue-800 mb-2">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <h5 className="font-medium text-blue-800 dark:text-blue-300 mb-2">
                       Biometric Verification
                     </h5>
-                    <div className="text-sm text-blue-700 space-y-1">
+                    <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                         <span>Touch patterns analyzed</span>

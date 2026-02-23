@@ -4626,21 +4626,61 @@ export default function BillingPage() {
         
         confirmPayment();
       } else {
-        // No session_id - this is likely onboarding completion, not a payment
-        toast({
-          title: "Stripe Onboarding Completed",
-          description: "Your Stripe account setup is complete. You can now accept payments.",
-          variant: "default",
-        });
+        // No session_id - this is likely onboarding completion, verify account status
+        const verifyAccount = async () => {
+          try {
+            const response = await apiRequest('POST', '/api/billing/verify-stripe-account', {});
+            
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || 'Failed to verify account status');
+            }
+
+            const data = await response.json();
+            
+            if (data.isAccountReady) {
+              toast({
+                title: "Stripe Onboarding Completed",
+                description: "Your Stripe account is ready to accept payments. You can now create invoices with online payment.",
+                variant: "default",
+              });
+            } else {
+              // Show detailed message about what's missing
+              const missingItems = [];
+              if (!data.accountStatus.chargesEnabled) {
+                missingItems.push("charges are not enabled");
+              }
+              if (data.accountStatus.cardPaymentsCapability !== 'active') {
+                missingItems.push(`card payments capability is ${data.accountStatus.cardPaymentsCapability || 'not active'}`);
+              }
+              
+              toast({
+                title: "Onboarding Incomplete",
+                description: data.message || `Please complete Stripe onboarding. ${missingItems.length > 0 ? `Missing: ${missingItems.join(', ')}.` : ''}`,
+                variant: "default",
+              });
+            }
+            
+            // Invalidate queries to refresh data
+            queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/tenant/info"] });
+          } catch (error: any) {
+            console.error('Error verifying account status:', error);
+            toast({
+              title: "Onboarding Status Unknown",
+              description: "Could not verify Stripe account status. Please check your Stripe Dashboard.",
+              variant: "default",
+            });
+          } finally {
+            // Clean up URL - redirect to billing page with subdomain
+            const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+            const cleanPath = `/${subdomain}/billing`;
+            window.history.replaceState({}, document.title, cleanPath);
+          }
+        };
         
-        // Invalidate queries to refresh data
-        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
-        
-        // Clean up URL - redirect to billing page with subdomain
-        const subdomain = localStorage.getItem('user_subdomain') || 'demo';
-        const cleanPath = `/${subdomain}/billing`;
-        window.history.replaceState({}, document.title, cleanPath);
+        verifyAccount();
       }
     } else if (stripeCancelled === "true" && invoiceId) {
       // Payment cancelled

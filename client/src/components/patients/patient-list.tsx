@@ -3292,12 +3292,31 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                         </div>
                       )}
                       {patient.insuranceInfo?.provider && (
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] sm:text-xs dark:text-gray-200 dark:border-gray-600 flex-shrink-0 max-w-[5rem] truncate"
-                        >
-                          {patient.insuranceInfo.provider === "NHS (National Health Service)" ? "NHS" : patient.insuranceInfo.provider.toUpperCase()}
-                        </Badge>
+                        <TooltipProvider>
+                          <Tooltip delayDuration={0}>
+                            <TooltipTrigger asChild>
+                              <div className="max-w-[5rem] min-w-0 flex-shrink-0 inline-block">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] dark:text-gray-200 dark:border-gray-600 w-full cursor-help !inline-block overflow-hidden text-ellipsis whitespace-nowrap"
+                                  style={{ 
+                                    maxWidth: '5rem',
+                                    display: 'inline-block',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title={patient.insuranceInfo.provider}
+                                >
+                                  {patient.insuranceInfo.provider === "NHS (National Health Service)" ? "NHS" : patient.insuranceInfo.provider.toUpperCase()}
+                                </Badge>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" align="end" className="z-[100]">
+                              <p className="max-w-xs break-words">Insurance Provider: {patient.insuranceInfo.provider}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       )}
                       {patient.isInsured && (
                         <Badge

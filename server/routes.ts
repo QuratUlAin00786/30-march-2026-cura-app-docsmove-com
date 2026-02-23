@@ -20480,6 +20480,51 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         await handleInvoiceFailure(invoice);
         break;
       }
+      case "account.updated": {
+        // Handle Stripe Connect account updates (e.g., after onboarding completion)
+        const account = event.data.object as Stripe.Account;
+        console.log("[STRIPE WEBHOOK] account.updated", {
+          accountId: account.id,
+          chargesEnabled: account.charges_enabled,
+          payoutsEnabled: account.payouts_enabled,
+          detailsSubmitted: account.details_submitted,
+          capabilities: account.capabilities,
+        });
+
+        // Find organization by stripe_account_id
+        const [organization] = await db
+          .select()
+          .from(organizations)
+          .where(eq(organizations.stripeAccountId, account.id))
+          .limit(1);
+
+        if (organization) {
+          // Check if account is ready: charges_enabled === true AND card_payments === "active"
+          const cardPaymentsStatus = account.capabilities?.card_payments;
+          const isAccountReady = account.charges_enabled === true && cardPaymentsStatus === 'active';
+
+          // Update organization stripe status
+          const newStatus = isAccountReady ? 'active' : 
+                           (account.details_submitted ? 'pending' : 'incomplete');
+
+          await db.update(organizations)
+            .set({
+              stripeStatus: newStatus,
+              updatedAt: new Date(),
+            })
+            .where(eq(organizations.id, organization.id));
+
+          console.log(`[STRIPE WEBHOOK] Updated organization ${organization.id} stripe status to ${newStatus}`, {
+            accountId: account.id,
+            chargesEnabled: account.charges_enabled,
+            cardPayments: cardPaymentsStatus,
+            isAccountReady,
+          });
+        } else {
+          console.warn(`[STRIPE WEBHOOK] No organization found for Stripe account ${account.id}`);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -29181,25 +29226,44 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         // Check if card_payments capability is active
         const cardPaymentsStatus = accountCapabilities?.card_payments;
         
-        // If account has details_submitted and charges_enabled, it's ready even if capability shows pending
-        // This can happen when Stripe is still processing the capability activation after onboarding
-        const isAccountReady = (connectedAccount.details_submitted && chargesEnabled) || 
-                               (cardPaymentsStatus === 'active' && chargesEnabled);
+        // STRICT CHECK: For cross-border accounts (GB platform, IN connected account),
+        // we MUST verify both charges_enabled === true AND card_payments === "active"
+        // before allowing any checkout session creation
+        const isAccountReady = chargesEnabled === true && cardPaymentsStatus === 'active';
         
-        // If capability is pending but account appears ready (details submitted, charges enabled), allow checkout
-        if (cardPaymentsStatus === 'pending' && isAccountReady) {
-          console.log('✅ [STRIPE-CHECKOUT] Account appears ready (details submitted, charges enabled), allowing checkout despite pending capability');
-          // Continue - account is ready, capability status might just be delayed
-        } else if (cardPaymentsStatus === 'pending' && !isAccountReady) {
-          console.warn('⚠️ [STRIPE-CHECKOUT] Account capability is pending and account not fully ready, but allowing checkout attempt:', {
-            accountId: organization.stripeAccountId,
-            status: cardPaymentsStatus,
-            chargesEnabled: chargesEnabled,
-            detailsSubmitted: connectedAccount.details_submitted
-          });
-          // Continue - let Stripe handle it if there's an issue
-        } else if (cardPaymentsStatus !== 'active' || !chargesEnabled) {
-          // Only block if capability is inactive or unrequested
+        console.log('🔍 [STRIPE-CHECKOUT] Account readiness check (strict):', {
+          cardPaymentsStatus,
+          chargesEnabled,
+          detailsSubmitted: connectedAccount.details_submitted,
+          isAccountReady,
+          accountId: organization.stripeAccountId,
+          country: connectedAccount.country
+        });
+        
+        // Update organization stripeStatus in database based on current Stripe account status
+        const newStatus = isAccountReady ? 'active' : 
+                         (connectedAccount.details_submitted ? 'pending' : 'incomplete');
+        
+        // Only update if status has changed to avoid unnecessary DB writes
+        if (organization.stripeStatus !== newStatus) {
+          await db.update(organizations)
+            .set({
+              stripeStatus: newStatus,
+              updatedAt: new Date(),
+            })
+            .where(eq(organizations.id, organization.id));
+          console.log(`🔄 [STRIPE-CHECKOUT] Updated organization stripeStatus from '${organization.stripeStatus}' to '${newStatus}'`);
+        }
+
+        // Only allow checkout if BOTH conditions are met:
+        // 1. charges_enabled === true
+        // 2. card_payments capability === "active"
+        // This prevents "You cannot create a charge on a connected account without the card_payments capability enabled" errors
+        if (isAccountReady) {
+          // Account is ready - log and continue to create checkout session
+          console.log('✅ [STRIPE-CHECKOUT] Account is ready - allowing checkout. Capability status:', cardPaymentsStatus, 'Charges enabled:', chargesEnabled);
+        } else {
+          // Capability is inactive or unrequested - block and show onboarding
           const baseUrl = process.env.FRONTEND_URL || req.protocol + '://' + req.get('host');
           
           // Generate onboarding link if account needs setup
@@ -29221,23 +29285,32 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             console.error('⚠️ [STRIPE-CHECKOUT] Could not generate onboarding link:', linkError.message);
           }
 
-          const statusMessages: Record<string, string> = {
-            'inactive': 'Card payments capability is not enabled. Please complete Stripe onboarding.',
-            'unrequested': 'Card payments capability has not been requested. Please complete Stripe onboarding.'
-          };
-
-          const statusMessage = statusMessages[cardPaymentsStatus] || 'Card payments capability is not active. Please complete Stripe onboarding.';
+          // Provide specific error message based on what's missing
+          let statusMessage = '';
+          if (!chargesEnabled && cardPaymentsStatus !== 'active') {
+            statusMessage = 'Your Stripe account needs to complete onboarding. Both charges and card payments capability must be enabled.';
+          } else if (!chargesEnabled) {
+            statusMessage = 'Charges are not enabled on your Stripe account. Please complete Stripe onboarding.';
+          } else if (cardPaymentsStatus !== 'active') {
+            const statusMessages: Record<string, string> = {
+              'pending': 'Card payments capability is pending activation. Please complete Stripe onboarding.',
+              'inactive': 'Card payments capability is not enabled. Please complete Stripe onboarding.',
+              'unrequested': 'Card payments capability has not been requested. Please complete Stripe onboarding.'
+            };
+            statusMessage = statusMessages[cardPaymentsStatus] || 'Card payments capability is not active. Please complete Stripe onboarding.';
+          }
 
           return res.status(400).json({
             error: "Stripe account is not ready to accept payments",
-            message: statusMessage,
-            details: `The connected Stripe account (${organization.stripeAccountId}) does not have card payments enabled. ${chargesEnabled ? '' : 'Charges are disabled on this account.'}`,
+            message: statusMessage || 'Your Stripe account must have charges enabled and card_payments capability active to accept payments.',
+            details: `The connected Stripe account (${organization.stripeAccountId}) requires both charges_enabled=true and card_payments="active" to process payments. This is especially important for cross-border accounts (platform: ${connectedAccount.country || 'unknown'}).`,
             accountStatus: {
               chargesEnabled: chargesEnabled,
               cardPaymentsCapability: cardPaymentsStatus,
               payoutsEnabled: connectedAccount.payouts_enabled,
               detailsSubmitted: connectedAccount.details_submitted,
-              requirements: connectedAccount.requirements
+              requirements: connectedAccount.requirements,
+              country: connectedAccount.country
             },
             onboardingUrl: onboardingUrl,
             helpUrl: "https://dashboard.stripe.com/connect/accounts/overview",
@@ -29494,6 +29567,78 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Generic error - always return JSON
       return res.status(500).json({ 
         error: "Failed to create payment session",
+        message: error.message || String(error)
+      });
+    }
+  });
+
+  // Verify Stripe account status after onboarding completion
+  app.post("/api/billing/verify-stripe-account", tenantMiddleware, authMiddleware, requireRole(["admin", "doctor", "nurse", "receptionist", "patient"]), async (req: TenantRequest, res) => {
+    try {
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      const organization = await storage.getOrganization(req.tenant!.id);
+      if (!organization || !organization.stripeAccountId) {
+        return res.status(400).json({ 
+          error: "Organization has not connected Stripe account" 
+        });
+      }
+
+      // Retrieve connected account to verify status
+      const connectedAccount = await stripe.accounts.retrieve(organization.stripeAccountId);
+      const cardPaymentsStatus = connectedAccount.capabilities?.card_payments;
+      const chargesEnabled = connectedAccount.charges_enabled || false;
+      
+      // STRICT CHECK: Both must be true for account to be ready
+      const isAccountReady = chargesEnabled === true && cardPaymentsStatus === 'active';
+
+      // Update organization stripe status in database
+      const newStatus = isAccountReady ? 'active' : 
+                       (connectedAccount.details_submitted ? 'pending' : 'incomplete');
+
+      const previousStatus = organization.stripeStatus;
+      
+      await db.update(organizations)
+        .set({
+          stripeStatus: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(organizations.id, organization.id));
+
+      console.log('✅ [STRIPE-VERIFY] Account status verified and updated:', {
+        organizationId: organization.id,
+        organizationName: organization.name,
+        accountId: organization.stripeAccountId,
+        chargesEnabled,
+        cardPayments: cardPaymentsStatus,
+        isAccountReady,
+        previousStatus,
+        newStatus,
+        detailsSubmitted: connectedAccount.details_submitted,
+        country: connectedAccount.country
+      });
+
+      res.json({
+        success: true,
+        isAccountReady,
+        accountStatus: {
+          chargesEnabled,
+          cardPaymentsCapability: cardPaymentsStatus,
+          payoutsEnabled: connectedAccount.payouts_enabled,
+          detailsSubmitted: connectedAccount.details_submitted,
+          country: connectedAccount.country
+        },
+        stripeStatus: newStatus,
+        message: isAccountReady 
+          ? "Your Stripe account is ready to accept payments."
+          : `Your Stripe account setup is incomplete. ${chargesEnabled ? 'Charges are enabled' : 'Charges are not enabled'}, ${cardPaymentsStatus === 'active' ? 'card payments are active' : `card payments status: ${cardPaymentsStatus || 'unrequested'}`}. Please complete onboarding to enable payments.`
+      });
+    } catch (error: any) {
+      console.error("❌ [STRIPE-VERIFY] Error verifying Stripe account:", error);
+      return res.status(500).json({ 
+        error: "Failed to verify Stripe account",
         message: error.message || String(error)
       });
     }
