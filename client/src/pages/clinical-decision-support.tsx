@@ -2642,12 +2642,12 @@ const AddDrugInteractionDialog: React.FC<AddDrugInteractionDialogProps> = ({ ope
     setIsGenerating(true);
     try {
       const response = await apiRequest('POST', '/api/clinical/drug-interaction-analyze', {
-        medication1Name: medication1Name.trim(),
-        medication1Dosage: medication1Dosage.trim() || undefined,
-        medication1Frequency: medication1Frequency.trim() || undefined,
-        medication2Name: medication2Name.trim(),
-        medication2Dosage: medication2Dosage.trim() || undefined,
-        medication2Frequency: medication2Frequency.trim() || undefined
+          medication1Name: medication1Name.trim(),
+          medication1Dosage: medication1Dosage.trim() || undefined,
+          medication1Frequency: medication1Frequency.trim() || undefined,
+          medication2Name: medication2Name.trim(),
+          medication2Dosage: medication2Dosage.trim() || undefined,
+          medication2Frequency: medication2Frequency.trim() || undefined
       });
       
       if (!response.ok) {
@@ -2679,7 +2679,7 @@ const AddDrugInteractionDialog: React.FC<AddDrugInteractionDialogProps> = ({ ope
                 const parsed = JSON.parse(jsonMatch[0]);
                 userFriendlyMessage = parsed.error || userFriendlyMessage;
               }
-            } catch {
+      } catch {
               // If parsing fails, use the original message
             }
           }
@@ -2748,11 +2748,11 @@ const AddDrugInteractionDialog: React.FC<AddDrugInteractionDialogProps> = ({ ope
         setApiKeyErrorMessage(userFriendlyMessage);
         setApiKeyErrorDialogOpen(true);
       } else {
-        toast({
-          title: "Error",
+      toast({
+        title: "Error",
           description: errorMessage,
-          variant: "destructive"
-        });
+        variant: "destructive"
+      });
       }
     } finally {
       setIsGenerating(false);
@@ -3135,7 +3135,7 @@ const AddDrugInteractionDialog: React.FC<AddDrugInteractionDialogProps> = ({ ope
               I Understand
             </Button>
           </div>
-        </DialogContent>
+      </DialogContent>
       </Dialog>
     </Dialog>
   );

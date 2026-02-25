@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, CreditCard, DollarSterling, PoundSterling, AlertTriangle, TrendingUp, Plus, Filter, Download, Eye, Edit, Trash2, FileText, Printer, Share } from "lucide-react";
+import { Loader2, CreditCard, DollarSterling, PoundSterling, AlertTriangle, TrendingUp, Plus, Filter, Download, Eye, Edit, Trash2, FileText, Printer, Share, X } from "lucide-react";
 import { queryClient, saasApiRequest } from "@/lib/saasQueryClient";
 import { useToast } from "@/hooks/use-toast";
 import InvoiceTemplate from "./InvoiceTemplate";
@@ -180,6 +180,8 @@ export default function SaaSBilling() {
   const [subscriptionErrors, setSubscriptionErrors] = useState<Record<string, string>>({});
   const [isSubscriptionDeleteDialogOpen, setIsSubscriptionDeleteDialogOpen] = useState(false);
   const [subscriptionToDelete, setSubscriptionToDelete] = useState<any>(null);
+  const [isCancelSubscriptionDialogOpen, setIsCancelSubscriptionDialogOpen] = useState(false);
+  const [subscriptionToCancel, setSubscriptionToCancel] = useState<any>(null);
   const [manualReminderLevels, setManualReminderLevels] = useState<Record<number, string>>({});
   const [sendingReminderIds, setSendingReminderIds] = useState<Record<number, boolean>>({});
   const manualReminderDefault = REMINDER_LEVELS[REMINDER_LEVELS.length - 1]?.key ?? "reminder_day_of";
@@ -193,6 +195,16 @@ export default function SaaSBilling() {
   const [analyticsOrgFilter, setAnalyticsOrgFilter] = useState("all");
   const [analyticsPackageFilter, setAnalyticsPackageFilter] = useState("all");
   const [analyticsPaymentMethodFilter, setAnalyticsPaymentMethodFilter] = useState("all");
+
+  // Fetch subscription history
+  const { data: subscriptionHistory, isLoading: historyLoading, refetch: refetchHistory } = useQuery({
+    queryKey: ['/api/saas/billing/subscription-history'],
+    queryFn: async () => {
+      const response = await saasApiRequest('GET', '/api/saas/billing/subscription-history');
+      if (!response.ok) throw new Error('Failed to fetch subscription history');
+      return response.json();
+    },
+  });
 
   // Fetch billing statistics
   const { data: billingStats, isLoading: statsLoading, refetch: refetchStats } = useQuery<BillingStats>({
@@ -1061,6 +1073,39 @@ const getReminderEntries = (metadata?: any) => {
     },
   });
 
+  // Cancel subscription mutation (SaaS Admin)
+  const cancelSubscriptionMutation = useMutation({
+    mutationFn: async ({ subscriptionId, immediate }: { subscriptionId: number; immediate: boolean }) => {
+      // Get organizationId from subscription for verification
+      const subscription = subscriptionsData?.find((s: any) => s.id === subscriptionId);
+      if (!subscription) throw new Error('Subscription not found');
+      
+      // Call SaaS admin cancel endpoint (uses /api/saas/admin/billing/cancel to avoid conflict with regular user route)
+      const response = await saasApiRequest('POST', `/api/saas/admin/billing/cancel`, {
+        subscriptionId,
+        immediate,
+        organizationId: subscription.organizationId, // Pass for verification
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to cancel subscription' }));
+        throw new Error(errorData.error || errorData.message || 'Failed to cancel subscription');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchSubscriptions();
+      refetchStats();
+      setModalMessage("Subscription cancelled successfully");
+      setIsSuccessModalOpen(true);
+      setIsCancelSubscriptionDialogOpen(false);
+      setSubscriptionToCancel(null);
+    },
+    onError: (error: Error) => {
+      setModalMessage(error.message);
+      setIsErrorModalOpen(true);
+    },
+  });
+
   const sendReminderMutation = useMutation({
     mutationFn: async ({ subscriptionId, level }: { subscriptionId: number; level: string }) => {
       const response = await saasApiRequest('POST', `/api/saas/billing/reminders/${subscriptionId}`, { level });
@@ -1218,6 +1263,19 @@ const getReminderEntries = (metadata?: any) => {
     deleteSubscriptionMutation.mutate(subscriptionToDelete.id);
     setIsSubscriptionDeleteDialogOpen(false);
     setSubscriptionToDelete(null);
+  };
+
+  const handleCancelSubscription = (subscription: any) => {
+    setSubscriptionToCancel(subscription);
+    setIsCancelSubscriptionDialogOpen(true);
+  };
+
+  const confirmCancelSubscription = (immediate: boolean) => {
+    if (!subscriptionToCancel) return;
+    cancelSubscriptionMutation.mutate({
+      subscriptionId: subscriptionToCancel.id,
+      immediate,
+    });
   };
 
   return (
@@ -1758,13 +1816,14 @@ const getReminderEntries = (metadata?: any) => {
       </Dialog>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-8">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="invoicesHistory">Invoices History</TabsTrigger>
           <TabsTrigger value="overdue">Overdue</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
           <TabsTrigger value="subscriptions">Subscriptions</TabsTrigger>
+          <TabsTrigger value="subscriptionHistory">Subscription History</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
         </TabsList>
 
@@ -2404,6 +2463,18 @@ const getReminderEntries = (metadata?: any) => {
                                 >
                                   <Edit className="w-4 h-4" />
                                 </Button>
+                                {(subscription.status === 'active' || subscription.status === 'trial') && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleCancelSubscription(subscription)}
+                                    title="Cancel Subscription"
+                                    disabled={cancelSubscriptionMutation.isPending}
+                                    className="text-orange-600 hover:text-orange-700 dark:text-orange-400"
+                                  >
+                                    <AlertTriangle className="w-4 h-4" />
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -2421,6 +2492,144 @@ const getReminderEntries = (metadata?: any) => {
                         <tr>
                           <td colSpan={12} className="text-center py-8 text-gray-500">
                             No subscriptions found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="subscriptionHistory" className="space-y-6">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Subscription History</h3>
+              <p className="text-sm text-gray-500">Complete audit trail of all subscription changes across all organizations.</p>
+            </div>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>All Subscription Changes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {historyLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="py-2 px-3 text-left">Date & Time</th>
+                        <th className="py-2 px-3 text-left">Organization</th>
+                        <th className="py-2 px-3 text-left">Action</th>
+                        <th className="py-2 px-3 text-left">From Package</th>
+                        <th className="py-2 px-3 text-left">To Package</th>
+                        <th className="py-2 px-3 text-left">Billing Cycle</th>
+                        <th className="py-2 px-3 text-left">Price Change</th>
+                        <th className="py-2 px-3 text-left">Performed By</th>
+                        <th className="py-2 px-3 text-left">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subscriptionHistory?.length ? (
+                        subscriptionHistory.map((item: any) => {
+                          const actionColors: Record<string, string> = {
+                            upgrade: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+                            downgrade: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100",
+                            cancel: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
+                            change_cycle: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+                            renew: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100",
+                            create: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100",
+                            update: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100",
+                          };
+
+                          const formatDateTime = (date: string | Date) => {
+                            if (!date) return "N/A";
+                            const d = new Date(date);
+                            return d.toLocaleString("en-GB", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            });
+                          };
+
+                          const formatPrice = (price: string | number | null) => {
+                            if (!price) return "N/A";
+                            const numPrice = typeof price === "string" ? parseFloat(price) : price;
+                            return `£${numPrice.toFixed(2)}`;
+                          };
+
+                          return (
+                            <tr
+                              key={item.id}
+                              className="border-b hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                            >
+                              <td className="py-3 px-3 text-sm">{formatDateTime(item.createdAt)}</td>
+                              <td className="py-3 px-3">
+                                <div className="font-medium">{item.organizationName || "N/A"}</div>
+                                <div className="text-xs text-gray-500">{item.organizationSubdomain || ""}</div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <Badge className={actionColors[item.action] || "bg-gray-100 text-gray-800"}>
+                                  {item.action.charAt(0).toUpperCase() + item.action.slice(1).replace("_", " ")}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-3">{item.oldPackageName || "N/A"}</td>
+                              <td className="py-3 px-3">{item.newPackageName || "N/A"}</td>
+                              <td className="py-3 px-3">
+                                {item.oldBillingCycle && item.newBillingCycle ? (
+                                  <span>
+                                    {item.oldBillingCycle} → {item.newBillingCycle}
+                                  </span>
+                                ) : (
+                                  item.oldBillingCycle || item.newBillingCycle || "N/A"
+                                )}
+                              </td>
+                              <td className="py-3 px-3">
+                                {item.oldPrice && item.newPrice ? (
+                                  <span>
+                                    {formatPrice(item.oldPrice)} → {formatPrice(item.newPrice)}
+                                  </span>
+                                ) : (
+                                  item.oldPrice ? formatPrice(item.oldPrice) : item.newPrice ? formatPrice(item.newPrice) : "N/A"
+                                )}
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="text-xs">
+                                  <div className="font-medium">{item.performedByType === "saas_admin" ? "SaaS Admin" : "Org Admin"}</div>
+                                  {item.details?.reason && (
+                                    <div className="text-gray-500 mt-1">{item.details.reason}</div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="text-xs space-y-1">
+                                  {item.details?.prorationAmount && (
+                                    <div>Proration: £{item.details.prorationAmount.toFixed(2)}</div>
+                                  )}
+                                  {item.details?.immediate !== undefined && (
+                                    <div>{item.details.immediate ? "Immediate" : "At period end"}</div>
+                                  )}
+                                  {item.details?.effectiveDate && (
+                                    <div>Effective: {formatDateTime(item.details.effectiveDate)}</div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="text-center py-8 text-gray-500">
+                            No subscription history found
                           </td>
                         </tr>
                       )}
@@ -2782,6 +2991,63 @@ const getReminderEntries = (metadata?: any) => {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Cancel Subscription Dialog */}
+      <Dialog
+        open={isCancelSubscriptionDialogOpen}
+        onOpenChange={(open) => {
+          setIsCancelSubscriptionDialogOpen(open);
+          if (!open) {
+            setSubscriptionToCancel(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel Subscription</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                <p className="font-semibold mb-2">Are you sure?</p>
+                <p className="text-sm">
+                  Cancelling the subscription for{" "}
+                  <strong>{subscriptionToCancel?.organizationName || "this organization"}</strong> will downgrade
+                  their account to the Basic (free) plan.
+                </p>
+                {subscriptionToCancel?.currentPeriodEnd && (
+                  <p className="text-sm mt-2">
+                    The subscription will remain active until{" "}
+                    <strong>
+                      {new Date(subscriptionToCancel.currentPeriodEnd).toLocaleDateString()}
+                    </strong>
+                    .
+                  </p>
+                )}
+              </AlertDescription>
+            </Alert>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsCancelSubscriptionDialogOpen(false);
+                setSubscriptionToCancel(null);
+              }}
+            >
+              Keep Subscription
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => confirmCancelSubscription(false)}
+              disabled={cancelSubscriptionMutation.isPending}
+            >
+              {cancelSubscriptionMutation.isPending ? "Processing..." : "Cancel at Period End"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

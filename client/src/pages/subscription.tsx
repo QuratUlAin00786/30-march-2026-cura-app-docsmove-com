@@ -8,9 +8,9 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Crown, Users, Calendar, Zap, Check, X, Package, Heart, Brain, Shield, Stethoscope, Phone, FileText, Activity, Pill, UserCheck, TrendingUp, Download, CreditCard, Printer } from "lucide-react";
+import { Crown, Users, Calendar, Zap, Check, X, Package, Heart, Brain, Shield, Stethoscope, Phone, FileText, Activity, Pill, UserCheck, TrendingUp, Download, CreditCard, Printer, AlertTriangle, User } from "lucide-react";
 import { PaymentMethodDialog } from "@/components/payment-method-dialog";
-import { getTenantSubdomain, queryClient } from "@/lib/queryClient";
+import { getTenantSubdomain, queryClient, apiRequest } from "@/lib/queryClient";
 import InvoiceTemplate from "@/pages/saas/components/InvoiceTemplate";
 import type { Subscription } from "@/types";
 import type { SaaSPackage } from "@shared/schema";
@@ -54,13 +54,51 @@ const formatPackageFeatures = (features: any): string[] => {
 
 const getCountdown = (target?: string | Date | null) => {
   if (!target) return { label: "N/A", isDanger: false };
-  const parts = parseDateParts(target);
-  if (!parts) return { label: "N/A", isDanger: false };
-  const due = new Date(parts.year, parts.month, parts.day, parts.hour, parts.minute);
-  const diffMs = due.getTime() - Date.now();
+  
+  // Parse the target date - handle both Date objects and strings
+  let targetDate: Date;
+  if (target instanceof Date) {
+    targetDate = target;
+  } else {
+    // Parse string - treat as UTC to match database storage
+    const str = String(target).trim();
+    const hasTimezone = /[Z+-]\d{2}:?\d{2}$/.test(str);
+    
+    if (hasTimezone) {
+      targetDate = new Date(str);
+    } else {
+      // No timezone indicator - parse manually and treat as UTC
+      const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?/);
+      if (isoMatch) {
+        const [, y, mo, d, hh, mm, ss, ms] = isoMatch;
+        // Use Date.UTC to create date in UTC timezone
+        targetDate = new Date(Date.UTC(
+          Number(y),
+          Number(mo) - 1,
+          Number(d),
+          Number(hh),
+          Number(mm),
+          ss ? Number(ss) : 0,
+          ms ? Number(ms.substring(0, 3)) : 0
+        ));
+      } else {
+        // Fallback: try standard parsing
+        targetDate = new Date(str);
+      }
+    }
+  }
+  
+  if (Number.isNaN(targetDate.getTime())) {
+    return { label: "N/A", isDanger: false };
+  }
+  
+  // Calculate difference in milliseconds
+  const diffMs = targetDate.getTime() - Date.now();
+  
   if (diffMs <= 0) {
     return { label: "Expired", isDanger: true };
   }
+  
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
   const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -172,6 +210,18 @@ export default function Subscription() {
   const [postCheckoutSession, setPostCheckoutSession] = useState<any>(null);
   const [postCheckoutLoading, setPostCheckoutLoading] = useState(false);
   const [postCheckoutError, setPostCheckoutError] = useState("");
+  
+  // Subscription management state
+  const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null);
+  const [downgradeLoading, setDowngradeLoading] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [changeCycleLoading, setChangeCycleLoading] = useState(false);
+  const [showDowngradeDialog, setShowDowngradeDialog] = useState(false);
+  const [selectedPlanForDowngrade, setSelectedPlanForDowngrade] = useState<any>(null);
+  const [downgradeErrors, setDowngradeErrors] = useState<string[]>([]);
+  const [requiredDeletions, setRequiredDeletions] = useState<{ users: number; patients: number } | null>(null);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showChangeCycleDialog, setShowChangeCycleDialog] = useState(false);
 
   const handleStripeCheckout = async (plan: any) => {
     if (!plan.stripePriceId) {
@@ -262,6 +312,468 @@ export default function Subscription() {
     }
   };
 
+  // Subscription management functions
+  const handleUpgrade = async (plan: any) => {
+    // Always use Stripe Checkout for upgrades - redirects to Stripe payment page
+    // The checkout endpoint will get stripe_price_id from database table saas_packages
+    setUpgradeLoading(plan.id);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Tenant-Subdomain': subdomain
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // Use Stripe Checkout - endpoint will get stripe_price_id from database
+      const response = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          // Don't pass stripePriceId - let backend get it from database
+          isUpgrade: subscription ? true : false,
+          existingSubscriptionId: subscription?.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to create checkout session');
+      }
+
+      if (data.url) {
+        // Redirect to Stripe Checkout
+        window.location.href = data.url;
+      } else {
+        console.error('No checkout URL received:', data);
+        setStripeAlertMessage(data?.error || data?.message || 'Failed to create checkout session. Please try again.');
+        setStripeAlertOpen(true);
+        setUpgradeLoading(null);
+      }
+    } catch (error: any) {
+      console.error('Upgrade error:', error);
+      setStripeAlertMessage(error.message || 'Failed to upgrade subscription');
+      setStripeAlertOpen(true);
+      setUpgradeLoading(null);
+    }
+  };
+
+  const handleDowngrade = async (plan: any) => {
+    setSelectedPlanForDowngrade(plan);
+    setDowngradeErrors([]);
+    setRequiredDeletions(null);
+
+    // If subscription query succeeded, user is authenticated - proceed with downgrade
+    if (!subscription || !subscription.id) {
+      console.error('[DOWNGRADE] No subscription found - user may not be authenticated');
+      setDowngradeErrors(['Unable to find your subscription. Please refresh the page and try again.']);
+      setShowDowngradeDialog(true);
+      return;
+    }
+
+    // First, validate usage BEFORE calling Stripe or updating database
+    try {
+      const token = localStorage.getItem('auth_token');
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      
+      // Update last activity time to prevent session timeout
+      const now = Date.now();
+      localStorage.setItem('lastActivityTime', now.toString());
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Tenant-Subdomain': subdomain,
+      };
+      
+      // Only add Authorization header if token exists
+      // If subscription exists, user is authenticated (subscription query succeeded)
+      // Backend will handle authentication validation
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      } else {
+        console.warn('[DOWNGRADE] No auth token in localStorage, but subscription exists - proceeding (backend may use session/cookies)');
+      }
+
+      console.log('[DOWNGRADE] Validating usage before downgrade...', {
+        subscriptionId: subscription?.id,
+        newPackageId: plan.id,
+        planName: plan.name,
+      });
+
+      const response = await fetch('/api/saas/billing/downgrade', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          subscriptionId: subscription?.id,
+          newPackageId: plan.id,
+          billingCycle: subscription?.billingCycle || 'monthly',
+          immediate: false,
+        }),
+      });
+
+      // Handle 401 Unauthorized - token expired or invalid
+      // This is an authentication error, NOT a validation error
+      if (response.status === 401) {
+        const data = await response.json().catch(() => ({ error: 'Unauthorized', message: 'Invalid token' }));
+        console.error('[DOWNGRADE] ❌ Authentication failed:', {
+          status: response.status,
+          error: data.error,
+          details: data.details,
+        });
+        
+        // Clear invalid token immediately
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_subdomain');
+        localStorage.removeItem('lastActivityTime');
+        localStorage.removeItem('sessionStartTime');
+        
+        // Show authentication error in alert, NOT in downgrade dialog
+        setStripeAlertMessage('Your session has expired. Please refresh the page and log in again, then try downgrading your subscription.');
+        setStripeAlertOpen(true);
+        setCancelLoading(false);
+        return;
+      }
+
+      const data = await response.json();
+
+      // Only show downgrade dialog for validation errors (400 status)
+      // Other errors (500, etc.) should show in alert
+      if (!response.ok) {
+        // If it's not a validation error (400), show in alert instead
+        if (response.status !== 400) {
+          setStripeAlertMessage(data.error || data.message || 'Failed to downgrade subscription');
+          setStripeAlertOpen(true);
+          setCancelLoading(false);
+          return;
+        }
+        // Validation failed - show error dialog with required deletions
+        console.log('[DOWNGRADE] ❌ Validation failed - Full response:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: data,
+          errors: data.errors,
+          requiredDeletions: data.requiredDeletions,
+          usersToRemove: data.usersToRemove,
+          patientsToRemove: data.patientsToRemove,
+        });
+        
+        // Extract required deletions from response (try multiple possible structures)
+        // Priority: direct fields > nested object > 0
+        let usersToRemove = 0;
+        let patientsToRemove = 0;
+        
+        // Try direct fields first
+        if (typeof data.usersToRemove === 'number') {
+          usersToRemove = data.usersToRemove;
+        }
+        if (typeof data.patientsToRemove === 'number') {
+          patientsToRemove = data.patientsToRemove;
+        }
+        
+        // If direct fields are 0 or missing, try nested object
+        if ((usersToRemove === 0 || patientsToRemove === 0) && data.requiredDeletions) {
+          if (typeof data.requiredDeletions === 'object' && data.requiredDeletions !== null) {
+            if (typeof data.requiredDeletions.users === 'number' && usersToRemove === 0) {
+              usersToRemove = data.requiredDeletions.users;
+            }
+            if (typeof data.requiredDeletions.patients === 'number' && patientsToRemove === 0) {
+              patientsToRemove = data.requiredDeletions.patients;
+            }
+          }
+        }
+        
+        console.log('[DOWNGRADE] Extracted deletion counts:', {
+          usersToRemove,
+          patientsToRemove,
+          rawUsersToRemove: data.usersToRemove,
+          rawPatientsToRemove: data.patientsToRemove,
+          rawRequiredDeletions: data.requiredDeletions,
+          hasRequiredDeletions: !!data.requiredDeletions,
+          requiredDeletionsType: typeof data.requiredDeletions,
+        });
+        
+        // If we still don't have deletion counts, try to parse from error messages
+        if (usersToRemove === 0 && patientsToRemove === 0) {
+          // Try to extract numbers from error messages as fallback
+          const allErrorText = [
+            ...(Array.isArray(data.errors) ? data.errors : []),
+            data.error || '',
+            data.message || '',
+          ].join(' ');
+          
+          const userMatch = allErrorText.match(/(\d+)\s+user/i);
+          const patientMatch = allErrorText.match(/(\d+)\s+patient/i);
+          
+          if (userMatch) {
+            usersToRemove = parseInt(userMatch[1], 10);
+            console.log('[DOWNGRADE] Parsed usersToRemove from error message:', usersToRemove);
+          }
+          if (patientMatch) {
+            patientsToRemove = parseInt(patientMatch[1], 10);
+            console.log('[DOWNGRADE] Parsed patientsToRemove from error message:', patientsToRemove);
+          }
+        }
+        
+        // Set required deletions with calculated values
+        // Always set the state if we have any values > 0 OR if the response indicates validation failed
+        // This ensures the UI can display the information even if values are 0 (edge case)
+        if (usersToRemove > 0 || patientsToRemove > 0 || response.status === 400) {
+          // If status is 400 (validation error), we should have deletion counts
+          // If they're still 0, it might mean usage is within limits but there's another validation issue
+          setRequiredDeletions({
+            users: usersToRemove,
+            patients: patientsToRemove,
+          });
+          console.log('[DOWNGRADE] ✅ Set requiredDeletions:', { 
+            users: usersToRemove, 
+            patients: patientsToRemove,
+            status: response.status,
+            hasValues: usersToRemove > 0 || patientsToRemove > 0,
+          });
+        } else {
+          // If we can't extract any deletion info, set to null
+          setRequiredDeletions(null);
+          console.warn('[DOWNGRADE] ⚠️ No deletion counts found in response:', {
+            status: response.status,
+            dataKeys: Object.keys(data),
+          });
+        }
+        
+        // Set errors - prefer detailed errors from backend, fallback to generic message
+        const errorMessages = Array.isArray(data.errors) ? data.errors : [];
+        if (data.error && !errorMessages.includes(data.error)) {
+          errorMessages.push(data.error);
+        }
+        if (data.message && !errorMessages.includes(data.message)) {
+          errorMessages.push(data.message);
+        }
+        
+        // If we have deletion counts but no detailed errors, create helpful error messages
+        if (errorMessages.length === 0) {
+          if (usersToRemove > 0 || patientsToRemove > 0) {
+            // Create detailed error message from deletion counts
+            const parts: string[] = [];
+            if (usersToRemove > 0) {
+              parts.push(`${usersToRemove} user${usersToRemove !== 1 ? 's' : ''}`);
+            }
+            if (patientsToRemove > 0) {
+              parts.push(`${patientsToRemove} patient${patientsToRemove !== 1 ? 's' : ''}`);
+            }
+            if (parts.length > 0) {
+              errorMessages.push(`Please remove ${parts.join(' and ')} before downgrading.`);
+            } else {
+              errorMessages.push('Failed to downgrade subscription');
+            }
+          } else {
+            errorMessages.push('Failed to downgrade subscription');
+          }
+        }
+        
+        setDowngradeErrors(errorMessages);
+        setShowDowngradeDialog(true);
+        return;
+      }
+
+      // Success - validation passed, downgrade processed
+      console.log('[DOWNGRADE] ✅ Downgrade successful');
+      setStripeAlertMessage(data.message || "Subscription will be downgraded at the next billing cycle.");
+      setStripeAlertOpen(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription"] });
+    } catch (error: any) {
+      console.error('[DOWNGRADE] Error:', error);
+      
+      // Handle network errors
+      if (error.message?.includes('fetch') || error.message?.includes('network')) {
+        setDowngradeErrors(['Network error. Please check your connection and try again.']);
+      } else if (error.message?.includes('token') || error.message?.includes('auth')) {
+        setDowngradeErrors(['Authentication error. Please refresh the page and log in again.']);
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_subdomain');
+        localStorage.removeItem('lastActivityTime');
+        localStorage.removeItem('sessionStartTime');
+      } else {
+        setDowngradeErrors([error.message || 'Failed to downgrade subscription']);
+      }
+      setRequiredDeletions(null);
+      setShowDowngradeDialog(true);
+    }
+  };
+
+  const handleCancel = async (immediate: boolean) => {
+    setCancelLoading(true);
+    try {
+      // If subscription query succeeded, user is authenticated - proceed with cancel
+      if (!subscription || !subscription.id) {
+        console.error('[CANCEL] No subscription found - user may not be authenticated');
+        setStripeAlertMessage('Unable to find your subscription. Please refresh the page and try again.');
+        setStripeAlertOpen(true);
+        setCancelLoading(false);
+        return;
+      }
+
+      // Get token and verify it exists
+      let token = localStorage.getItem('auth_token');
+      
+      // Double-check token exists (might have been cleared by checkSessionTimeout)
+      if (!token) {
+        // Try one more time - sometimes checkSessionTimeout clears it
+        token = localStorage.getItem('auth_token');
+        if (!token) {
+          console.error('[CANCEL] No auth token available - session may have expired');
+          setStripeAlertMessage('Your session has expired. Please refresh the page and log in again, then try canceling your subscription.');
+          setStripeAlertOpen(true);
+          setCancelLoading(false);
+          return;
+        }
+      }
+
+      // Update last activity time BEFORE making request to prevent timeout
+      const activityTime = Date.now();
+      localStorage.setItem('lastActivityTime', activityTime.toString());
+
+      console.log('[CANCEL] Sending cancel request:', {
+        subscriptionId: subscription?.id,
+        immediate,
+        hasToken: !!token,
+        tokenLength: token?.length,
+        tokenPreview: token ? `${token.substring(0, 20)}...` : 'missing',
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log('[CANCEL] Sending cancel request to Stripe...');
+
+      // Use fetch directly instead of apiRequest to avoid token clearing issues
+      // apiRequest calls checkSessionTimeout which might clear the token
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Tenant-Subdomain': subdomain,
+        'Authorization': `Bearer ${token}`,
+      };
+
+      const response = await fetch('/api/saas/billing/cancel', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          subscriptionId: subscription?.id,
+          immediate: immediate,
+        }),
+      });
+
+      // Handle 401 Unauthorized - token expired or invalid
+      if (response.status === 401) {
+        const errorData = await response.json().catch(() => ({ error: 'Unauthorized', message: 'Invalid token' }));
+        console.error('[CANCEL] ❌ Authentication failed:', {
+          status: response.status,
+          error: errorData.error,
+          message: errorData.message,
+          details: errorData.details,
+        });
+        
+        // Clear invalid token
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_subdomain');
+        localStorage.removeItem('lastActivityTime');
+        localStorage.removeItem('sessionStartTime');
+        
+        // Check if it's the SaaS admin token error
+        if (errorData.message?.includes('Invalid token or inactive owner')) {
+          setStripeAlertMessage('Authentication error: Invalid token. Please refresh the page and log in again, then try canceling your subscription.');
+        } else {
+          setStripeAlertMessage(`Authentication failed: ${errorData.message || errorData.error || 'Invalid token'}. Please refresh the page and log in again.`);
+        }
+        setStripeAlertOpen(true);
+        setCancelLoading(false);
+        return;
+      }
+
+      // Parse response JSON
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to cancel subscription');
+      }
+
+      // Update last activity on success
+      const successTime = Date.now();
+      localStorage.setItem('lastActivityTime', successTime.toString());
+
+      setStripeAlertMessage(data.message || "Subscription cancelled successfully.");
+      setStripeAlertOpen(true);
+      setShowCancelDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription"] });
+    } catch (error: any) {
+      console.error('[CANCEL] Cancel error:', error);
+      
+      // Handle network errors
+      if (error.message?.includes('fetch') || error.message?.includes('network')) {
+        setStripeAlertMessage('Network error. Please check your connection and try again.');
+      } else if (error.message?.includes('401') || error.message?.includes('Unauthorized') || error.message?.includes('Authentication')) {
+        setStripeAlertMessage('Authentication error. Please refresh the page and log in again, then try canceling your subscription.');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_subdomain');
+        localStorage.removeItem('lastActivityTime');
+        localStorage.removeItem('sessionStartTime');
+      } else {
+        setStripeAlertMessage(error.message || 'Failed to cancel subscription');
+      }
+      setStripeAlertOpen(true);
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  const handleChangeCycle = async (newCycle: 'monthly' | 'annual') => {
+    setChangeCycleLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Tenant-Subdomain': subdomain
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch('/api/saas/billing/change-cycle', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          subscriptionId: subscription?.id,
+          newBillingCycle: newCycle,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to change billing cycle');
+      }
+
+      setStripeAlertMessage(data.message || "Billing cycle changed successfully.");
+      setStripeAlertOpen(true);
+      setShowChangeCycleDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription"] });
+    } catch (error: any) {
+      console.error('Change cycle error:', error);
+      setStripeAlertMessage(error.message || 'Failed to change billing cycle');
+      setStripeAlertOpen(true);
+    } finally {
+      setChangeCycleLoading(false);
+    }
+  };
+
   const { data: subscription, isLoading, error } = useQuery<Subscription>({
     queryKey: ["/api/subscription"],
   });
@@ -307,6 +819,19 @@ export default function Subscription() {
     }
   });
 
+  // Sort billing history by date (most recent first) and separate latest invoice
+  const sortedBillingHistory = [...billingHistory].sort((a, b) => {
+    const dateA = a.paymentDate ? new Date(a.paymentDate).getTime() : new Date(a.periodStart).getTime();
+    const dateB = b.paymentDate ? new Date(b.paymentDate).getTime() : new Date(b.periodStart).getTime();
+    return dateB - dateA; // Most recent first
+  });
+
+  // Get the latest invoice (most recent)
+  const latestInvoice = sortedBillingHistory.length > 0 ? sortedBillingHistory[0] : null;
+
+  // Get previous invoices (all except the latest)
+  const previousInvoices = sortedBillingHistory.length > 1 ? sortedBillingHistory.slice(1) : [];
+
   // Split packages into subscription plans (have maxUsers) and add-ons (don't have maxUsers)
   const dbPlans = dbPackages.filter(pkg => pkg.features?.maxUsers);
   const dbAddons = dbPackages.filter(pkg => !pkg.features?.maxUsers);
@@ -341,17 +866,21 @@ export default function Subscription() {
   const isSaasAdmin = userRole === "admin";
 
   useEffect(() => {
-    if (!subscription?.nextBillingAt) {
+    // Use expiresAt first (end date), then nextBillingAt (billing cycle end), as fallback
+    const targetDate = subscription?.expiresAt || subscription?.nextBillingAt;
+    
+    if (!targetDate) {
       setCountdown({ label: "Not scheduled", isDanger: false });
       return;
     }
+    
     const update = () => {
-      setCountdown(getCountdown(subscription.nextBillingAt));
+      setCountdown(getCountdown(targetDate));
     };
     update();
     const timer = setInterval(update, 15 * 1000);
     return () => clearInterval(timer);
-  }, [subscription?.nextBillingAt]);
+  }, [subscription?.expiresAt, subscription?.nextBillingAt]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -428,22 +957,34 @@ export default function Subscription() {
         <div className="space-y-4">
           {/* Subscription name and active dates at top (from saas_subscriptions: plan name, active dates, expires_at as end date) */}
           {(subscription?.status === "active" || subscription?.status === "trial") && subscription?.planName && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30 px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30 px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 relative">
+              {/* Countdown in top right corner */}
+              <div className="absolute top-4 right-6">
+                <div className="space-y-1 text-right">
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Countdown</p>
+                  <p className={`text-sm font-semibold ${countdown.isDanger ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-300"}`}>
+                    {countdown.label}
+                  </p>
+                </div>
+              </div>
               <div className="flex items-center gap-2">
-                <Crown className="h-5 w-5 text-emerald-600 dark:text-emerald-500" />
-                <span className="font-semibold text-emerald-900 dark:text-emerald-100 capitalize">
+                <Crown className="h-6 w-6 text-emerald-600 dark:text-emerald-500" />
+                <span className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 capitalize">
                   {subscription.planName}
                 </span>
                 <Badge className="bg-emerald-600 text-white">
                   {subscription.status === "trial" ? "Trial" : "Active"}
                 </Badge>
+                <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                  Subscription active
+                </span>
               </div>
               <div className="flex flex-wrap items-center gap-x-4 text-sm text-emerald-800 dark:text-emerald-200">
                 <span>
-                  <strong>Active from:</strong> {formatDate(subscription.currentPeriodStart ?? subscription.createdAt)}
+                  <strong>Active from:</strong> {formatDateTime(subscription.currentPeriodStart ?? subscription.createdAt)}
                 </span>
                 <span>
-                  <strong>End date:</strong> {formatDate(subscription.expiresAt ?? subscription.nextBillingAt)}
+                  <strong>End date:</strong> {formatDateTime(subscription.expiresAt ?? subscription.nextBillingAt)}
                 </span>
               </div>
             </div>
@@ -473,23 +1014,6 @@ export default function Subscription() {
               </AlertDescription>
             </Alert>
           )}
-          {(subscription?.status === "active" || subscription?.status === "trial") && (() => {
-            const isTrial = subscription?.planName?.toLowerCase() === "trial" || subscription?.status === "trial";
-            return (
-              <Alert className={`flex items-start gap-3 pb-2 ${isTrial ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30" : "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"}`}>
-                <Check className={`h-5 w-5 shrink-0 mt-0.5 ${isTrial ? "text-blue-600 dark:text-blue-500" : "text-emerald-600 dark:text-emerald-500"}`} />
-                <div>
-                  <AlertTitle className={`text-sm ${isTrial ? "text-blue-800 dark:text-blue-200" : "text-emerald-800 dark:text-emerald-200"}`}>
-                    {isTrial ? "Trial active" : "Subscription active"}
-                  </AlertTitle>
-                  <AlertDescription className="text-sm text-muted-foreground">
-                    Active from: {formatDateTime(subscription.currentPeriodStart ?? subscription.createdAt)} ·
-                    End date: {formatDateTime(subscription.expiresAt ?? subscription.nextBillingAt)}
-                  </AlertDescription>
-                </div>
-              </Alert>
-            );
-          })()}
 
           {/* Current Subscription */}
           {subscription && (
@@ -501,7 +1025,7 @@ export default function Subscription() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Zap className="h-4 w-4" />
@@ -550,18 +1074,39 @@ export default function Subscription() {
                       <span>User Capacity</span>
                     </div>
                     <p className="text-2xl font-bold">
-                      {subscription.currentUsers} <span className="text-lg text-muted-foreground">/ {subscription.userLimit}</span>
+                      {subscription.currentUsers} <span className="text-lg text-muted-foreground">/ {subscription.features?.maxUsers || subscription.userLimit || 0}</span>
                     </p>
                     <div className="relative w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
                       <div
                         className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all"
                         style={{
-                          width: `${Math.min((subscription.currentUsers / subscription.userLimit) * 100, 100)}%`
+                          width: `${Math.min((subscription.currentUsers / (subscription.features?.maxUsers || subscription.userLimit || 1)) * 100, 100)}%`
                         }}
                       />
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Stethoscope className="h-4 w-4" />
+                      <span>Patient Capacity</span>
+                    </div>
+                    <p className="text-2xl font-bold">
+                      {subscription.currentPatients || 0} <span className="text-lg text-muted-foreground">/ {subscription.features?.maxPatients || 0}</span>
+                    </p>
+                    <div className="relative w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(((subscription.currentPatients || 0) / (subscription.features?.maxPatients || 1)) * 100, 100)}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Calendar className="h-4 w-4" />
@@ -582,14 +1127,104 @@ export default function Subscription() {
                     )}
                   </div>
                 </div>
+                </div>
+
+                {/* Current Invoice */}
+                {latestInvoice && (
+                  <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100">Current Invoice</h4>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const dueDate = new Date(latestInvoice.periodEnd);
+                          dueDate.setDate(dueDate.getDate() + 30);
+                          setSelectedInvoice({
+                            id: latestInvoice.id,
+                            invoiceNumber: latestInvoice.invoiceNumber,
+                            organizationName: subscription?.plan || 'Organization',
+                            organizationAddress: `${subscription?.plan || 'Healthcare'}\nHealthcare Organization\nUnited Kingdom`,
+                            amount: latestInvoice.amount,
+                            currency: latestInvoice.currency || 'GBP',
+                            paymentMethod: latestInvoice.paymentMethod,
+                            paymentStatus: latestInvoice.paymentStatus,
+                            createdAt: latestInvoice.paymentDate || latestInvoice.periodStart,
+                            dueDate: dueDate.toISOString(),
+                            description: `Monthly subscription payment - ${subscription?.plan || 'Subscription'}`
+                          });
+                          setShowInvoiceDialog(true);
+                        }}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        View Invoice
+                      </Button>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">{latestInvoice.invoiceNumber}</span>
+                        </div>
+                        <Badge
+                          className={
+                            latestInvoice.paymentStatus === 'completed' ? 'bg-green-500 text-white' :
+                              latestInvoice.paymentStatus === 'pending' ? 'bg-yellow-500 text-white' :
+                                latestInvoice.paymentStatus === 'failed' ? 'bg-red-500 text-white' :
+                                  ''
+                          }
+                        >
+                          {latestInvoice.paymentStatus}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground">Date</p>
+                          <p className="font-medium">
+                            {latestInvoice.paymentDate 
+                              ? new Date(latestInvoice.paymentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                              : 'Pending'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Amount</p>
+                          <p className="font-semibold">
+                            {latestInvoice.currency} {parseFloat(latestInvoice.amount).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Payment Method</p>
+                          <p className="font-medium capitalize">
+                            {latestInvoice.paymentMethod?.replace('_', ' ') || 'N/A'}
+                          </p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-base font-medium text-muted-foreground mb-1">Period</p>
+                          <p className="font-medium text-base">
+                            Active from: {formatDateTime(latestInvoice.periodStart)} · End date: {formatDateTime(latestInvoice.periodEnd)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
 
           {subscription && (
             <Card>
-              <CardHeader>
+              <CardHeader className="relative">
                 <CardTitle>Current SaaS Subscription Snapshot</CardTitle>
+                {/* Countdown in top right corner */}
+                <div className="absolute top-4 right-4">
+                  <div className="space-y-1 text-right">
+                    <p className="text-sm text-muted-foreground">Countdown</p>
+                    <p className={`text-lg font-semibold ${countdown.isDanger ? "text-red-600" : "text-emerald-600"}`}>
+                      {countdown.label}
+                    </p>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-gray-600">
@@ -613,24 +1248,41 @@ export default function Subscription() {
                     </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">Monthly Recurring</p>
                     <p className="text-lg font-semibold">£{subscription.monthlyPrice || "0"}</p>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Next billing</p>
+                    <p className="text-sm text-muted-foreground">Expires at</p>
                     <p className="text-lg font-semibold">
-                      {subscription.nextBillingAt ? formatDateTime(subscription.nextBillingAt) : "—"}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Countdown</p>
-                    <p className={`text-lg font-semibold ${countdown.isDanger ? "text-red-600" : "text-emerald-600"}`}>
-                      {countdown.label}
+                      {subscription.expiresAt ? formatDateTime(subscription.expiresAt) : "—"}
                     </p>
                   </div>
                 </div>
+                
+                {/* Billing Cycle Change */}
+                {subscription && subscription.status === 'active' && (
+                  <div className="mt-4 p-4 border rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-semibold mb-1">Billing Cycle</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Current: {subscription.billingCycle === 'annual' ? 'Annual' : 'Monthly'}
+                    </p>
+                  </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowChangeCycleDialog(true)}
+                        disabled={changeCycleLoading}
+                      >
+                        Change Cycle
+                      </Button>
+                </div>
+                  </div>
+                )}
+
               </CardContent>
             </Card>
           )}
@@ -642,7 +1294,11 @@ export default function Subscription() {
               <p className="text-sm text-muted-foreground">Select a plan that fits your practice needs</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {plans.map((plan) => (
+              {plans.map((plan) => {
+                // Only apply "Currently Subscribed" logic for admin users
+                const shouldCheckSubscription = isSaasAdmin;
+                
+                return (
                 <Card
                   key={plan.id}
                   className={`relative flex flex-col h-full ${plan.popular
@@ -692,29 +1348,218 @@ export default function Subscription() {
                     </div>
                   </CardContent>
                   <div className="px-6 pb-6">
+                    {(() => {
+                      // If no subscription, show upgrade button
+                      if (!subscription) {
+                        return (
                     <Button
                       className="w-full text-sm"
                       variant={plan.popular ? "default" : "outline"}
                       disabled={loadingPlanId === plan.id}
-                      onClick={() => {
-                        if (subscription?.plan === plan.id) {
-                          setCurrentPlanData(plan);
-                          setShowCurrentPlanDialog(true);
+                            onClick={() => handleStripeCheckout(plan)}
+                            data-testid={`button-plan-${plan.id}`}
+                          >
+                            {loadingPlanId === plan.id 
+                              ? "Loading..." 
+                              : `Upgrade (${plan.name}) Package`
+                            }
+                          </Button>
+                        );
+                      }
+                      
+                      // Compare by packageId first (most reliable), then by plan name
+                      const subscriptionPackageId = subscription?.packageId;
+                      const subscriptionPlanName = (subscription?.planName || subscription?.plan || '').toLowerCase().trim();
+                      const planIdStr = plan.id.toString();
+                      const planNameLower = (plan.name || '').toLowerCase().trim();
+                      
+                      // Check if this plan matches the user's currently active subscription
+                      // Priority: packageId match > plan name match
+                      const isCurrentPlan = (subscriptionPackageId && subscriptionPackageId.toString() === planIdStr) ||
+                                           (subscriptionPlanName && planNameLower && subscriptionPlanName === planNameLower);
+                      
+                      if (!isCurrentPlan) {
+                        // Not the current plan - determine if upgrade or downgrade
+                        const currentPlanPrice = dbPackages.find(p => p.id === subscription.packageId)?.price 
+                          ? parseFloat(String(dbPackages.find(p => p.id === subscription.packageId)?.price || 0))
+                          : 0;
+                        const planPrice = parseFloat(String(plan.price || 0));
+                        const isHigherPlan = planPrice > currentPlanPrice;
+                        const isLowerPlan = planPrice < currentPlanPrice;
+
+                        if (isHigherPlan) {
+                          // Upgrade button
+                          return (
+                            <Button
+                              className="w-full text-sm"
+                              variant={plan.popular ? "default" : "outline"}
+                              disabled={upgradeLoading === plan.id}
+                              onClick={() => handleUpgrade(plan)}
+                              data-testid={`button-plan-${plan.id}`}
+                            >
+                              {upgradeLoading === plan.id 
+                                ? "Processing..." 
+                                : `Upgrade to ${plan.name}`
+                              }
+                            </Button>
+                          );
+                        } else if (isLowerPlan) {
+                          // Downgrade button
+                          // If downgrading to Basic Plan, use light grey color
+                          const isBasicPlan = plan.name?.toLowerCase().includes('basic');
+                          return (
+                            <Button
+                              className={`w-full text-sm ${isBasicPlan ? 'bg-gray-300 hover:bg-gray-400 text-gray-800 border-gray-400 dark:bg-gray-600 dark:hover:bg-gray-700 dark:text-gray-200 dark:border-gray-500' : ''}`}
+                              variant={isBasicPlan ? "outline" : "outline"}
+                              disabled={downgradeLoading === plan.id}
+                              onClick={() => handleDowngrade(plan)}
+                              data-testid={`button-plan-${plan.id}`}
+                            >
+                              {downgradeLoading === plan.id 
+                                ? "Processing..." 
+                                : `Downgrade to ${plan.name}`
+                              }
+                            </Button>
+                          );
                         } else {
-                          handleStripeCheckout(plan);
+                          // Same price - switch plan
+                          return (
+                            <Button
+                              className="w-full text-sm"
+                              variant="outline"
+                              onClick={() => handleStripeCheckout(plan)}
+                            >
+                              Switch to {plan.name}
+                            </Button>
+                          );
                         }
-                      }}
+                      }
+                      
+                      // This is the current plan - check if subscription is active, not expired, and not cancelled
+                      const status = subscription?.status?.toLowerCase();
+                      
+                      // Check if subscription is active (status is "active" or "trial")
+                      const isActive = status === "active" || status === "trial";
+                      
+                      // Check if subscription is not cancelled
+                      const isNotCancelled = status !== "cancelled";
+                      
+                      // Check if subscription is not expired
+                      // Parse dates as UTC to match database storage
+                      const now = new Date();
+                      let isNotExpired = true;
+                      
+                      if (subscription?.expiresAt) {
+                        // Parse expiresAt as UTC
+                        const expiresAtStr = String(subscription.expiresAt).trim();
+                        const hasTimezone = /[Z+-]\d{2}:?\d{2}$/.test(expiresAtStr);
+                        let expiresDate: Date;
+                        
+                        if (hasTimezone) {
+                          expiresDate = new Date(expiresAtStr);
+                        } else {
+                          // No timezone - treat as UTC
+                          const isoMatch = expiresAtStr.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?/);
+                          if (isoMatch) {
+                            const [, y, mo, d, hh, mm, ss, ms] = isoMatch;
+                            expiresDate = new Date(Date.UTC(
+                              Number(y),
+                              Number(mo) - 1,
+                              Number(d),
+                              Number(hh),
+                              Number(mm),
+                              ss ? Number(ss) : 0,
+                              ms ? Number(ms.substring(0, 3)) : 0
+                            ));
+                          } else {
+                            expiresDate = new Date(expiresAtStr);
+                          }
+                        }
+                        isNotExpired = expiresDate.getTime() > now.getTime();
+                      } else if (subscription?.nextBillingAt) {
+                        // Parse nextBillingAt as UTC
+                        const nextBillingStr = String(subscription.nextBillingAt).trim();
+                        const hasTimezone = /[Z+-]\d{2}:?\d{2}$/.test(nextBillingStr);
+                        let nextBillingDate: Date;
+                        
+                        if (hasTimezone) {
+                          nextBillingDate = new Date(nextBillingStr);
+                        } else {
+                          // No timezone - treat as UTC
+                          const isoMatch = nextBillingStr.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?/);
+                          if (isoMatch) {
+                            const [, y, mo, d, hh, mm, ss, ms] = isoMatch;
+                            nextBillingDate = new Date(Date.UTC(
+                              Number(y),
+                              Number(mo) - 1,
+                              Number(d),
+                              Number(hh),
+                              Number(mm),
+                              ss ? Number(ss) : 0,
+                              ms ? Number(ms.substring(0, 3)) : 0
+                            ));
+                          } else {
+                            nextBillingDate = new Date(nextBillingStr);
+                          }
+                        }
+                        isNotExpired = nextBillingDate.getTime() > now.getTime();
+                      }
+                      
+                      // Also check status - if status is "expired", it's expired regardless of dates
+                      if (status === "expired") {
+                        isNotExpired = false;
+                      }
+                      
+                      // Determine if this is the currently subscribed plan
+                      // Must match plan ID, be active, not expired, and not cancelled
+                      const isCurrentlySubscribed = isActive && isNotExpired && isNotCancelled;
+                      
+                      // Debug logging (only for admin users)
+                      if (isSaasAdmin) {
+                        console.log('[Subscription Match]', {
+                          planId: plan.id,
+                          planName: plan.name,
+                          subscriptionPackageId: subscription?.packageId,
+                          subscriptionPlanName: subscription?.planName,
+                          subscriptionPlan: subscription?.plan,
+                          isCurrentPlan,
+                          status: subscription?.status,
+                          expiresAt: subscription?.expiresAt,
+                          nextBillingAt: subscription?.nextBillingAt,
+                          isActive,
+                          isNotCancelled,
+                          isNotExpired,
+                          isCurrentlySubscribed
+                        });
+                      }
+                      
+                      // This is the current plan
+                      return (
+                        <div className="space-y-2">
+                          <Button
+                            className="w-full text-sm"
+                            variant="outline"
+                            disabled={isCurrentlySubscribed}
                       data-testid={`button-plan-${plan.id}`}
                     >
-                      {loadingPlanId === plan.id ? "Loading..." : (
-                        subscription?.plan === plan.id
-                          ? "✓ Current Plan"
-                          : `Upgrade (${plan.name}) Package`
-                      )}
+                            {isCurrentlySubscribed ? "Currently Subscribed" : "Expired"}
                     </Button>
+                          {isCurrentlySubscribed && (
+                            <Button
+                              className="w-full text-sm"
+                              variant="destructive"
+                              onClick={() => setShowCancelDialog(true)}
+                            >
+                              Cancel Subscription
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -787,12 +1632,14 @@ export default function Subscription() {
                 <div className="flex items-center justify-center py-8">
                   <LoadingSpinner />
                 </div>
-              ) : billingHistory.length === 0 ? (
+              ) : previousInvoices.length === 0 ? (
                 <div className="text-center py-12">
                   <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h4 className="font-semibold mb-2">No billing history yet</h4>
+                  <h4 className="font-semibold mb-2">No previous invoices</h4>
                   <p className="text-sm text-muted-foreground">
-                    Billing records will appear here once your subscription becomes active.
+                    {latestInvoice 
+                      ? "Your latest invoice is shown in the Current Subscription section above."
+                      : "Billing records will appear here once your subscription becomes active."}
                   </p>
                 </div>
               ) : (
@@ -810,7 +1657,7 @@ export default function Subscription() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {billingHistory.map((payment: any) => (
+                      {previousInvoices.map((payment: any) => (
                         <tr key={payment.id} className="hover:bg-muted/50">
                           <td className="px-4 py-3 whitespace-nowrap">
                             <div className="flex items-center gap-2">
@@ -1094,6 +1941,175 @@ export default function Subscription() {
           </div>
           <div className="flex justify-end">
             <Button onClick={() => setStripeAlertOpen(false)}>OK</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Downgrade Validation Dialog */}
+      <Dialog open={showDowngradeDialog} onOpenChange={setShowDowngradeDialog}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Cannot Downgrade
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-lg font-semibold">Usage Exceeds Plan Limits</AlertTitle>
+              <AlertDescription className="mt-2">
+                Your current usage exceeds the limits of the selected plan. Please reduce your usage before downgrading.
+              </AlertDescription>
+            </Alert>
+            
+            {requiredDeletions && (requiredDeletions.users > 0 || requiredDeletions.patients > 0) && (
+              <div className="p-5 bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg">
+                <div className="flex items-center gap-2 mb-4">
+                  <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                  <p className="font-bold text-base text-red-900 dark:text-red-100">Required Actions to Downgrade:</p>
+                </div>
+                <div className="space-y-3">
+                  {requiredDeletions.users > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-white dark:bg-red-950/30 rounded-md border border-red-200 dark:border-red-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-full">
+                          <Users className="h-5 w-5 text-red-600 dark:text-red-400" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm text-red-900 dark:text-red-100">Users</p>
+                          <p className="text-xs text-red-700 dark:text-red-300">Remove users to continue</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-red-600 dark:text-red-400">{requiredDeletions.users}</p>
+                        <p className="text-xs text-red-700 dark:text-red-300">
+                          {requiredDeletions.users === 1 ? 'user' : 'users'} to remove
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {requiredDeletions.patients > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-white dark:bg-red-950/30 rounded-md border border-red-200 dark:border-red-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-full">
+                          <User className="h-5 w-5 text-red-600 dark:text-red-400" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm text-red-900 dark:text-red-100">Patients</p>
+                          <p className="text-xs text-red-700 dark:text-red-300">Remove patients to continue</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-red-600 dark:text-red-400">{requiredDeletions.patients}</p>
+                        <p className="text-xs text-red-700 dark:text-red-300">
+                          {requiredDeletions.patients === 1 ? 'patient' : 'patients'} to remove
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-4 pt-3 border-t border-red-200 dark:border-red-800">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                    Total: <span className="font-bold">{requiredDeletions.users + requiredDeletions.patients}</span> item{(requiredDeletions.users + requiredDeletions.patients) === 1 ? '' : 's'} need to be removed
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {downgradeErrors.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Details:</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                  {downgradeErrors.map((error, index) => (
+                    <li key={index}>{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <p className="text-sm text-blue-900 dark:text-blue-100">
+                <strong>Note:</strong> Once you've reduced your usage to within the plan limits, you can try downgrading again.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => {
+                setShowDowngradeDialog(false);
+                setDowngradeErrors([]);
+                setRequiredDeletions(null);
+              }}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Subscription Dialog */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel Subscription</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Alert>
+              <AlertTitle>Are you sure?</AlertTitle>
+              <AlertDescription>
+                Cancelling your subscription will downgrade your account to the Basic (free) plan.
+                {subscription?.currentPeriodEnd && (
+                  <div className="mt-2">
+                    Your subscription will remain active until{" "}
+                    {new Date(subscription.currentPeriodEnd).toLocaleDateString()}.
+                  </div>
+                )}
+              </AlertDescription>
+            </Alert>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
+                Keep Subscription
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => handleCancel(false)}
+                disabled={cancelLoading}
+              >
+                {cancelLoading ? "Processing..." : "Cancel at Period End"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Billing Cycle Change Dialog */}
+      <Dialog open={showChangeCycleDialog} onOpenChange={setShowChangeCycleDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Billing Cycle</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p>Current cycle: <strong>{subscription?.billingCycle === 'annual' ? 'Annual' : 'Monthly'}</strong></p>
+              <p className="text-sm text-muted-foreground mt-2">
+                {subscription?.billingCycle === 'monthly' 
+                  ? "Switching to annual billing will take effect immediately. Unused monthly credit will be applied."
+                  : "Switching to monthly billing will take effect at the next renewal date."}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowChangeCycleDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handleChangeCycle(subscription?.billingCycle === 'annual' ? 'monthly' : 'annual')}
+                disabled={changeCycleLoading}
+              >
+                {changeCycleLoading ? "Processing..." : `Switch to ${subscription?.billingCycle === 'annual' ? 'Monthly' : 'Annual'}`}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

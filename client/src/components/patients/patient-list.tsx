@@ -3313,7 +3313,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
                               </div>
                             </TooltipTrigger>
                             <TooltipContent side="top" align="end" className="z-[100]">
-                              <p className="max-w-xs break-words">Insurance Provider: {patient.insuranceInfo.provider}</p>
+                              <p className="max-w-xs break-words text-[10px]">Insurance Provider: {patient.insuranceInfo.provider}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>

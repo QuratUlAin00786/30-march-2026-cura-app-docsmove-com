@@ -1,13 +1,20 @@
 import type { Express, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import Stripe from "stripe";
 import { storage } from "./storage";
 import { db } from "./db";
 import nodemailer from "nodemailer";
-import { saasOwners, organizations, users, saasPayments, saasInvoices } from "@shared/schema";
+import { saasOwners, organizations, users, saasPayments, saasInvoices, saasSubscriptions, saasPackages } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { emailService } from "./services/email";
 import { sendReminderForSubscription } from "./services/subscription-reminders";
+import {
+  getOrCreateStripeCustomer,
+  getStripePriceId,
+  validateUsageBeforeDowngrade,
+  updateSubscriptionFromStripe,
+} from "./services/stripe-subscription";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import fs from "fs";
 import path from "path";
@@ -2856,6 +2863,218 @@ Attached is invoice ${payment.invoiceNumber} for ${payment.organizationName}.`,
           enabled: false,
           message: "Failed to check Stripe Connect status",
           error: error.message || String(error)
+        });
+      }
+    }
+  );
+
+  // ============================================
+  // SaaS Admin - Cancel Subscription Endpoint
+  // ============================================
+  // Allows SaaS admins to cancel any organization's subscription
+  // NOTE: Using /api/saas/admin/billing/cancel to avoid conflict with regular user route
+  app.post(
+    "/api/saas/admin/billing/cancel",
+    verifySaaSToken,
+    async (req: SaaSRequest, res: Response) => {
+      try {
+        const stripe = process.env.STRIPE_SECRET_KEY
+          ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+              apiVersion: '2025-07-30.basil',
+            })
+          : null;
+
+        if (!stripe) {
+          return res.status(500).json({ error: "Stripe is not configured" });
+        }
+
+        const { subscriptionId, immediate, organizationId } = req.body;
+
+        if (!subscriptionId) {
+          return res.status(400).json({ error: "Missing subscription ID" });
+        }
+
+        // Get subscription from database
+        const [currentSubscription] = await db
+          .select()
+          .from(saasSubscriptions)
+          .where(eq(saasSubscriptions.id, subscriptionId))
+          .limit(1);
+
+        if (!currentSubscription) {
+          return res.status(404).json({ error: "Subscription not found" });
+        }
+
+        // If organizationId is provided, verify it matches
+        if (organizationId && currentSubscription.organizationId !== organizationId) {
+          return res.status(403).json({ error: "Subscription does not belong to the specified organization" });
+        }
+
+        if (!currentSubscription.stripeSubscriptionId) {
+          return res.status(400).json({ error: "Subscription does not have Stripe ID" });
+        }
+
+        if (immediate === true) {
+          // Immediate cancellation
+          await stripe.subscriptions.cancel(currentSubscription.stripeSubscriptionId);
+
+          // Update database - downgrade to Basic (free) plan
+          const [basicPlan] = await db
+            .select()
+            .from(saasPackages)
+            .where(eq(saasPackages.name, "Basic"))
+            .limit(1);
+
+          // Get old package for history
+          const [oldPackage] = currentSubscription.packageId
+            ? await db
+                .select()
+                .from(saasPackages)
+                .where(eq(saasPackages.id, currentSubscription.packageId))
+                .limit(1)
+            : [null];
+
+          if (basicPlan) {
+            await db
+              .update(saasSubscriptions)
+              .set({
+                packageId: basicPlan.id,
+                status: "cancelled",
+                cancelAtPeriodEnd: false,
+                updatedAt: new Date(),
+              })
+              .where(eq(saasSubscriptions.id, subscriptionId));
+          }
+
+          // Log subscription history
+          await logSubscriptionHistory({
+            organizationId: currentSubscription.organizationId,
+            subscriptionId,
+            action: "cancel",
+            performedBy: (req as any).saasUser?.id,
+            performedByType: "saas_admin",
+            oldPackageId: currentSubscription.packageId || undefined,
+            newPackageId: basicPlan?.id,
+            oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+            oldStatus: currentSubscription.status || undefined,
+            newStatus: "cancelled",
+            oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+            details: {
+              immediate: true,
+              stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+            },
+            ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+            userAgent: req.headers["user-agent"] || undefined,
+          });
+
+          res.json({
+            success: true,
+            message: "Subscription cancelled immediately. Account downgraded to Basic plan.",
+            immediate: true,
+          });
+        } else {
+          // Cancel at period end (recommended)
+          await stripe.subscriptions.update(
+            currentSubscription.stripeSubscriptionId,
+            {
+              cancel_at_period_end: true,
+            }
+          );
+
+          // Get old package for history
+          const [oldPackage] = currentSubscription.packageId
+            ? await db
+                .select()
+                .from(saasPackages)
+                .where(eq(saasPackages.id, currentSubscription.packageId))
+                .limit(1)
+            : [null];
+
+          // Update database
+          await db
+            .update(saasSubscriptions)
+            .set({
+              cancelAtPeriodEnd: true,
+              updatedAt: new Date(),
+            })
+            .where(eq(saasSubscriptions.id, subscriptionId));
+
+          // Log subscription history
+          await logSubscriptionHistory({
+            organizationId: currentSubscription.organizationId,
+            subscriptionId,
+            action: "cancel",
+            performedBy: (req as any).saasUser?.id,
+            performedByType: "saas_admin",
+            oldPackageId: currentSubscription.packageId || undefined,
+            oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+            oldStatus: currentSubscription.status || undefined,
+            newStatus: "cancelled",
+            oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+            details: {
+              immediate: false,
+              effectiveDate: currentSubscription.currentPeriodEnd?.toISOString(),
+              stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+            },
+            ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+            userAgent: req.headers["user-agent"] || undefined,
+          });
+
+          res.json({
+            success: true,
+            message: "Subscription will be cancelled at the end of the current billing period.",
+            immediate: false,
+            expiresAt: currentSubscription.currentPeriodEnd,
+          });
+        }
+      } catch (error: any) {
+        console.error("Cancel subscription error (SaaS Admin):", error);
+        res.status(500).json({
+          error: "Failed to cancel subscription",
+          message: error.message,
+        });
+      }
+    }
+  );
+
+  // ============================================
+  // SaaS Admin - Get Subscription History
+  // ============================================
+  app.get(
+    "/api/saas/billing/subscription-history",
+    verifySaaSToken,
+    async (req: SaaSRequest, res: Response) => {
+      try {
+        const { organizationId } = req.query;
+        const { getSubscriptionHistory } = await import("./services/subscription-history");
+        
+        const history = await getSubscriptionHistory(
+          organizationId ? Number(organizationId) : undefined
+        );
+
+        // Join with organizations to get organization names
+        const historyWithOrgNames = await Promise.all(
+          history.map(async (item) => {
+            const [org] = await db
+              .select({ name: organizations.name, subdomain: organizations.subdomain })
+              .from(organizations)
+              .where(eq(organizations.id, item.organizationId))
+              .limit(1);
+
+            return {
+              ...item,
+              organizationName: org?.name || "Unknown",
+              organizationSubdomain: org?.subdomain || "",
+            };
+          })
+        );
+
+        res.json(historyWithOrgNames);
+      } catch (error: any) {
+        console.error("Get subscription history error:", error);
+        res.status(500).json({
+          error: "Failed to fetch subscription history",
+          message: error.message,
         });
       }
     }

@@ -2860,9 +2860,18 @@ Report generated from Cura EMR System`;
     }
   };
 
-  // Load signature when dialog opens
+  // Load signature when dialog opens and initialize canvas for theme
   useEffect(() => {
-    if (showESignDialog && selectedResult) {
+    if (showESignDialog && selectedResult && canvasRef.current) {
+      // Initialize canvas context with correct stroke color for current theme
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        // Set stroke color based on theme
+        ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+        ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+      }
+      
       // Small delay to ensure canvas is rendered
       setTimeout(() => {
         loadSignatureFromDatabase();
@@ -2871,7 +2880,7 @@ Report generated from Cura EMR System`;
       // Clear signature when dialog closes
       clearSignature();
     }
-  }, [showESignDialog, selectedResult?.id]);
+  }, [showESignDialog, selectedResult?.id, theme]);
 
   const saveSignature = async () => {
     // Hide tabs immediately when Apply Advanced E-Signature is clicked (for nurse/admin/doctor roles)
@@ -3167,17 +3176,17 @@ Report generated from Cura EMR System`;
   const getStatusColor = (status: string) => {
     switch (status) {
       case "pending":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
       case "collected":
-        return "bg-blue-100 text-blue-800";
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
       case "processing":
-        return "bg-blue-100 text-blue-800";
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
       case "completed":
-        return "bg-green-100 text-green-800";
+        return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
       case "cancelled":
-        return "bg-red-100 text-red-800";
+        return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
     }
   };
 
@@ -4606,11 +4615,11 @@ Report generated from Cura EMR System`;
 
       {/* Order Lab Test Dialog */}
       <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg h-[550px] flex flex-col">
           <DialogHeader>
             <DialogTitle>Order Lab Test</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto flex-1 pr-2">
             <div className="space-y-2">
               <Label htmlFor="patient">Select Patient</Label>
               {user?.role === "patient" ? (
@@ -4967,41 +4976,41 @@ Report generated from Cura EMR System`;
                 }
               />
             </div>
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => setShowOrderDialog(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  createLabOrderMutation.mutate({
-                    patientId: parseInt(orderFormData.patientId),
-                    testType: orderFormData.testType.join(" | "),
-                    priority: orderFormData.priority,
-                    notes: orderFormData.notes,
-                    selectedUserId: orderFormData.selectedUserId
-                      ? parseInt(orderFormData.selectedUserId)
-                      : null,
-                    selectedUserName: orderFormData.selectedUserName,
-                    orderedBy: user?.id,
-                  });
-                }}
-                disabled={
-                  createLabOrderMutation.isPending ||
-                  !orderFormData.patientId ||
-                  orderFormData.testType.length === 0 ||
-                  (user?.role !== "patient" && !orderFormData.selectedUserId)
-                }
-                className="flex-1 bg-medical-blue hover:bg-blue-700"
-              >
-                {createLabOrderMutation.isPending
-                  ? "Ordering..."
-                  : "Order Test"}
-              </Button>
-            </div>
+          </div>
+          <div className="flex gap-2 pt-4 border-t mt-4 shrink-0">
+            <Button
+              variant="outline"
+              onClick={() => setShowOrderDialog(false)}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                createLabOrderMutation.mutate({
+                  patientId: parseInt(orderFormData.patientId),
+                  testType: orderFormData.testType.join(" | "),
+                  priority: orderFormData.priority,
+                  notes: orderFormData.notes,
+                  selectedUserId: orderFormData.selectedUserId
+                    ? parseInt(orderFormData.selectedUserId)
+                    : null,
+                  selectedUserName: orderFormData.selectedUserName,
+                  orderedBy: user?.id,
+                });
+              }}
+              disabled={
+                createLabOrderMutation.isPending ||
+                !orderFormData.patientId ||
+                orderFormData.testType.length === 0 ||
+                (user?.role !== "patient" && !orderFormData.selectedUserId)
+              }
+              className="flex-1 bg-medical-blue hover:bg-blue-700"
+            >
+              {createLabOrderMutation.isPending
+                ? "Ordering..."
+                : "Order Test"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

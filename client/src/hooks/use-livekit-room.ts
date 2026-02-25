@@ -230,11 +230,18 @@ export function useLiveKitRoom(): UseLiveKitRoomReturn {
           if (config.videoEnabled !== false) {
             setIsVideoEnabled(false);
           }
+          
+          // Provide more specific error messages
+          let errorMessage = 'Could not access media devices. You can join and enable them manually.';
+          if (err.name === 'NotAllowedError') {
+            errorMessage = 'Please allow camera/microphone access to join the call with video/audio.';
+          } else if (err.name === 'NotFoundError' || err.message?.includes('not found') || err.message?.includes('device not found')) {
+            errorMessage = 'No camera/microphone device found. The call will continue without video/audio.';
+          }
+          
           toast({
             title: 'Media Permissions',
-            description: err.name === 'NotAllowedError' 
-              ? 'Please allow camera/microphone access to join the call with video/audio.'
-              : 'Could not access media devices. You can join and enable them manually.',
+            description: errorMessage,
             variant: 'default',
           });
         }
@@ -254,12 +261,54 @@ export function useLiveKitRoom(): UseLiveKitRoomReturn {
 
       if (config.videoEnabled !== false) {
         try {
-          await newRoom.localParticipant.setCameraEnabled(true);
-          console.log('✅ Camera enabled');
+          // Check if camera is available before trying to enable it
+          let hasCamera = false;
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            hasCamera = devices.some(device => device.kind === 'videoinput' && device.deviceId !== '');
+            
+            // If no camera found in initial enumeration, try requesting permission
+            if (!hasCamera) {
+              try {
+                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                tempStream.getTracks().forEach(track => track.stop());
+                // Re-enumerate after permission
+                const devicesAfterPerm = await navigator.mediaDevices.enumerateDevices();
+                hasCamera = devicesAfterPerm.some(device => device.kind === 'videoinput' && device.deviceId !== '');
+              } catch (permErr: any) {
+                // Permission denied or no camera - that's okay, we'll continue without video
+                console.log('⚠️ Camera not available or permission denied:', permErr.name);
+                hasCamera = false;
+              }
+            }
+          } catch (enumErr) {
+            console.warn('⚠️ Could not enumerate devices:', enumErr);
+            hasCamera = false;
+          }
+
+          if (hasCamera) {
+            await newRoom.localParticipant.setCameraEnabled(true);
+            console.log('✅ Camera enabled');
+          } else {
+            console.log('⚠️ No camera device found - continuing call without video');
+            setIsVideoEnabled(false);
+            toast({
+              title: 'Camera Not Available',
+              description: 'No camera device found. The call will continue without video.',
+              variant: 'default',
+            });
+          }
         } catch (err: any) {
           console.error('❌ Failed to enable camera:', err);
           setIsVideoEnabled(false);
           // Don't throw - allow call to continue without video
+          if (err.name === 'NotFoundError' || err.message?.includes('not found') || err.message?.includes('device not found')) {
+            toast({
+              title: 'Camera Not Available',
+              description: 'No camera device found. The call will continue without video.',
+              variant: 'default',
+            });
+          }
         }
       }
 

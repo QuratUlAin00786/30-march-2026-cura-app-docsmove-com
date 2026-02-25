@@ -19,7 +19,7 @@ import { messagingService } from "./messaging-service";
 import { isDoctorLike } from './utils/role-utils.js';
 // PayPal imports moved to dynamic imports to avoid initialization errors when credentials are missing
 import { gdprComplianceService } from "./services/gdpr-compliance";
-import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, User, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema, InsertSaaSSubscription, imagingPricing, scheduledVideoCalls, insertScheduledVideoCallSchema, messages } from "../shared/schema";
+import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, User, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, saasPackages, saasPayments, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema, InsertSaaSSubscription, imagingPricing, scheduledVideoCalls, insertScheduledVideoCallSchema, messages } from "../shared/schema";
 import * as schema from "../shared/schema";
 import { db, pool } from "./db";
 import { and, eq, sql, desc, asc, isNull, isNotNull, or, gte, lte, ne } from "drizzle-orm";
@@ -29,6 +29,16 @@ import { clinicalDecisionSupport } from "./services/clinical-decision-support";
 import { pharmacyService } from "./services/pharmacy";
 import { formService } from "./services/forms";
 import { emailService } from "./services/email";
+import {
+  getOrCreateStripeCustomer,
+  getStripePriceId,
+  validateUsageBeforeDowngrade,
+  updateSubscriptionFromStripe,
+  getUserCount,
+  getPatientCount,
+  getStorageUsage,
+} from "./services/stripe-subscription";
+import { logSubscriptionHistory } from "./services/subscription-history";
 import { sendEmail, generatePrescriptionEmailHTML } from "./email";
 import multer from "multer";
 import path from 'path';
@@ -1478,6 +1488,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Register remaining SaaS administration routes
+  // Register SaaS routes AFTER regular routes to avoid route conflicts
+  // Regular user routes should take precedence over SaaS admin routes
   registerSaaSRoutes(app);
 
   // Temporary admin endpoint to activate subscription for a user by email
@@ -10383,6 +10395,1171 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Subscription fetch error:", error);
       res.status(500).json({ error: "Failed to fetch subscription" });
+    }
+  });
+
+  // ============================================
+  // SaaS Subscription Management Endpoints
+  // ============================================
+
+  // Get usage statistics
+  app.get("/api/saas/billing/usage", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = requireOrgId(req);
+
+      const userCount = await getUserCount(organizationId);
+      const patientCount = await getPatientCount(organizationId);
+      const storageGB = await getStorageUsage(organizationId);
+
+      res.json({
+        users: userCount,
+        patients: patientCount,
+        storageGB: storageGB,
+      });
+    } catch (error: any) {
+      console.error("Get usage error:", error);
+      res.status(500).json({
+        error: "Failed to get usage statistics",
+        message: error.message,
+      });
+    }
+  });
+
+  // Upgrade subscription (immediate effect with proration)
+  app.post("/api/saas/billing/upgrade", tenantMiddleware, authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      const { subscriptionId, newPackageId, billingCycle } = req.body;
+      const organizationId = requireOrgId(req);
+
+      if (!subscriptionId || !newPackageId || !billingCycle) {
+        return res.status(400).json({ error: "Missing required fields: subscriptionId, newPackageId, billingCycle" });
+      }
+
+      // Get current subscription
+      const [currentSubscription] = await db
+        .select()
+        .from(saasSubscriptions)
+        .where(
+          and(
+            eq(saasSubscriptions.id, subscriptionId),
+            eq(saasSubscriptions.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (!currentSubscription) {
+        return res.status(404).json({ error: "Subscription not found" });
+      }
+
+      if (!currentSubscription.stripeSubscriptionId) {
+        return res.status(400).json({ error: "Subscription does not have Stripe ID" });
+      }
+
+      // Get new package and price ID
+      const newPriceId = await getStripePriceId(newPackageId, billingCycle);
+
+      // Get Stripe subscription
+      const stripeSubscription = await stripe.subscriptions.retrieve(
+        currentSubscription.stripeSubscriptionId
+      );
+
+      // Update Stripe subscription with proration (immediate upgrade)
+      const updatedSubscription = await stripe.subscriptions.update(
+        currentSubscription.stripeSubscriptionId,
+        {
+          items: [{
+            id: stripeSubscription.items.data[0].id,
+            price: newPriceId,
+          }],
+          proration_behavior: 'create_prorations', // Immediate upgrade with credit
+        }
+      );
+
+      // Get old and new package details for history
+      const [oldPackage] = currentSubscription.packageId
+        ? await db
+            .select()
+            .from(saasPackages)
+            .where(eq(saasPackages.id, currentSubscription.packageId))
+            .limit(1)
+        : [null];
+      const [newPackage] = await db
+        .select()
+        .from(saasPackages)
+        .where(eq(saasPackages.id, newPackageId))
+        .limit(1);
+
+      // Update database
+      await db
+        .update(saasSubscriptions)
+        .set({
+          packageId: newPackageId,
+          stripePriceId: newPriceId,
+          billingCycle: billingCycle,
+          currentPeriodStart: new Date(updatedSubscription.current_period_start * 1000),
+          currentPeriodEnd: new Date(updatedSubscription.current_period_end * 1000),
+          updatedAt: new Date(),
+        })
+        .where(eq(saasSubscriptions.id, subscriptionId));
+
+      // Log subscription history
+      await logSubscriptionHistory({
+        organizationId,
+        subscriptionId,
+        action: "upgrade",
+        performedBy: req.user?.id,
+        performedByType: "org_admin",
+        oldPackageId: currentSubscription.packageId || undefined,
+        newPackageId: newPackageId,
+        oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+        newBillingCycle: billingCycle as "monthly" | "annual",
+        oldStatus: currentSubscription.status || undefined,
+        newStatus: currentSubscription.status || undefined,
+        oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+        newPrice: newPackage?.price ? Number(newPackage.price) : undefined,
+        details: {
+          prorationAmount: updatedSubscription.latest_invoice?.amount_due ? updatedSubscription.latest_invoice.amount_due / 100 : undefined,
+          stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+        },
+        ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+        userAgent: req.headers["user-agent"] || undefined,
+      });
+
+      res.json({
+        success: true,
+        message: "Subscription upgraded successfully. New features are now active.",
+        subscription: {
+          packageId: newPackageId,
+          billingCycle: billingCycle,
+          currentPeriodEnd: updatedSubscription.current_period_end * 1000,
+        },
+      });
+    } catch (error: any) {
+      console.error("Upgrade subscription error:", error);
+      res.status(500).json({
+        error: "Failed to upgrade subscription",
+        message: error.message,
+      });
+    }
+  });
+
+  // Downgrade subscription (takes effect at next billing cycle)
+  app.post("/api/saas/billing/downgrade", tenantMiddleware, authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      const { subscriptionId, newPackageId, billingCycle, immediate } = req.body;
+      const organizationId = requireOrgId(req);
+
+      if (!subscriptionId || !newPackageId || !billingCycle) {
+        return res.status(400).json({ error: "Missing required fields: subscriptionId, newPackageId, billingCycle" });
+      }
+
+      // STEP 1: Validate usage BEFORE any Stripe or database operations
+      console.log("[DOWNGRADE] Step 1: Validating usage before downgrade...", {
+        organizationId,
+        newPackageId,
+        subscriptionId,
+        billingCycle,
+      });
+      
+      let validation;
+      try {
+        validation = await validateUsageBeforeDowngrade(organizationId, newPackageId);
+      } catch (validationError: any) {
+        console.error("[DOWNGRADE] ❌ Validation function error:", validationError);
+        return res.status(500).json({
+          error: "Failed to validate usage",
+          message: validationError.message || "An error occurred while validating usage limits",
+          details: process.env.NODE_ENV === 'development' ? validationError.stack : undefined,
+        });
+      }
+      
+      if (!validation.valid) {
+        const usersToRemove = validation.requiredDeletions?.users ?? 0;
+        const patientsToRemove = validation.requiredDeletions?.patients ?? 0;
+        
+        console.log("[DOWNGRADE] ❌ Validation failed - blocking downgrade:", {
+          errors: validation.errors,
+          usersToRemove,
+          patientsToRemove,
+          requiredDeletions: validation.requiredDeletions,
+        });
+        
+        // Build user-friendly message
+        let message = "Please remove ";
+        const removals: string[] = [];
+        if (usersToRemove > 0) {
+          removals.push(`${usersToRemove} user${usersToRemove !== 1 ? 's' : ''}`);
+        }
+        if (patientsToRemove > 0) {
+          removals.push(`${patientsToRemove} patient${patientsToRemove !== 1 ? 's' : ''}`);
+        }
+        
+        if (removals.length === 1) {
+          message += removals[0];
+        } else if (removals.length === 2) {
+          message += `${removals[0]} and ${removals[1]}`;
+        }
+        message += " to downgrade this package.";
+        
+        // Return error WITHOUT calling Stripe or updating database
+        return res.status(400).json({
+          success: false,
+          error: "Cannot downgrade: usage exceeds plan limits",
+          message: message,
+          errors: validation.errors,
+          usersToRemove: usersToRemove,
+          patientsToRemove: patientsToRemove,
+          requiredDeletions: validation.requiredDeletions,
+        });
+      }
+
+      console.log("[DOWNGRADE] ✅ Validation passed - proceeding with downgrade");
+
+      // Get current subscription
+      const [currentSubscription] = await db
+        .select()
+        .from(saasSubscriptions)
+        .where(
+          and(
+            eq(saasSubscriptions.id, subscriptionId),
+            eq(saasSubscriptions.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (!currentSubscription) {
+        return res.status(404).json({ error: "Subscription not found" });
+      }
+
+      if (!currentSubscription.stripeSubscriptionId) {
+        return res.status(400).json({ error: "Subscription does not have Stripe ID" });
+      }
+
+      // Get new package and price ID
+      const newPriceId = await getStripePriceId(newPackageId, billingCycle);
+
+      // Get Stripe subscription
+      const stripeSubscription = await stripe.subscriptions.retrieve(
+        currentSubscription.stripeSubscriptionId
+      );
+
+      if (immediate === true) {
+        // Immediate downgrade: cancel current, refund, create new subscription
+        // This is complex - consider if you really need this
+        return res.status(400).json({
+          error: "Immediate downgrade requires manual processing. Please contact support.",
+        });
+      }
+
+      // Standard downgrade: takes effect at next billing cycle
+      let updatedSubscription: Stripe.Subscription;
+      try {
+        console.log("[DOWNGRADE] Step 4: Updating Stripe subscription...", {
+          subscriptionId: currentSubscription.stripeSubscriptionId,
+          newPriceId,
+          currentItemId: stripeSubscription.items.data[0]?.id,
+        });
+        
+        if (!stripeSubscription.items.data[0]?.id) {
+          throw new Error("Stripe subscription has no items");
+        }
+        
+        updatedSubscription = await stripe.subscriptions.update(
+          currentSubscription.stripeSubscriptionId,
+          {
+            items: [{
+              id: stripeSubscription.items.data[0].id,
+              price: newPriceId,
+            }],
+            proration_behavior: 'none', // No immediate charge
+            billing_cycle_anchor: 'unchanged', // Keep current billing date
+          }
+        );
+        console.log("[DOWNGRADE] ✅ Stripe subscription updated:", {
+          id: updatedSubscription.id,
+          status: updatedSubscription.status,
+        });
+      } catch (stripeUpdateError: any) {
+        console.error("[DOWNGRADE] ❌ Error updating Stripe subscription:", stripeUpdateError);
+        return res.status(400).json({
+          error: "Failed to update Stripe subscription",
+          message: stripeUpdateError.message || "Could not update subscription in Stripe",
+          details: stripeUpdateError.type === 'StripeInvalidRequestError' ? 'Invalid price ID or subscription configuration' : undefined,
+        });
+      }
+
+      // Update database
+      try {
+        console.log("[DOWNGRADE] Step 5: Updating database...", {
+          subscriptionId,
+          newPackageId,
+          newPriceId,
+        });
+        await db
+          .update(saasSubscriptions)
+          .set({
+            packageId: newPackageId,
+            stripePriceId: newPriceId,
+            billingCycle: billingCycle,
+            // Keep current period end - downgrade happens at renewal
+            updatedAt: new Date(),
+          })
+          .where(eq(saasSubscriptions.id, subscriptionId));
+        console.log("[DOWNGRADE] ✅ Database updated successfully");
+      } catch (dbError: any) {
+        console.error("[DOWNGRADE] ❌ Error updating database:", dbError);
+        // Stripe subscription was already updated, so we need to handle this carefully
+        // For now, return error - in production, you might want to rollback the Stripe change
+        return res.status(500).json({
+          error: "Failed to update subscription in database",
+          message: "Subscription was updated in Stripe but failed to update in our database. Please contact support.",
+          details: process.env.NODE_ENV === 'development' ? dbError.message : undefined,
+        });
+      }
+
+      // Log subscription history
+      try {
+        await logSubscriptionHistory({
+          organizationId,
+          subscriptionId,
+          action: "downgrade",
+          performedBy: req.user?.id,
+          performedByType: "org_admin",
+          oldPackageId: currentSubscription.packageId || undefined,
+          newPackageId: newPackageId,
+          oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" || undefined,
+          newBillingCycle: billingCycle,
+          oldStatus: currentSubscription.status || undefined,
+          newStatus: currentSubscription.status || undefined, // Status doesn't change for downgrade
+          oldPrice: currentSubscription.stripePriceId ? undefined : undefined, // Could fetch old price if needed
+          details: {
+            immediate: false,
+            effectiveDate: currentSubscription.currentPeriodEnd?.toISOString() || undefined,
+            stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+          },
+          ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+          userAgent: req.headers["user-agent"] || undefined,
+        });
+        console.log("[DOWNGRADE] ✅ Subscription history logged");
+      } catch (historyError: any) {
+        // Don't fail the request if history logging fails, just log it
+        console.error("[DOWNGRADE] ⚠️ Error logging subscription history (non-critical):", historyError);
+      }
+
+      res.json({
+        success: true,
+        message: "Subscription will be downgraded at the next billing cycle. Current features remain active until then.",
+        subscription: {
+          packageId: newPackageId,
+          billingCycle: billingCycle,
+          currentPeriodEnd: currentSubscription.currentPeriodEnd,
+          effectiveDate: currentSubscription.currentPeriodEnd,
+        },
+      });
+    } catch (error: any) {
+      console.error("[DOWNGRADE] ❌ Unexpected error in downgrade endpoint:", {
+        error: error.message,
+        stack: error.stack,
+        name: error.name,
+        type: error.type,
+      });
+      res.status(500).json({
+        error: "Failed to downgrade subscription",
+        message: error.message || "An unexpected error occurred",
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      });
+    }
+  });
+
+  // Cancel subscription (downgrade to Basic/free)
+  app.post("/api/saas/billing/cancel", tenantMiddleware, authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      console.log("[CANCEL] Cancel subscription request received:", {
+        subscriptionId: req.body.subscriptionId,
+        immediate: req.body.immediate,
+        userId: req.user?.id,
+        organizationId: req.organizationId,
+        hasAuthToken: !!req.get("Authorization"),
+        tenantId: req.tenant?.id,
+      });
+
+      // Check authentication first
+      if (!req.user || !req.user.id) {
+        console.error("[CANCEL] ❌ No user in request - authentication failed");
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      // Check organization ID
+      let organizationId: number;
+      try {
+        organizationId = requireOrgId(req);
+      } catch (orgError: any) {
+        console.error("[CANCEL] ❌ Organization ID missing:", orgError.message);
+        return res.status(401).json({ 
+          error: "Authentication required", 
+          details: "Organization ID is missing. Please log in again." 
+        });
+      }
+
+      if (!stripe) {
+        console.error("[CANCEL] Stripe is not configured - STRIPE_SECRET_KEY missing");
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      const { subscriptionId, immediate } = req.body;
+
+      if (!subscriptionId) {
+        return res.status(400).json({ error: "Missing subscription ID" });
+      }
+
+      // Get current subscription
+      const [currentSubscription] = await db
+        .select()
+        .from(saasSubscriptions)
+        .where(
+          and(
+            eq(saasSubscriptions.id, subscriptionId),
+            eq(saasSubscriptions.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (!currentSubscription) {
+        console.error("[CANCEL] Subscription not found in database:", {
+          subscriptionId,
+          organizationId,
+        });
+        return res.status(404).json({ error: "Subscription not found" });
+      }
+
+      // Get stripe_subscription_id from database table "saas_subscriptions"
+      // IMPORTANT: We ONLY use sub_... (subscription ID) - NOT tok_..., pm_..., or cus_...
+      const stripeSubscriptionId = currentSubscription.stripeSubscriptionId;
+      
+      console.log("[CANCEL] Found subscription in database:", {
+        dbSubscriptionId: currentSubscription.id,
+        stripeSubscriptionId: stripeSubscriptionId,
+        status: currentSubscription.status,
+        cancelAtPeriodEnd: currentSubscription.cancelAtPeriodEnd,
+      });
+
+      if (!stripeSubscriptionId) {
+        console.error("[CANCEL] Subscription missing Stripe ID:", {
+          subscriptionId: currentSubscription.id,
+          organizationId,
+        });
+        return res.status(400).json({ 
+          error: "Subscription does not have Stripe ID",
+          message: "This subscription does not have a Stripe subscription ID. Please contact support."
+        });
+      }
+
+      // Validate that it's a subscription ID (starts with 'sub_')
+      if (!stripeSubscriptionId.startsWith('sub_')) {
+        console.error("[CANCEL] Invalid Stripe subscription ID format:", {
+          stripeSubscriptionId,
+          expectedFormat: "sub_xxxxx",
+        });
+        return res.status(400).json({ 
+          error: "Invalid Stripe subscription ID format",
+          message: `The subscription ID must start with 'sub_'. Found: ${stripeSubscriptionId}`
+        });
+      }
+
+      // Check if subscription is already cancelled
+      if (currentSubscription.status === 'cancelled' && currentSubscription.cancelAtPeriodEnd) {
+        return res.status(400).json({ 
+          error: "Subscription is already scheduled for cancellation at period end",
+          message: "This subscription is already set to cancel at the end of the billing period."
+        });
+      }
+
+      // Verify the Stripe subscription exists and is active
+      // Use stripe_subscription_id from database
+      try {
+        console.log("[CANCEL] Verifying Stripe subscription exists:", stripeSubscriptionId);
+        const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+        console.log("[CANCEL] Stripe subscription status:", {
+          id: stripeSubscription.id,
+          status: stripeSubscription.status,
+          cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
+        });
+
+        if (stripeSubscription.status === 'canceled' || stripeSubscription.status === 'unpaid') {
+          return res.status(400).json({ 
+            error: "Subscription is already cancelled or unpaid",
+            message: `This subscription is already ${stripeSubscription.status} in Stripe.`
+          });
+        }
+      } catch (stripeRetrieveError: any) {
+        console.error("[CANCEL] Error retrieving Stripe subscription:", stripeRetrieveError);
+        return res.status(400).json({ 
+          error: "Invalid Stripe subscription",
+          message: `Could not retrieve subscription from Stripe: ${stripeRetrieveError.message || 'Subscription not found'}`
+        });
+      }
+
+      if (immediate === true) {
+        // STEP 1: Cancel subscription in Stripe FIRST
+        // Use ONLY sub_... (subscription ID) from database
+        // Example: await stripe.subscriptions.cancel('sub_123456789');
+        console.log("[CANCEL] Step 1: Canceling Stripe subscription:", stripeSubscriptionId);
+        
+        let cancelledStripeSubscription;
+        try {
+          cancelledStripeSubscription = await stripe.subscriptions.cancel(stripeSubscriptionId);
+          console.log("[CANCEL] ✅ Stripe subscription cancelled successfully:", {
+            id: cancelledStripeSubscription.id,
+            status: cancelledStripeSubscription.status,
+            canceled_at: cancelledStripeSubscription.canceled_at,
+          });
+        } catch (stripeCancelError: any) {
+          console.error("[CANCEL] ❌ Failed to cancel Stripe subscription:", {
+            error: stripeCancelError.message,
+            code: stripeCancelError.code,
+            type: stripeCancelError.type,
+            subscriptionId: stripeSubscriptionId,
+          });
+          
+          // If Stripe cancellation fails, do NOT update database
+          if (stripeCancelError.code === 'resource_missing') {
+            return res.status(404).json({ 
+              error: "Stripe subscription not found",
+              message: "The subscription does not exist in Stripe. It may have already been cancelled."
+            });
+          } else if (stripeCancelError.type === 'StripeAuthenticationError') {
+            return res.status(500).json({ 
+              error: "Stripe authentication failed",
+              message: "Invalid Stripe API key. Please check your STRIPE_SECRET_KEY environment variable."
+            });
+          }
+          
+          throw new Error(`Stripe cancellation failed: ${stripeCancelError.message || stripeCancelError.type || 'Unknown error'}`);
+        }
+
+        // STEP 2: Only after successful Stripe cancellation, update database
+        console.log("[CANCEL] Step 2: Updating database after successful Stripe cancellation");
+        
+        // Find Basic plan (usually packageId = 1 or name = "Basic")
+        const [basicPlan] = await db
+          .select()
+          .from(saasPackages)
+          .where(eq(saasPackages.name, "Basic"))
+          .limit(1);
+
+        // Get old package for history
+        const [oldPackage] = currentSubscription.packageId
+          ? await db
+              .select()
+              .from(saasPackages)
+              .where(eq(saasPackages.id, currentSubscription.packageId))
+              .limit(1)
+          : [null];
+
+        if (basicPlan) {
+          await db
+            .update(saasSubscriptions)
+            .set({
+              packageId: basicPlan.id,
+              status: "cancelled",
+              cancelAtPeriodEnd: false,
+              updatedAt: new Date(),
+            })
+            .where(eq(saasSubscriptions.id, subscriptionId));
+          
+          console.log("[CANCEL] ✅ Database updated - subscription status set to 'cancelled'");
+        } else {
+          console.error("[CANCEL] ⚠️ Basic plan not found in database - subscription cancelled in Stripe but database not updated");
+        }
+
+        // Log subscription history (non-critical - don't fail if this errors)
+        try {
+          await logSubscriptionHistory({
+            organizationId,
+            subscriptionId,
+            action: "cancel",
+            performedBy: req.user?.id,
+            performedByType: "org_admin",
+            oldPackageId: currentSubscription.packageId || undefined,
+            newPackageId: basicPlan?.id,
+            oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+            oldStatus: currentSubscription.status || undefined,
+            newStatus: "cancelled",
+            oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+            details: {
+              immediate: true,
+              stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+            },
+            ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+            userAgent: req.headers["user-agent"] || undefined,
+          });
+          console.log("[CANCEL] ✅ Subscription history logged");
+        } catch (historyError: any) {
+          // Don't fail the request if history logging fails
+          console.error("[CANCEL] ⚠️ Error logging subscription history (non-critical):", historyError);
+        }
+
+        res.json({
+          success: true,
+          message: "Subscription cancelled immediately. Account downgraded to Basic plan.",
+          immediate: true,
+        });
+      } else {
+        // Cancel at period end (recommended)
+        try {
+          // Validate Stripe subscription ID format (already validated above, but double-check)
+          // We ONLY use sub_... (subscription ID) - NOT tok_..., pm_..., or cus_...
+          if (!stripeSubscriptionId || !stripeSubscriptionId.startsWith('sub_')) {
+            return res.status(400).json({ 
+              error: "Invalid Stripe subscription ID",
+              message: `The subscription has an invalid Stripe ID format: ${stripeSubscriptionId}. Expected format: sub_xxxxx`
+            });
+          }
+
+          // First, verify the subscription exists in Stripe and get current status
+          // Use stripe_subscription_id from database
+          let stripeSubscription;
+          try {
+            console.log("[CANCEL] Retrieving Stripe subscription:", stripeSubscriptionId);
+            stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+            console.log("[CANCEL] Verified Stripe subscription:", {
+              id: stripeSubscription.id,
+              status: stripeSubscription.status,
+              cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
+            });
+
+            // Check if already cancelled
+            if (stripeSubscription.status === 'canceled') {
+              return res.status(400).json({ 
+                error: "Subscription already cancelled",
+                message: "This subscription has already been cancelled in Stripe."
+              });
+            }
+          } catch (retrieveError: any) {
+            console.error("[CANCEL] Failed to retrieve Stripe subscription:", {
+              error: retrieveError.message,
+              code: retrieveError.code,
+              type: retrieveError.type,
+            });
+            
+            if (retrieveError.code === 'resource_missing') {
+              return res.status(404).json({ 
+                error: "Stripe subscription not found",
+                message: "The subscription does not exist in Stripe. It may have already been cancelled or deleted."
+              });
+            } else if (retrieveError.type === 'StripeAuthenticationError' || retrieveError.message?.includes('Invalid token') || retrieveError.message?.includes('Invalid API Key')) {
+              return res.status(500).json({ 
+                error: "Stripe authentication failed",
+                message: "Invalid Stripe API key. Please verify your STRIPE_SECRET_KEY environment variable is correct.",
+                details: process.env.NODE_ENV === 'development' ? retrieveError.message : undefined
+              });
+            }
+            throw retrieveError;
+          }
+
+          // STEP 1: Update subscription in Stripe to cancel at period end FIRST
+          console.log("[CANCEL] Step 1: Updating Stripe subscription to cancel at period end:", stripeSubscriptionId);
+          
+          let updatedStripeSubscription;
+          try {
+            updatedStripeSubscription = await stripe.subscriptions.update(
+              stripeSubscriptionId,
+              {
+                cancel_at_period_end: true,
+              }
+            );
+
+            console.log("[CANCEL] ✅ Stripe subscription updated successfully:", {
+              subscriptionId: updatedStripeSubscription.id,
+              cancelAtPeriodEnd: updatedStripeSubscription.cancel_at_period_end,
+              status: updatedStripeSubscription.status,
+            });
+          } catch (stripeUpdateError: any) {
+            console.error("[CANCEL] ❌ Failed to update Stripe subscription:", {
+              error: stripeUpdateError.message,
+              code: stripeUpdateError.code,
+              type: stripeUpdateError.type,
+            });
+            
+            // If Stripe update fails, do NOT update database
+            if (stripeUpdateError.code === 'resource_missing') {
+              return res.status(404).json({ 
+                error: "Stripe subscription not found",
+                message: "The subscription does not exist in Stripe. It may have already been cancelled or deleted."
+              });
+            } else if (stripeUpdateError.type === 'StripeAuthenticationError') {
+              return res.status(500).json({ 
+                error: "Stripe authentication failed",
+                message: "Invalid Stripe API key. Please check your STRIPE_SECRET_KEY environment variable."
+              });
+            }
+            
+            throw new Error(`Stripe update failed: ${stripeUpdateError.message || stripeUpdateError.type || 'Unknown error'}`);
+          }
+
+          // STEP 2: Only after successful Stripe update, update database
+          console.log("[CANCEL] Step 2: Updating database after successful Stripe update");
+          
+          // Get old package for history
+          const [oldPackage] = currentSubscription.packageId
+            ? await db
+                .select()
+                .from(saasPackages)
+                .where(eq(saasPackages.id, currentSubscription.packageId))
+                .limit(1)
+            : [null];
+
+          // Update database
+          await db
+            .update(saasSubscriptions)
+            .set({
+              cancelAtPeriodEnd: true,
+              updatedAt: new Date(),
+            })
+            .where(eq(saasSubscriptions.id, subscriptionId));
+          
+          console.log("[CANCEL] ✅ Database updated - cancelAtPeriodEnd set to true");
+
+          // Log subscription history (non-critical - don't fail if this errors)
+          try {
+            await logSubscriptionHistory({
+              organizationId,
+              subscriptionId,
+              action: "cancel",
+              performedBy: req.user?.id,
+              performedByType: "org_admin",
+              oldPackageId: currentSubscription.packageId || undefined,
+              oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+              oldStatus: currentSubscription.status || undefined,
+              newStatus: "cancelled",
+              oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+              details: {
+                immediate: false,
+                effectiveDate: currentSubscription.currentPeriodEnd?.toISOString(),
+                stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+              },
+              ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+              userAgent: req.headers["user-agent"] || undefined,
+            });
+            console.log("[CANCEL] ✅ Subscription history logged");
+          } catch (historyError: any) {
+            // Don't fail the request if history logging fails
+            console.error("[CANCEL] ⚠️ Error logging subscription history (non-critical):", historyError);
+          }
+
+          res.json({
+            success: true,
+            message: "Subscription will be cancelled at the end of the current billing period.",
+            immediate: false,
+            expiresAt: currentSubscription.currentPeriodEnd,
+          });
+        } catch (stripeError: any) {
+          console.error("[CANCEL] Stripe API error:", {
+            error: stripeError.message,
+            code: stripeError.code,
+            type: stripeError.type,
+            statusCode: stripeError.statusCode,
+            subscriptionId: currentSubscription.stripeSubscriptionId,
+            raw: stripeError.raw,
+          });
+
+          // Handle specific Stripe errors
+          if (stripeError.code === 'resource_missing') {
+            return res.status(404).json({ 
+              error: "Stripe subscription not found",
+              message: "The subscription does not exist in Stripe. It may have already been cancelled or deleted."
+            });
+          } else if (stripeError.type === 'StripeAuthenticationError' || stripeError.message?.includes('Invalid token') || stripeError.message?.includes('Invalid API Key')) {
+            return res.status(500).json({ 
+              error: "Stripe authentication failed",
+              message: "Invalid Stripe API key. Please check your STRIPE_SECRET_KEY environment variable.",
+              details: process.env.NODE_ENV === 'development' ? stripeError.message : undefined
+            });
+          } else if (stripeError.type === 'StripeInvalidRequestError') {
+            return res.status(400).json({ 
+              error: "Stripe request invalid",
+              message: stripeError.message || "Invalid request to Stripe API. Please check the subscription status."
+            });
+          }
+          
+          throw new Error(`Stripe cancellation failed: ${stripeError.message || stripeError.type || 'Unknown error'}`);
+        }
+      }
+    } catch (error: any) {
+      console.error("Cancel subscription error:", {
+        error: error.message,
+        stack: error.stack,
+        code: error.code,
+        type: error.type,
+        subscriptionId: req.body.subscriptionId,
+        organizationId: req.organizationId,
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = error.message || "Failed to cancel subscription";
+      if (error.type === 'StripeInvalidRequestError') {
+        errorMessage = `Stripe error: ${error.message || 'Invalid request to Stripe'}`;
+      } else if (error.code === 'resource_missing') {
+        errorMessage = "Stripe subscription not found. It may have already been cancelled.";
+      }
+      
+      res.status(500).json({
+        error: "Failed to cancel subscription",
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      });
+    }
+  });
+
+  // Change billing cycle (monthly ↔ annual)
+  app.post("/api/saas/billing/change-cycle", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      const { subscriptionId, newBillingCycle } = req.body;
+      const organizationId = requireOrgId(req);
+
+      if (!subscriptionId || !newBillingCycle) {
+        return res.status(400).json({ error: "Missing required fields: subscriptionId, newBillingCycle" });
+      }
+
+      if (!["monthly", "annual"].includes(newBillingCycle)) {
+        return res.status(400).json({ error: "Invalid billing cycle. Must be 'monthly' or 'annual'" });
+      }
+
+      // Get current subscription
+      const [currentSubscription] = await db
+        .select()
+        .from(saasSubscriptions)
+        .where(
+          and(
+            eq(saasSubscriptions.id, subscriptionId),
+            eq(saasSubscriptions.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (!currentSubscription) {
+        return res.status(404).json({ error: "Subscription not found" });
+      }
+
+      // Check if already on this cycle
+      if (currentSubscription.billingCycle === newBillingCycle) {
+        return res.status(400).json({ error: "Already on this billing cycle" });
+      }
+
+      // Get new price ID for same package but different cycle
+      const newPriceId = await getStripePriceId(currentSubscription.packageId, newBillingCycle);
+
+      // Get Stripe subscription
+      const stripeSubscription = await stripe.subscriptions.retrieve(
+        currentSubscription.stripeSubscriptionId!
+      );
+
+      if (currentSubscription.billingCycle === "monthly" && newBillingCycle === "annual") {
+        // Monthly → Annual: Immediate change with proration
+        const updatedSubscription = await stripe.subscriptions.update(
+          currentSubscription.stripeSubscriptionId!,
+          {
+            items: [{
+              id: stripeSubscription.items.data[0].id,
+              price: newPriceId,
+            }],
+            proration_behavior: 'create_prorations', // Credit unused monthly portion
+          }
+        );
+
+        await db
+          .update(saasSubscriptions)
+          .set({
+            billingCycle: newBillingCycle,
+            stripePriceId: newPriceId,
+            currentPeriodStart: new Date(updatedSubscription.current_period_start * 1000),
+            currentPeriodEnd: new Date(updatedSubscription.current_period_end * 1000),
+            updatedAt: new Date(),
+          })
+          .where(eq(saasSubscriptions.id, subscriptionId));
+
+        // Log subscription history
+        await logSubscriptionHistory({
+          organizationId,
+          subscriptionId,
+          action: "change_cycle",
+          performedBy: req.user?.id,
+          performedByType: "org_admin",
+          oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual",
+          newBillingCycle: newBillingCycle as "monthly" | "annual",
+          details: {
+            effectiveImmediately: true,
+            prorationAmount: updatedSubscription.latest_invoice?.amount_due ? updatedSubscription.latest_invoice.amount_due / 100 : undefined,
+            stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+          },
+          ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+          userAgent: req.headers["user-agent"] || undefined,
+        });
+
+        res.json({
+          success: true,
+          message: "Billing cycle changed to annual. Unused monthly credit applied.",
+          effectiveImmediately: true,
+        });
+      } else {
+        // Annual → Monthly: Change at next renewal
+        const updatedSubscription = await stripe.subscriptions.update(
+          currentSubscription.stripeSubscriptionId!,
+          {
+            items: [{
+              id: stripeSubscription.items.data[0].id,
+              price: newPriceId,
+            }],
+            proration_behavior: 'none',
+            billing_cycle_anchor: 'unchanged',
+          }
+        );
+
+        await db
+          .update(saasSubscriptions)
+          .set({
+            billingCycle: newBillingCycle,
+            stripePriceId: newPriceId,
+            updatedAt: new Date(),
+          })
+          .where(eq(saasSubscriptions.id, subscriptionId));
+
+        // Log subscription history
+        await logSubscriptionHistory({
+          organizationId,
+          subscriptionId,
+          action: "change_cycle",
+          performedBy: req.user?.id,
+          performedByType: "org_admin",
+          oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual",
+          newBillingCycle: newBillingCycle as "monthly" | "annual",
+          details: {
+            effectiveImmediately: false,
+            effectiveDate: currentSubscription.currentPeriodEnd?.toISOString(),
+            stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+          },
+          ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+          userAgent: req.headers["user-agent"] || undefined,
+        });
+
+        res.json({
+          success: true,
+          message: "Billing cycle will change to monthly at the next renewal date.",
+          effectiveImmediately: false,
+          effectiveDate: currentSubscription.currentPeriodEnd,
+        });
+      }
+    } catch (error: any) {
+      console.error("Change billing cycle error:", error);
+      res.status(500).json({
+        error: "Failed to change billing cycle",
+        message: error.message,
+      });
+    }
+  });
+
+  // ============================================
+  // Stripe Webhook Handler for Subscription Events
+  // ============================================
+  // This endpoint should be configured in Stripe Dashboard:
+  // https://dashboard.stripe.com/webhooks
+  // Webhook URL: https://yourdomain.com/api/saas/webhooks/stripe
+  // Events to subscribe: customer.subscription.created, customer.subscription.updated, 
+  //                      customer.subscription.deleted, invoice.paid, invoice.payment_failed
+  app.post("/api/saas/webhooks/stripe", express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+    const sig = req.headers['stripe-signature'];
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!sig || !webhookSecret) {
+      console.error('⚠️ [WEBHOOK] Missing signature or webhook secret');
+      return res.status(400).send('Missing signature or webhook secret');
+    }
+
+    if (!stripe) {
+      console.error('⚠️ [WEBHOOK] Stripe is not configured');
+      return res.status(500).send('Stripe is not configured');
+    }
+
+    let event: Stripe.Event;
+
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } catch (err: any) {
+      console.error('❌ [WEBHOOK] Signature verification failed:', err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    try {
+      console.log(`📥 [WEBHOOK] Received event: ${event.type}`);
+
+      switch (event.type) {
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated': {
+          const stripeSubscription = event.data.object as Stripe.Subscription;
+          
+          console.log(`🔄 [WEBHOOK] Processing subscription ${stripeSubscription.id} (${event.type})`);
+          
+          // Find organization by customer ID
+          const [org] = await db
+            .select()
+            .from(organizations)
+            .where(eq(organizations.stripeCustomerId, stripeSubscription.customer as string))
+            .limit(1);
+
+          if (!org) {
+            console.warn(`⚠️ [WEBHOOK] Organization not found for customer ${stripeSubscription.customer}`);
+            break;
+          }
+
+          // Update subscription in database
+          await updateSubscriptionFromStripe(stripeSubscription, org.id);
+          console.log(`✅ [WEBHOOK] Updated subscription for organization ${org.id}`);
+          break;
+        }
+
+        case 'customer.subscription.deleted': {
+          const stripeSubscription = event.data.object as Stripe.Subscription;
+          
+          console.log(`🗑️ [WEBHOOK] Subscription deleted: ${stripeSubscription.id}`);
+          
+          const [org] = await db
+            .select()
+            .from(organizations)
+            .where(eq(organizations.stripeCustomerId, stripeSubscription.customer as string))
+            .limit(1);
+
+          if (!org) {
+            console.warn(`⚠️ [WEBHOOK] Organization not found for customer ${stripeSubscription.customer}`);
+            break;
+          }
+
+          // Find Basic plan (free tier)
+          const [basicPlan] = await db
+            .select()
+            .from(saasPackages)
+            .where(eq(saasPackages.name, "Basic"))
+            .limit(1);
+
+          if (basicPlan) {
+            // Update subscription to Basic plan
+            await db
+              .update(saasSubscriptions)
+              .set({
+                packageId: basicPlan.id,
+                status: "cancelled",
+                cancelAtPeriodEnd: false,
+                updatedAt: new Date(),
+              })
+              .where(eq(saasSubscriptions.organizationId, org.id));
+            
+            console.log(`✅ [WEBHOOK] Downgraded organization ${org.id} to Basic plan`);
+          } else {
+            console.warn(`⚠️ [WEBHOOK] Basic plan not found, cannot downgrade organization ${org.id}`);
+          }
+          break;
+        }
+
+        case 'invoice.paid': {
+          const invoice = event.data.object as Stripe.Invoice;
+          
+          console.log(`💰 [WEBHOOK] Invoice paid: ${invoice.id}`);
+          
+          if (invoice.subscription && typeof invoice.subscription === 'string') {
+            // Find subscription by Stripe subscription ID
+            const [subscription] = await db
+              .select()
+              .from(saasSubscriptions)
+              .where(eq(saasSubscriptions.stripeSubscriptionId, invoice.subscription as string))
+              .limit(1);
+
+            if (subscription) {
+              // Update payment status and extend subscription
+              await db
+                .update(saasSubscriptions)
+                .set({
+                  paymentStatus: 'paid',
+                  updatedAt: new Date(),
+                })
+                .where(eq(saasSubscriptions.id, subscription.id));
+
+              // Create payment record
+              await db.insert(saasPayments).values({
+                organizationId: subscription.organizationId,
+                subscriptionId: subscription.id,
+                invoiceNumber: invoice.number || `INV-${Date.now()}`,
+                amount: String((invoice.amount_paid || 0) / 100), // Convert from cents
+                currency: invoice.currency?.toUpperCase() || 'GBP',
+                paymentMethod: 'stripe',
+                paymentStatus: 'completed',
+                paymentDate: new Date(invoice.status_transitions?.paid_at ? invoice.status_transitions.paid_at * 1000 : Date.now()),
+                dueDate: new Date(invoice.due_date ? invoice.due_date * 1000 : Date.now()),
+                periodStart: new Date(invoice.period_start * 1000),
+                periodEnd: new Date(invoice.period_end * 1000),
+                providerTransactionId: invoice.id,
+                metadata: {
+                  stripePaymentIntentId: typeof invoice.payment_intent === 'string' ? invoice.payment_intent : undefined,
+                },
+              });
+
+              console.log(`✅ [WEBHOOK] Updated payment status for subscription ${subscription.id}`);
+            }
+          }
+          break;
+        }
+
+        case 'invoice.payment_failed': {
+          const invoice = event.data.object as Stripe.Invoice;
+          
+          console.log(`❌ [WEBHOOK] Invoice payment failed: ${invoice.id}`);
+          
+          if (invoice.subscription && typeof invoice.subscription === 'string') {
+            // Find subscription by Stripe subscription ID
+            const [subscription] = await db
+              .select()
+              .from(saasSubscriptions)
+              .where(eq(saasSubscriptions.stripeSubscriptionId, invoice.subscription as string))
+              .limit(1);
+
+            if (subscription) {
+              // Mark subscription as past_due
+              await db
+                .update(saasSubscriptions)
+                .set({
+                  paymentStatus: 'failed',
+                  status: 'expired',
+                  updatedAt: new Date(),
+                })
+                .where(eq(saasSubscriptions.id, subscription.id));
+
+              console.log(`⚠️ [WEBHOOK] Marked subscription ${subscription.id} as past_due`);
+              
+              // TODO: Send notification email to organization admin
+              // await emailService.sendPaymentFailedNotification(subscription.organizationId);
+            }
+          }
+          break;
+        }
+
+        default:
+          console.log(`ℹ️ [WEBHOOK] Unhandled event type: ${event.type}`);
+      }
+
+      res.json({ received: true });
+    } catch (error: any) {
+      console.error('❌ [WEBHOOK] Handler error:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -20060,9 +21237,31 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Subscription package not found" });
       }
 
-      const priceId = (req.body.stripePriceId as string) || pkg.stripePriceId;
+      // Get billing cycle from request or default to monthly
+      const billingCycle = (req.body.billingCycle as "monthly" | "annual") || "monthly";
+      
+      // Get Stripe price ID from database - use getStripePriceId helper to get the correct price for billing cycle
+      let priceId: string | null = null;
+      
+      if (req.body.stripePriceId) {
+        // If explicitly provided, use it
+        priceId = req.body.stripePriceId as string;
+      } else {
+        // Get price ID from database based on package and billing cycle
+        try {
+          const { getStripePriceId } = await import("./services/stripe-subscription");
+          priceId = await getStripePriceId(planId, billingCycle);
+        } catch (error: any) {
+          console.error("Error getting Stripe price ID:", error);
+          // Fallback to package's default stripePriceId
+          priceId = pkg.stripePriceId;
+        }
+      }
+      
       if (!priceId) {
-        return res.status(400).json({ error: "Stripe price ID is missing for this package" });
+        return res.status(400).json({ 
+          error: "Stripe price ID is missing for this package. Please configure Stripe prices for this package in the database." 
+        });
       }
 
       const userRecord = await storage.getUser(req.user.id, req.user.organizationId);
@@ -20094,6 +21293,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           packageId: pkg.id.toString(),
           organizationId: organizationId.toString(),
           userId: req.user.id.toString(),
+          billingCycle: billingCycle,
+          isUpgrade: req.body.isUpgrade ? "true" : "false",
+          existingSubscriptionId: req.body.existingSubscriptionId?.toString() || "",
         },
       });
 
@@ -20441,16 +21643,48 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const session = event.data.object as Stripe.Checkout.Session;
         const packageId = Number(session.metadata?.packageId || session.metadata?.planId);
         const organizationId = Number(session.metadata?.organizationId);
+        const isUpgrade = session.metadata?.isUpgrade === "true";
+        const existingSubscriptionId = session.metadata?.existingSubscriptionId 
+          ? Number(session.metadata.existingSubscriptionId) 
+          : null;
+        
         console.log("[STRIPE WEBHOOK] checkout.session.completed", {
           sessionId: session.id,
           organizationId,
           packageId,
+          isUpgrade,
+          existingSubscriptionId,
         });
+        
         if (!packageId || !organizationId || !session.subscription) {
           break;
         }
+        
         const stripeSubscription = await stripe.subscriptions.retrieve(session.subscription.toString());
+        
+        // If this is an upgrade and there's an existing subscription, cancel the old one
+        if (isUpgrade && existingSubscriptionId) {
+          try {
+            const [existingSub] = await db
+              .select()
+              .from(saasSubscriptions)
+              .where(eq(saasSubscriptions.id, existingSubscriptionId))
+              .limit(1);
+            
+            if (existingSub?.stripeSubscriptionId && existingSub.stripeSubscriptionId !== stripeSubscription.id) {
+              // Cancel the old subscription in Stripe
+              await stripe.subscriptions.cancel(existingSub.stripeSubscriptionId);
+              console.log(`✅ [WEBHOOK] Cancelled old subscription ${existingSub.stripeSubscriptionId}`);
+            }
+          } catch (cancelError: any) {
+            console.error("⚠️ [WEBHOOK] Error cancelling old subscription:", cancelError.message);
+            // Continue with new subscription activation even if old one fails to cancel
+          }
+        }
+        
+        // Activate the new/upgraded subscription
         await upsertSubscriptionFromStripe(stripeSubscription, organizationId, packageId);
+        console.log(`✅ [WEBHOOK] Subscription activated for organization ${organizationId}, package ${packageId}`);
         break;
       }
       case "customer.subscription.updated": {

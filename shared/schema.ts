@@ -50,6 +50,9 @@ export const saasSubscriptions = pgTable("saas_subscriptions", {
   organizationId: integer("organization_id").notNull(),
   packageId: integer("package_id").notNull(),
   stripeSubscriptionId: varchar("stripe_subscription_id", { length: 64 }),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 64 }),
+  stripePriceId: varchar("stripe_price_id", { length: 64 }),
+  billingCycle: varchar("billing_cycle", { length: 20 }).notNull().default("monthly"), // monthly, annual
   status: varchar("status", { length: 20 }).notNull().default("active"), // active, trial, expired, cancelled
   paymentStatus: varchar("payment_status", { length: 20 }).notNull().default("trial"), // paid, unpaid, failed, pending, trial
   currentPeriodStart: timestamp("current_period_start").notNull(),
@@ -113,6 +116,35 @@ export const saasSettings = pgTable("saas_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// SaaS Subscription History - Audit trail for subscription changes
+export const saasSubscriptionHistory = pgTable("saas_subscription_history", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  subscriptionId: integer("subscription_id").notNull().references(() => saasSubscriptions.id, { onDelete: "cascade" }),
+  action: varchar("action", { length: 50 }).notNull(), // 'upgrade', 'downgrade', 'cancel', 'renew', 'change_cycle', 'create', 'update'
+  performedBy: integer("performed_by").references(() => users.id), // User who performed the action
+  performedByType: varchar("performed_by_type", { length: 20 }).default("admin"), // 'saas_admin' or 'org_admin'
+  oldPackageId: integer("old_package_id").references(() => saasPackages.id),
+  newPackageId: integer("new_package_id").references(() => saasPackages.id),
+  oldBillingCycle: varchar("old_billing_cycle", { length: 20 }), // 'monthly' or 'annual'
+  newBillingCycle: varchar("new_billing_cycle", { length: 20 }), // 'monthly' or 'annual'
+  oldStatus: varchar("old_status", { length: 20 }), // 'active', 'trial', 'cancelled', etc.
+  newStatus: varchar("new_status", { length: 20 }), // 'active', 'trial', 'cancelled', etc.
+  oldPrice: decimal("old_price", { precision: 10, scale: 2 }),
+  newPrice: decimal("new_price", { precision: 10, scale: 2 }),
+  details: jsonb("details").$type<{
+    prorationAmount?: number;
+    reason?: string;
+    immediate?: boolean;
+    effectiveDate?: string;
+    stripeSubscriptionId?: string;
+    [key: string]: any;
+  }>().default({}),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // SaaS Invoices - Track billing invoices
 export const saasInvoices = pgTable("saas_invoices", {
   id: serial("id").primaryKey(),
@@ -164,6 +196,7 @@ export const organizations = pgTable("organizations", {
   paymentStatus: varchar("payment_status", { length: 20 }).notNull().default("trial"), // trial, paid, unpaid, failed, pending
   stripeAccountId: varchar("stripe_account_id", { length: 255 }),
   stripeStatus: varchar("stripe_status", { length: 20 }).default("active"), // active, disconnected
+  stripeCustomerId: varchar("stripe_customer_id", { length: 64 }), // For platform subscription billing (separate from stripe_account_id)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -3414,6 +3447,9 @@ export type InsertSaaSInvoice = z.infer<typeof insertSaaSInvoiceSchema>;
 
 export type SaaSSettings = typeof saasSettings.$inferSelect;
 export type InsertSaaSSettings = typeof saasSettings.$inferInsert;
+
+export type SaaSSubscriptionHistory = typeof saasSubscriptionHistory.$inferSelect;
+export type InsertSaaSSubscriptionHistory = typeof saasSubscriptionHistory.$inferInsert;
 
 // Muscle Position Types
 export type MusclePosition = typeof musclePositions.$inferSelect;

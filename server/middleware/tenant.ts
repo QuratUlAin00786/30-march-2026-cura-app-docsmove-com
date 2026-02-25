@@ -25,9 +25,18 @@ export async function tenantMiddleware(req: TenantRequest, res: Response, next: 
     // DEBUG: Log all incoming requests
     console.log(`[TENANT-MIDDLEWARE] 🔍 Request: ${req.method} ${req.path} | originalUrl: ${req.originalUrl} | url: ${req.url}`);
     
-    // CRITICAL: Skip tenant middleware for SaaS routes - they use separate authentication
-    if (req.path.startsWith('/saas/')) {
-      console.log(`[TENANT-MIDDLEWARE] ✅ Skipping SaaS route: ${req.path}`);
+    // CRITICAL: Skip tenant middleware for SaaS admin routes - they use separate authentication
+    // BUT: Regular user SaaS billing routes (/api/saas/billing/*) need organizationId, so don't skip them
+    const originalUrl = req.originalUrl || req.url || '';
+    
+    if (req.path.startsWith('/saas/') && !req.path.startsWith('/api/saas/billing/')) {
+      console.log(`[TENANT-MIDDLEWARE] ✅ Skipping SaaS admin route: ${req.path}`);
+      return next();
+    }
+    
+    // Also check originalUrl in case path is stripped
+    if (originalUrl.startsWith('/saas/') && !originalUrl.startsWith('/api/saas/billing/')) {
+      console.log(`[TENANT-MIDDLEWARE] ✅ Skipping SaaS admin route (from originalUrl): ${originalUrl}`);
       return next();
     }
     
@@ -41,7 +50,6 @@ export async function tenantMiddleware(req: TenantRequest, res: Response, next: 
     // Universal login determines organization from user, regular login uses subdomain but handles subscription check
     // Check both /api/auth/... and /auth/... paths (depending on how Express mounts routes)
     const authPath = req.path;
-    const originalUrl = req.originalUrl || req.url || '';
     if (authPath === '/api/auth/universal-login' || authPath === '/auth/universal-login' ||
         authPath === '/api/auth/login' || authPath === '/auth/login' ||
         originalUrl.includes('/auth/universal-login') || originalUrl.includes('/auth/login') ||
@@ -326,11 +334,42 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
     try {
       payload = authService.verifyToken(token);
     } catch (verifyError: any) {
-      console.error(`[AUTH-MIDDLEWARE] Token verification threw:`, verifyError?.message);
-      return res.status(401).json({ error: "Invalid token", details: verifyError?.message });
+      console.error(`[AUTH-MIDDLEWARE] Token verification threw exception:`, {
+        message: verifyError?.message,
+        name: verifyError?.name,
+        path: req.path,
+        tokenPreview: token ? `${token.substring(0, 20)}...` : 'missing',
+        stack: verifyError?.stack,
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = "Invalid token";
+      if (verifyError?.name === 'TokenExpiredError') {
+        errorMessage = "Token has expired. Please log in again.";
+      } else if (verifyError?.name === 'JsonWebTokenError') {
+        errorMessage = "Invalid token format or secret mismatch. Please log in again.";
+      } else if (verifyError?.message) {
+        errorMessage = verifyError.message;
+      }
+      
+      return res.status(401).json({ 
+        error: "Invalid token", 
+        details: errorMessage,
+        code: verifyError?.name || 'TOKEN_ERROR'
+      });
     }
     if (!payload) {
-      return res.status(401).json({ error: "Invalid token" });
+      console.error(`[AUTH-MIDDLEWARE] Token verification returned null payload for path: ${req.path}`, {
+        tokenExists: !!token,
+        tokenLength: token?.length,
+        tokenPreview: token ? `${token.substring(0, 30)}...` : 'missing',
+        jwtSecretConfigured: !!process.env.JWT_SECRET,
+      });
+      return res.status(401).json({ 
+        error: "Invalid token",
+        details: "Token verification failed. This may be due to: 1) Token expired, 2) Invalid token format, 3) JWT_SECRET mismatch. Please log in again.",
+        code: 'TOKEN_VERIFICATION_FAILED'
+      });
     }
 
     // Ensure user belongs to the current tenant
@@ -376,7 +415,8 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
       console.error(`[AUTH-MIDDLEWARE] Database error stack:`, dbError?.stack);
       // Don't send response if already sent
       if (!res.headersSent) {
-        return res.status(500).json({ error: "Authentication required", details: dbError?.message ?? "Database error" });
+        // Return 401 for authentication errors, not 500
+        return res.status(401).json({ error: "Authentication required", details: dbError?.message ?? "Failed to verify user" });
       }
     }
   } catch (error: any) {
@@ -385,7 +425,13 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
     console.error("[AUTH-MIDDLEWARE] Error message:", error?.message);
     // Don't send response if already sent
     if (!res.headersSent) {
-      res.status(500).json({ error: "Authentication required", details: error?.message });
+      // Return 401 for authentication errors, not 500
+      // Only return 500 for unexpected errors that aren't authentication-related
+      if (error?.message?.includes('token') || error?.message?.includes('jwt') || error?.message?.includes('authentication')) {
+        res.status(401).json({ error: "Authentication required", details: error?.message });
+      } else {
+        res.status(500).json({ error: "Internal server error", details: error?.message });
+      }
     }
   }
 }

@@ -136,13 +136,17 @@ export interface Appointment {
 }
 
 export interface Subscription {
+  billingCycle?: 'monthly' | 'annual';
+  currentPeriodEnd?: string | Date | null;
   id: number;
-  plan: "starter" | "professional" | "enterprise" | "pro";
+  packageId?: number;
+  plan: "starter" | "professional" | "enterprise" | "pro" | string;
   planName?: string;
   status: "trial" | "active" | "suspended" | "cancelled" | "expired";
   paymentStatus?: "trial" | "paid" | "unpaid" | "failed" | "pending";
   userLimit: number;
   currentUsers: number;
+  currentPatients?: number;
   monthlyPrice?: number;
   trialEndsAt?: string;
   nextBillingAt?: string;
@@ -154,6 +158,10 @@ export interface Subscription {
     advancedReporting?: boolean;
     apiAccess?: boolean;
     whiteLabel?: boolean;
+    maxUsers?: number;
+    maxPatients?: number;
+    storageGB?: number;
+    [key: string]: any;
   };
   createdAt: string;
   updatedAt: string;

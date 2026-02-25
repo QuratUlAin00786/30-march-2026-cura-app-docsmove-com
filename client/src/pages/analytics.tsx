@@ -1089,52 +1089,68 @@ export default function AnalyticsPage() {
                 <CardTitle>AI Insights by Severity</CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={Object.entries(analyticsData?.clinicalAnalytics?.aiInsights?.severityDistribution || {}).map(([severity, count]) => ({
-                    severity: severity.charAt(0).toUpperCase() + severity.slice(1),
-                    count: count as number
-                  }))}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="severity" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="#8b5cf6" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <style dangerouslySetInnerHTML={{__html: `
+                  .ai-insights-chart text {
+                    fill: #6b7280;
+                  }
+                  .dark .ai-insights-chart text {
+                    fill: #d1d5db;
+                  }
+                  .ai-insights-chart line {
+                    stroke: #e5e7eb;
+                  }
+                  .dark .ai-insights-chart line {
+                    stroke: #374151;
+                  }
+                `}} />
+                <div className="ai-insights-chart">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={Object.entries(analyticsData?.clinicalAnalytics?.aiInsights?.severityDistribution || {}).map(([severity, count]) => ({
+                      severity: severity.charAt(0).toUpperCase() + severity.slice(1),
+                      count: count as number
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="severity" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#8b5cf6" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </CardContent>
             </Card>
 
             {/* Recent Clinical Activity */}
             <Card>
               <CardHeader>
-                <CardTitle>Recent Activity (7 Days)</CardTitle>
+                <CardTitle className="dark:text-white">Recent Activity (7 Days)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                  <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                     <div className="flex items-center">
-                      <Users className="h-5 w-5 text-blue-600 mr-2" />
-                      <span className="font-medium">Consultations</span>
+                      <Users className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
+                      <span className="font-medium dark:text-gray-200">Consultations</span>
                     </div>
-                    <span className="text-2xl font-bold text-blue-600">
+                    <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                       {analyticsData?.clinicalAnalytics?.recentActivity?.consultations || 0}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                  <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
                     <div className="flex items-center">
-                      <Activity className="h-5 w-5 text-green-600 mr-2" />
-                      <span className="font-medium">Prescriptions</span>
+                      <Activity className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
+                      <span className="font-medium dark:text-gray-200">Prescriptions</span>
                     </div>
-                    <span className="text-2xl font-bold text-green-600">
+                    <span className="text-2xl font-bold text-green-600 dark:text-green-400">
                       {analyticsData?.clinicalAnalytics?.recentActivity?.prescriptions || 0}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-purple-50 rounded-lg">
+                  <div className="flex items-center justify-between p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
                     <div className="flex items-center">
-                      <AlertTriangle className="h-5 w-5 text-purple-600 mr-2" />
-                      <span className="font-medium">AI Insights</span>
+                      <AlertTriangle className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
+                      <span className="font-medium dark:text-gray-200">AI Insights</span>
                     </div>
-                    <span className="text-2xl font-bold text-purple-600">
+                    <span className="text-2xl font-bold text-purple-600 dark:text-purple-400">
                       {analyticsData?.clinicalAnalytics?.recentActivity?.insights || 0}
                     </span>
                   </div>

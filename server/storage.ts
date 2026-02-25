@@ -2048,6 +2048,7 @@ export class DatabaseStorage implements IStorage {
         .select({
           id: saasSubscriptions.id,
           organizationId: saasSubscriptions.organizationId,
+          packageId: saasSubscriptions.packageId,
           plan: saasPackages.name,
           planName: saasPackages.name,
           status: saasSubscriptions.status,
@@ -2072,21 +2073,41 @@ export class DatabaseStorage implements IStorage {
       
       if (!subscription) return undefined;
       
-      // Count actual users in the organization (excluding SaaS owners)
+      // Count actual active users in the organization (excluding SaaS owners, inactive users, and patient role)
       const userCountResult = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(users)
         .where(and(
           eq(users.organizationId, organizationId),
-          eq(users.isSaaSOwner, false)
+          eq(users.isSaaSOwner, false),
+          eq(users.isActive, true),
+          ne(users.role, 'patient') // Exclude patient role - patients are counted separately
         ));
       
       const actualUserCount = userCountResult[0]?.count || 0;
+      
+      // Count actual active patients in the organization
+      const patientCountResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(patients)
+        .where(and(
+          eq(patients.organizationId, organizationId),
+          eq(patients.isActive, true)
+        ));
+      
+      const actualPatientCount = patientCountResult[0]?.count || 0;
+      
+      // Get package features to extract maxUsers and maxPatients
+      const packageFeatures = subscription.features as any || {};
+      const maxUsers = packageFeatures.maxUsers || 0;
+      const maxPatients = packageFeatures.maxPatients || 0;
       
       // Transform data to match frontend type expectations
       return {
         ...subscription,
         currentUsers: actualUserCount,
+        currentPatients: actualPatientCount,
+        userLimit: maxUsers, // Use maxUsers from package features instead of saasSubscriptions.maxUsers
         monthlyPrice: subscription.monthlyPrice ? String(subscription.monthlyPrice) : null,
         features: subscription.features || {
           aiInsights: true,

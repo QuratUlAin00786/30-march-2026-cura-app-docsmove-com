@@ -729,6 +729,7 @@ export default function PrescriptionsPage() {
   const [showPdfViewerDialog, setShowPdfViewerDialog] = useState(false);
   const [pdfViewerUrl, setPdfViewerUrl] = useState<string>("");
   const [selectedPdfPrescription, setSelectedPdfPrescription] = useState<any>(null);
+  const [pdfLoadError, setPdfLoadError] = useState(false);
   const [showShareLogDialog, setShowShareLogDialog] = useState(false);
   const [selectedPrescriptionForShareLog, setSelectedPrescriptionForShareLog] = useState<any>(null);
   const [shareLogs, setShareLogs] = useState<any[]>([]);
@@ -2448,9 +2449,18 @@ export default function PrescriptionsPage() {
     }
   }, [showESignDialog]);
 
-  // Load signature when dialog opens
+  // Load signature when dialog opens and initialize canvas for theme
   useEffect(() => {
-    if (showESignDialog && selectedPrescription) {
+    if (showESignDialog && selectedPrescription && canvasRef.current) {
+      // Initialize canvas context with correct stroke color for current theme
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        // Set stroke color based on theme
+        ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+        ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+      }
+      
       // Small delay to ensure canvas is rendered
       setTimeout(() => {
         loadSignatureFromDatabase();
@@ -3592,7 +3602,22 @@ export default function PrescriptionsPage() {
         }
 
         const blob = await response.blob();
+        
+        // Verify it's a PDF (check blob type or size)
+        if (blob.size === 0) {
+          console.error("[CLIENT] PDF blob is empty");
+          toast({
+            title: "Invalid PDF",
+            description: "The PDF file appears to be empty or corrupted.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
         const blobUrl = window.URL.createObjectURL(blob);
+        
+        // Reset error state
+        setPdfLoadError(false);
         
         // Set PDF URL and show viewer dialog
         setSelectedPdfPrescription(prescription);
@@ -6223,18 +6248,27 @@ export default function PrescriptionsPage() {
                       </Button>
                     )}
                     {user?.role !== "patient" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 flex-shrink-0"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePrintPrescription(prescription.id || prescription.prescriptionNumber);
-                        }}
-                        title="Print"
-                      >
-                        <Printer className="h-3.5 w-3.5" />
-                      </Button>
+                      prescription.savedPdfPath ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 flex-shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePrintPrescription(prescription.id || prescription.prescriptionNumber);
+                          }}
+                          title="Print"
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : (
+                        <span
+                          className="inline-flex h-6 w-6 items-center justify-center flex-shrink-0 cursor-not-allowed opacity-60"
+                          title="No saved PDF file - cannot print"
+                        >
+                          <Printer className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
+                        </span>
+                      )
                     )}
                     {prescription.savedPdfPath ? (
                       <Button
@@ -6269,43 +6303,61 @@ export default function PrescriptionsPage() {
                       >
                         <PenTool className="h-3.5 w-3.5" />
                       </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                        className="h-6 w-6 p-0 flex-shrink-0"
-                          onClick={() => handleSendToPharmacy(prescription.id)}
-                          title="Share/Send to Pharmacy"
-                        >
-                        <Share2 className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                        className="h-6 w-6 p-0 flex-shrink-0"
-                          onClick={async () => {
-                            setSelectedPrescriptionForShareLog(prescription);
-                            // Fetch share logs for this prescription
-                            try {
-                              const response = await apiRequest(
-                                "GET",
-                                `/api/prescriptions/${prescription.id}/share-logs`
-                              );
-                              if (response.ok) {
-                                const data = await response.json();
-                                setShareLogs(data.shareLogs || []);
-                              } else {
+                        {prescription.savedPdfPath ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 flex-shrink-0"
+                            onClick={() => handleSendToPharmacy(prescription.id)}
+                            title="Share/Send to Pharmacy"
+                          >
+                            <Share2 className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : (
+                          <span
+                            className="inline-flex h-6 w-6 items-center justify-center flex-shrink-0 cursor-not-allowed opacity-60"
+                            title="No saved PDF file - cannot share"
+                          >
+                            <Share2 className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
+                          </span>
+                        )}
+                        {prescription.savedPdfPath ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 flex-shrink-0"
+                            onClick={async () => {
+                              setSelectedPrescriptionForShareLog(prescription);
+                              // Fetch share logs for this prescription
+                              try {
+                                const response = await apiRequest(
+                                  "GET",
+                                  `/api/prescriptions/${prescription.id}/share-logs`
+                                );
+                                if (response.ok) {
+                                  const data = await response.json();
+                                  setShareLogs(data.shareLogs || []);
+                                } else {
+                                  setShareLogs([]);
+                                }
+                              } catch (error) {
+                                console.error("Error fetching share logs:", error);
                                 setShareLogs([]);
                               }
-                            } catch (error) {
-                              console.error("Error fetching share logs:", error);
-                              setShareLogs([]);
-                            }
-                            setShowShareLogDialog(true);
-                          }}
-                          title="View Share History"
-                        >
-                          <History className="h-3.5 w-3.5" />
-                        </Button>
+                              setShowShareLogDialog(true);
+                            }}
+                            title="View Share History"
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : (
+                          <span
+                            className="inline-flex h-6 w-6 items-center justify-center flex-shrink-0 cursor-not-allowed opacity-60"
+                            title="No saved PDF file - no share history"
+                          >
+                            <History className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
+                          </span>
+                        )}
                     </div>
                   )}
                   <div className="flex items-center justify-center px-1">
@@ -8028,7 +8080,7 @@ export default function PrescriptionsPage() {
       <Dialog open={showPharmacyDialog} onOpenChange={setShowPharmacyDialog}>
         <DialogContent className="max-w-md max-h-[650px] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
-            <DialogTitle>Send Prescription to Halo Health Pharmacy</DialogTitle>
+            <DialogTitle className="dark:text-white">Send Prescription to Halo Health Pharmacy</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -8448,14 +8500,14 @@ export default function PrescriptionsPage() {
       <Dialog open={showPharmacyDialog} onOpenChange={setShowPharmacyDialog}>
         <DialogContent className="max-w-md max-h-[650px] overflow-y-auto overflow-x-hidden dark:bg-slate-800 dark:border-gray-700">
           <DialogHeader>
-            <DialogTitle>Send Prescription to Halo Health Pharmacy</DialogTitle>
+            <DialogTitle className="dark:text-white">Send Prescription to Halo Health Pharmacy</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 min-w-0">
             <div className="bg-blue-50 dark:bg-slate-700/50 p-4 rounded-lg border border-blue-200 dark:border-slate-600">
-              <h4 className="font-semibold text-blue-900 mb-2">
+              <h4 className="font-semibold text-blue-900 dark:text-white mb-2">
                 Halo Health Pharmacy
               </h4>
-              <div className="text-sm text-blue-800 space-y-1">
+              <div className="text-sm text-blue-800 dark:text-gray-200 space-y-1">
                 <p>Unit 2 Drayton Court</p>
                 <p>Solihull</p>
                 <p>B90 4NG</p>
@@ -8465,7 +8517,48 @@ export default function PrescriptionsPage() {
             </div>
 
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
+              {/* Prescription Attachment Status */}
+              {(() => {
+                const prescription = prescriptions?.find(
+                  (p) => p.id === selectedPrescriptionId,
+                );
+                const isAttached = prescription?.savedPdfPath ? true : false;
+                const prescriptionName = prescription?.prescriptionNumber || prescription?.id || "Unknown";
+                
+                return (
+                  <div className="bg-gray-50 dark:bg-slate-700/50 p-3 rounded-lg border border-gray-200 dark:border-slate-600">
+                    <div className="flex items-center gap-2">
+                      {isAttached ? (
+                        <>
+                          <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              Prescription Attached
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                              {prescriptionName}
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <X className="h-5 w-5 text-gray-400 dark:text-gray-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Prescription Not Attached
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                              {prescriptionName} - PDF will be generated automatically
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <p className="text-sm text-gray-600 dark:text-gray-300">
                 This prescription will be sent as a PDF to the pharmacy via
                 email for processing.
               </p>
@@ -9732,6 +9825,7 @@ export default function PrescriptionsPage() {
             URL.revokeObjectURL(pdfViewerUrl);
             setPdfViewerUrl("");
             setSelectedPdfPrescription(null);
+            setPdfLoadError(false);
           }
         }}
       >
@@ -9749,12 +9843,53 @@ export default function PrescriptionsPage() {
           </DialogHeader>
           <div className="flex-1 overflow-hidden px-6 pb-4" style={{ minHeight: '600px', height: 'calc(90vh - 120px)' }}>
             {pdfViewerUrl ? (
-              <iframe
-                src={pdfViewerUrl}
-                className="w-full h-full border rounded"
-                title="Prescription PDF"
-                style={{ minHeight: '600px' }}
-              />
+              pdfLoadError ? (
+                <div className="flex flex-col items-center justify-center h-full space-y-4">
+                  <div className="text-red-500">
+                    <FileText className="h-16 w-16" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                      Failed to load PDF
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                      The PDF could not be displayed. You can try downloading it instead.
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const link = document.createElement('a');
+                        link.href = pdfViewerUrl;
+                        link.download = `${selectedPdfPrescription?.prescriptionNumber || selectedPdfPrescription?.id || 'prescription'}.pdf`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Download PDF
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <iframe
+                  src={`${pdfViewerUrl}#toolbar=1&navpanes=1&scrollbar=1`}
+                  className="w-full h-full border rounded"
+                  title="Prescription PDF"
+                  style={{ minHeight: '600px' }}
+                  onError={() => {
+                    console.error("[CLIENT] Iframe failed to load PDF");
+                    setPdfLoadError(true);
+                  }}
+                  onLoad={() => {
+                    // Set a timeout to check if PDF loaded successfully
+                    setTimeout(() => {
+                      // If we still don't have an error after 3 seconds, assume it loaded
+                      // This is a fallback since we can't reliably detect iframe errors due to CORS
+                    }, 3000);
+                  }}
+                />
+              )
             ) : (
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
