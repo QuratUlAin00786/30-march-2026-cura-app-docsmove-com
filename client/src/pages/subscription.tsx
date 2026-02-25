@@ -8,11 +8,12 @@ import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Crown, Users, Calendar, Zap, Check, X, Package, Heart, Brain, Shield, Stethoscope, Phone, FileText, Activity, Pill, UserCheck, TrendingUp, Download, CreditCard, Printer, AlertTriangle, User } from "lucide-react";
+import { Crown, Users, Calendar, Zap, Check, X, Package, Heart, Brain, Shield, Stethoscope, Phone, FileText, Activity, Pill, UserCheck, TrendingUp, Download, CreditCard, Printer, AlertTriangle, User, Trash2 } from "lucide-react";
 import { PaymentMethodDialog } from "@/components/payment-method-dialog";
 import { getTenantSubdomain, queryClient, apiRequest } from "@/lib/queryClient";
 import InvoiceTemplate from "@/pages/saas/components/InvoiceTemplate";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/hooks/use-theme";
 import type { Subscription } from "@/types";
 import type { SaaSPackage } from "@shared/schema";
 
@@ -197,6 +198,7 @@ function safeSessionLabel(val: unknown): string {
 
 export default function Subscription() {
   const { toast } = useToast();
+  const { theme } = useTheme();
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showCurrentPlanDialog, setShowCurrentPlanDialog] = useState(false);
@@ -224,6 +226,195 @@ export default function Subscription() {
   const [requiredDeletions, setRequiredDeletions] = useState<{ users: number; patients: number } | null>(null);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showChangeCycleDialog, setShowChangeCycleDialog] = useState(false);
+
+  // Signature box state
+  const [showSignatureDialog, setShowSignatureDialog] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [signature, setSignature] = useState<string>("");
+  const [lastPosition, setLastPosition] = useState<{ x: number; y: number } | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const isSignatureDarkTheme = () => theme === "dark";
+
+  // Signature Canvas Drawing Functions
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    setIsDrawing(true);
+    setLastPosition({ x, y });
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const stopDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current || !isDrawing) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+
+    const moved =
+      lastPosition &&
+      (Math.abs(currentX - lastPosition.x) > 2 ||
+        Math.abs(currentY - lastPosition.y) > 2);
+
+    if (!moved && lastPosition) {
+      ctx.lineWidth = 2;
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+      ctx.beginPath();
+      ctx.arc(lastPosition.x, lastPosition.y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    setIsDrawing(false);
+    setLastPosition(null);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+
+    setLastPosition({ x, y });
+  };
+
+  const startDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
+    setIsDrawing(true);
+    setLastPosition({ x, y });
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const stopDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current || !isDrawing) return;
+    e.preventDefault();
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.changedTouches[0];
+    const currentX = touch.clientX - rect.left;
+    const currentY = touch.clientY - rect.top;
+
+    const moved =
+      lastPosition &&
+      (Math.abs(currentX - lastPosition.x) > 2 ||
+        Math.abs(currentY - lastPosition.y) > 2);
+
+    if (!moved && lastPosition) {
+      ctx.lineWidth = 2;
+      ctx.fillStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+      ctx.beginPath();
+      ctx.arc(lastPosition.x, lastPosition.y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    setIsDrawing(false);
+    setLastPosition(null);
+  };
+
+  const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !canvasRef.current) return;
+    e.preventDefault();
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = isSignatureDarkTheme() ? "#ffffff" : "#000000";
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+
+    setLastPosition({ x, y });
+  };
+
+  const clearSignature = () => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Clear canvas and set background based on theme
+    const isDark = isSignatureDarkTheme();
+    ctx.fillStyle = isDark ? "#1a1a1a" : "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Reset stroke color
+    ctx.strokeStyle = isDark ? "#ffffff" : "#000000";
+    ctx.fillStyle = isDark ? "#ffffff" : "#000000";
+    
+    setSignature("");
+  };
+
+  // Initialize canvas with theme-aware colors
+  useEffect(() => {
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      // Set canvas background based on theme
+      const isDark = isSignatureDarkTheme();
+      const backgroundColor = isDark ? "#1a1a1a" : "#ffffff";
+      ctx.fillStyle = backgroundColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Set stroke color based on theme
+      ctx.strokeStyle = isDark ? "#ffffff" : "#000000";
+      ctx.fillStyle = isDark ? "#ffffff" : "#000000";
+    }
+  }, [theme, showSignatureDialog]);
 
   const handleStripeCheckout = async (plan: any) => {
     if (!plan.stripePriceId) {
@@ -2173,7 +2364,7 @@ export default function Subscription() {
                       `);
                       printWindow.document.close();
                       setTimeout(() => {
-                        printWindow.print();
+                      printWindow.print();
                       }, 250);
                     }
                   }
@@ -2374,6 +2565,82 @@ export default function Subscription() {
                 disabled={changeCycleLoading}
               >
                 {changeCycleLoading ? "Processing..." : `Switch to ${subscription?.billingCycle === 'annual' ? 'Monthly' : 'Annual'}`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Signature Box Dialog */}
+      <Dialog open={showSignatureDialog} onOpenChange={setShowSignatureDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              Digital Signature
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Digital Signature Pad
+                </label>
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  Signature Quality: Real-time Analysis
+                </div>
+              </div>
+
+              <div className="border-2 border-gray-300 dark:border-gray-600 rounded-lg relative overflow-hidden bg-white dark:bg-gray-900 shadow-inner">
+                <canvas
+                  ref={canvasRef}
+                  width={450}
+                  height={200}
+                  className="cursor-crosshair w-full"
+                  onMouseDown={startDrawing}
+                  onMouseMove={draw}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                  onTouchStart={startDrawingTouch}
+                  onTouchMove={drawTouch}
+                  onTouchEnd={stopDrawingTouch}
+                />
+                <div className="absolute top-2 right-2 text-xs text-gray-400 dark:text-gray-500">
+                  Advanced Capture Mode
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={clearSignature}
+                  className="flex-1"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Clear
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <Button variant="outline" onClick={() => setShowSignatureDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (canvasRef.current) {
+                    const canvas = canvasRef.current;
+                    const signatureData = canvas.toDataURL();
+                    setSignature(signatureData);
+                    toast({
+                      title: "Signature Saved",
+                      description: "Your signature has been captured successfully.",
+                    });
+                    setShowSignatureDialog(false);
+                  }
+                }}
+              >
+                Save Signature
               </Button>
             </div>
           </div>

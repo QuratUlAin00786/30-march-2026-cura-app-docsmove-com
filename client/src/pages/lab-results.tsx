@@ -4978,39 +4978,39 @@ Report generated from Cura EMR System`;
             </div>
           </div>
           <div className="flex gap-2 pt-4 border-t mt-4 shrink-0">
-            <Button
-              variant="outline"
-              onClick={() => setShowOrderDialog(false)}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                createLabOrderMutation.mutate({
-                  patientId: parseInt(orderFormData.patientId),
-                  testType: orderFormData.testType.join(" | "),
-                  priority: orderFormData.priority,
-                  notes: orderFormData.notes,
-                  selectedUserId: orderFormData.selectedUserId
-                    ? parseInt(orderFormData.selectedUserId)
-                    : null,
-                  selectedUserName: orderFormData.selectedUserName,
-                  orderedBy: user?.id,
-                });
-              }}
-              disabled={
-                createLabOrderMutation.isPending ||
-                !orderFormData.patientId ||
-                orderFormData.testType.length === 0 ||
-                (user?.role !== "patient" && !orderFormData.selectedUserId)
-              }
-              className="flex-1 bg-medical-blue hover:bg-blue-700"
-            >
-              {createLabOrderMutation.isPending
-                ? "Ordering..."
-                : "Order Test"}
-            </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowOrderDialog(false)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  createLabOrderMutation.mutate({
+                    patientId: parseInt(orderFormData.patientId),
+                    testType: orderFormData.testType.join(" | "),
+                    priority: orderFormData.priority,
+                    notes: orderFormData.notes,
+                    selectedUserId: orderFormData.selectedUserId
+                      ? parseInt(orderFormData.selectedUserId)
+                      : null,
+                    selectedUserName: orderFormData.selectedUserName,
+                    orderedBy: user?.id,
+                  });
+                }}
+                disabled={
+                  createLabOrderMutation.isPending ||
+                  !orderFormData.patientId ||
+                  orderFormData.testType.length === 0 ||
+                  (user?.role !== "patient" && !orderFormData.selectedUserId)
+                }
+                className="flex-1 bg-medical-blue hover:bg-blue-700"
+              >
+                {createLabOrderMutation.isPending
+                  ? "Ordering..."
+                  : "Order Test"}
+              </Button>
           </div>
         </DialogContent>
       </Dialog>

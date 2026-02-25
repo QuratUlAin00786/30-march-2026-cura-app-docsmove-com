@@ -87,6 +87,7 @@ import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { useLocation } from "wouter";
 import { isDoctorLike, formatRoleLabel } from "@/lib/role-utils";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/hooks/use-theme";
 
 const formatTimestampFromSystem = (timestamp?: string | null) => {
   if (!timestamp) return "N/A";
@@ -534,6 +535,7 @@ const COMMON_DOSAGES = [
 
 export default function PrescriptionsPage() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const { canCreate, canEdit, canDelete } = useRolePermissions();
   const [, setLocation] = useLocation();
   const [searchInput, setSearchInput] = useState("");
@@ -739,8 +741,7 @@ export default function PrescriptionsPage() {
   } | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
-  const isSignatureDarkTheme = () =>
-    typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const isSignatureDarkTheme = () => theme === "dark";
 
   /** When dark theme, user draws in white; convert to black-on-white for PDF/save. */
   const getSignatureDataForPdf = (canvas: HTMLCanvasElement): string => {
@@ -2454,7 +2455,7 @@ export default function PrescriptionsPage() {
       ctx.strokeStyle = isDark ? "#ffffff" : "#000000";
       ctx.fillStyle = isDark ? "#ffffff" : "#000000";
     }
-  }, [showESignDialog]);
+  }, [showESignDialog, theme]);
 
   // Load signature when dialog opens and initialize canvas for theme
   useEffect(() => {
@@ -2476,7 +2477,81 @@ export default function PrescriptionsPage() {
       // Clear signature when dialog closes
       clearSignature();
     }
-  }, [showESignDialog, selectedPrescription?.id]);
+  }, [showESignDialog, selectedPrescription?.id, theme]);
+
+  // Watch for theme changes and update canvas background and stroke color dynamically
+  useEffect(() => {
+    if (!showESignDialog || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Function to update canvas background and stroke color based on current theme
+    const updateCanvasForTheme = () => {
+      const isDark = isSignatureDarkTheme();
+      const newBackgroundColor = isDark ? "#1a1a1a" : "#ffffff";
+      const oldBackgroundColor = isDark ? "#ffffff" : "#1a1a1a"; // Opposite of current
+      const strokeColor = isDark ? "#ffffff" : "#000000";
+      
+      // Get current canvas image data
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // Create a new image data with the new background
+      const newImageData = ctx.createImageData(canvas.width, canvas.height);
+      const newData = newImageData.data;
+      
+      // Convert old background color to RGB
+      const oldBgR = parseInt(oldBackgroundColor.slice(1, 3), 16);
+      const oldBgG = parseInt(oldBackgroundColor.slice(3, 5), 16);
+      const oldBgB = parseInt(oldBackgroundColor.slice(5, 7), 16);
+      
+      // Convert new background color to RGB
+      const newBgR = parseInt(newBackgroundColor.slice(1, 3), 16);
+      const newBgG = parseInt(newBackgroundColor.slice(3, 5), 16);
+      const newBgB = parseInt(newBackgroundColor.slice(5, 7), 16);
+      
+      // Process each pixel: if it's the old background, use new background; otherwise keep the pixel
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+        
+        // Check if pixel matches old background (with tolerance for anti-aliasing)
+        const isOldBackground = 
+          Math.abs(r - oldBgR) < 10 &&
+          Math.abs(g - oldBgG) < 10 &&
+          Math.abs(b - oldBgB) < 10;
+        
+        if (isOldBackground) {
+          // Use new background color
+          newData[i] = newBgR;
+          newData[i + 1] = newBgG;
+          newData[i + 2] = newBgB;
+          newData[i + 3] = 255;
+        } else {
+          // Keep existing pixel (signature stroke)
+          newData[i] = r;
+          newData[i + 1] = g;
+          newData[i + 2] = b;
+          newData[i + 3] = a;
+        }
+      }
+      
+      // Clear canvas and draw new image data
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.putImageData(newImageData, 0, 0);
+      
+      // Update stroke color for future drawing
+      ctx.strokeStyle = strokeColor;
+      ctx.fillStyle = strokeColor;
+    };
+
+    // Update canvas when theme changes
+    updateCanvasForTheme();
+  }, [showESignDialog, theme]);
 
   const saveSignature = async () => {
     // Hide tabs immediately when Apply Advanced E-Signature is clicked (for nurse/admin/doctor roles)
@@ -5171,13 +5246,14 @@ export default function PrescriptionsPage() {
                           {prescription.signature &&
                           prescription.signature.doctorSignature ? (
                             <div className="mt-2">
-                              <div className="h-12 w-32 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded flex items-center justify-center overflow-hidden">
+                              <div className="h-12 w-32 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded overflow-hidden p-0">
                                 <img
                                   src={prescription.signature.doctorSignature}
                                   alt="Doctor Signature"
                                   className="h-full w-full object-contain object-left"
                                   style={{
-                                    filter: isSignatureDarkTheme() ? 'invert(1)' : 'none'
+                                    filter: isSignatureDarkTheme() ? 'invert(1)' : 'none',
+                                    display: 'block'
                                   }}
                                 />
                               </div>
@@ -6256,18 +6332,18 @@ export default function PrescriptionsPage() {
                     )}
                     {user?.role !== "patient" && (
                       prescription.savedPdfPath ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 flex-shrink-0"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePrintPrescription(prescription.id || prescription.prescriptionNumber);
-                          }}
-                          title="Print"
-                        >
-                          <Printer className="h-3.5 w-3.5" />
-                        </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePrintPrescription(prescription.id || prescription.prescriptionNumber);
+                        }}
+                        title="Print"
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                      </Button>
                       ) : (
                         <span
                           className="inline-flex h-6 w-6 items-center justify-center flex-shrink-0 cursor-not-allowed opacity-60"
@@ -6311,15 +6387,15 @@ export default function PrescriptionsPage() {
                         <PenTool className="h-3.5 w-3.5" />
                       </Button>
                         {prescription.savedPdfPath ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 flex-shrink-0"
-                            onClick={() => handleSendToPharmacy(prescription.id)}
-                            title="Share/Send to Pharmacy"
-                          >
-                            <Share2 className="h-3.5 w-3.5" />
-                          </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                          onClick={() => handleSendToPharmacy(prescription.id)}
+                          title="Share/Send to Pharmacy"
+                        >
+                        <Share2 className="h-3.5 w-3.5" />
+                        </Button>
                         ) : (
                           <span
                             className="inline-flex h-6 w-6 items-center justify-center flex-shrink-0 cursor-not-allowed opacity-60"
@@ -6329,34 +6405,34 @@ export default function PrescriptionsPage() {
                           </span>
                         )}
                         {prescription.savedPdfPath ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 flex-shrink-0"
-                            onClick={async () => {
-                              setSelectedPrescriptionForShareLog(prescription);
-                              // Fetch share logs for this prescription
-                              try {
-                                const response = await apiRequest(
-                                  "GET",
-                                  `/api/prescriptions/${prescription.id}/share-logs`
-                                );
-                                if (response.ok) {
-                                  const data = await response.json();
-                                  setShareLogs(data.shareLogs || []);
-                                } else {
-                                  setShareLogs([]);
-                                }
-                              } catch (error) {
-                                console.error("Error fetching share logs:", error);
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                        className="h-6 w-6 p-0 flex-shrink-0"
+                          onClick={async () => {
+                            setSelectedPrescriptionForShareLog(prescription);
+                            // Fetch share logs for this prescription
+                            try {
+                              const response = await apiRequest(
+                                "GET",
+                                `/api/prescriptions/${prescription.id}/share-logs`
+                              );
+                              if (response.ok) {
+                                const data = await response.json();
+                                setShareLogs(data.shareLogs || []);
+                              } else {
                                 setShareLogs([]);
                               }
-                              setShowShareLogDialog(true);
-                            }}
-                            title="View Share History"
-                          >
-                            <History className="h-3.5 w-3.5" />
-                          </Button>
+                            } catch (error) {
+                              console.error("Error fetching share logs:", error);
+                              setShareLogs([]);
+                            }
+                            setShowShareLogDialog(true);
+                          }}
+                          title="View Share History"
+                        >
+                          <History className="h-3.5 w-3.5" />
+                        </Button>
                         ) : (
                           <span
                             className="inline-flex h-6 w-6 items-center justify-center flex-shrink-0 cursor-not-allowed opacity-60"
@@ -9879,11 +9955,11 @@ export default function PrescriptionsPage() {
                   </div>
                 </div>
               ) : (
-                <iframe
+              <iframe
                   src={`${pdfViewerUrl}#toolbar=1&navpanes=1&scrollbar=1`}
-                  className="w-full h-full border rounded"
-                  title="Prescription PDF"
-                  style={{ minHeight: '600px' }}
+                className="w-full h-full border rounded"
+                title="Prescription PDF"
+                style={{ minHeight: '600px' }}
                   onError={() => {
                     console.error("[CLIENT] Iframe failed to load PDF");
                     setPdfLoadError(true);
@@ -9895,7 +9971,7 @@ export default function PrescriptionsPage() {
                       // This is a fallback since we can't reliably detect iframe errors due to CORS
                     }, 3000);
                   }}
-                />
+              />
               )
             ) : (
               <div className="flex items-center justify-center h-full">
