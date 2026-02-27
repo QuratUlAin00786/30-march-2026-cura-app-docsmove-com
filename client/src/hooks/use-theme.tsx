@@ -16,8 +16,32 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("light");
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // Check if current page is a login/auth page
+  const isAuthPage = () => {
+    if (typeof window === "undefined") return false;
+    const path = window.location.pathname.toLowerCase();
+    return (
+      path.includes("/auth/login") ||
+      path.includes("/login") ||
+      path.includes("/auth/reset-password") ||
+      path.includes("/create-trial") ||
+      path.includes("/create-trial-verify") ||
+      path.includes("/create-trial-set-password")
+    );
+  };
+
   // Initialize theme from localStorage on client side only
   useEffect(() => {
+    // Force light theme on login/auth pages
+    if (isAuthPage()) {
+      const root = document.documentElement;
+      root.classList.remove("light", "dark");
+      root.classList.add("light");
+      setTheme("light");
+      setIsInitialized(true);
+      return;
+    }
+
     const savedTheme = localStorage.getItem("cura-theme") as Theme;
     const initialTheme = savedTheme || "light";
     
@@ -30,13 +54,53 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setIsInitialized(true);
   }, []);
 
+  // Watch for route changes and apply theme accordingly
+  useEffect(() => {
+    const handleRouteChange = () => {
+      if (isAuthPage()) {
+        const root = document.documentElement;
+        root.classList.remove("light", "dark");
+        root.classList.add("light");
+        setTheme("light");
+      } else if (isInitialized) {
+        // Restore theme from localStorage when leaving auth pages
+        const savedTheme = localStorage.getItem("cura-theme") as Theme;
+        const themeToApply = savedTheme || "light";
+        const root = document.documentElement;
+        root.classList.remove("light", "dark");
+        root.classList.add(themeToApply);
+        setTheme(themeToApply);
+      }
+    };
+
+    // Check on mount and listen for popstate (back/forward navigation)
+    handleRouteChange();
+    window.addEventListener("popstate", handleRouteChange);
+    
+    // Also check periodically for route changes (for programmatic navigation)
+    const interval = setInterval(handleRouteChange, 100);
+
+    return () => {
+      window.removeEventListener("popstate", handleRouteChange);
+      clearInterval(interval);
+    };
+  }, [isInitialized]);
+
   // Apply theme changes immediately when theme state changes
   useEffect(() => {
+    // Force light theme on login/auth pages
+    if (isAuthPage()) {
+      const root = document.documentElement;
+      root.classList.remove("light", "dark");
+      root.classList.add("light");
+      return;
+    }
+
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(theme);
     
-    // Save theme to localStorage
+    // Save theme to localStorage (only if not on auth page)
     localStorage.setItem("cura-theme", theme);
   }, [theme]);
 

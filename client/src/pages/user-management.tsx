@@ -5486,7 +5486,7 @@ export default function UserManagement() {
             {/* Roles List */}
             <Card>
               <CardHeader>
-                <CardTitle>System Roles</CardTitle>
+                <CardTitle className="dark:text-white">System Roles</CardTitle>
               </CardHeader>
               <CardContent>
                 {rolesLoading ? (
@@ -5500,25 +5500,25 @@ export default function UserManagement() {
                     {roles.map((role: Role) => (
                       <div
                         key={role.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 dark:border-gray-700 dark:bg-slate-800 transition-colors"
                         data-testid={`role-card-${role.id}`}
                       >
                         <div className="flex items-center space-x-4">
-                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                            <Shield className="h-5 w-5 text-blue-600" />
+                          <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                            <Shield className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                           </div>
                           <div>
-                            <h3 className="font-medium text-white bg-orange-500 px-3 py-1 rounded w-40 text-center text-sm">
+                            <h3 className="font-medium text-white bg-orange-500 dark:bg-orange-600 hover:bg-orange-600 dark:hover:bg-orange-700 px-3 py-1 rounded w-40 text-center text-sm transition-colors cursor-default">
                               {role.displayName}
                             </h3>
-                            <p className="text-xs text-gray-500">{role.description}</p>
-                            <p className="text-[10px] text-gray-400">Role ID: {role.name}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{role.description}</p>
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500">Role ID: {role.name}</p>
                           </div>
                         </div>
 
                         
                         <div className="flex items-center space-x-3">
-                          <Badge variant={role.isSystem ? "secondary" : "default"}>
+                          <Badge variant={role.isSystem ? "secondary" : "default"} className="dark:bg-slate-700 dark:text-gray-200">
                             {role.isSystem ? "System Role" : "Custom Role"}
                           </Badge>
                           
@@ -5528,7 +5528,7 @@ export default function UserManagement() {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleEditRole(role)}
-                              className="text-blue-600 hover:text-blue-700"
+                              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
                               data-testid={`button-edit-role-${role.id}`}
                             >
                               <Edit className="h-4 w-4" />
@@ -5537,7 +5537,7 @@ export default function UserManagement() {
                             {role.isSystem === false && canManageRoles && (
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" data-testid={`button-delete-role-${role.id}`}>
+                                  <Button variant="ghost" size="sm" className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30" data-testid={`button-delete-role-${role.id}`}>
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </AlertDialogTrigger>
@@ -5569,33 +5569,33 @@ export default function UserManagement() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {roles.map((role: Role) => (
-                      <Card key={`role-grid-${role.id}`} className="hover:shadow-lg transition-shadow" data-testid={`role-grid-card-${role.id}`}>
+                      <Card key={`role-grid-${role.id}`} className="hover:shadow-lg dark:hover:bg-slate-800/50 transition-shadow dark:bg-slate-800 dark:border-gray-700" data-testid={`role-grid-card-${role.id}`}>
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex items-center space-x-3">
-                              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                                <Shield className="h-6 w-6 text-blue-600" />
+                              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                                <Shield className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                               </div>
                               <div>
-                                <h3 className="font-medium text-gray-900">
+                                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
                                   {role.displayName}
                                 </h3>
-                                <Badge variant={role.isSystem ? "secondary" : "default"}>
+                                <Badge variant={role.isSystem ? "secondary" : "default"} className="mt-1">
                                   {role.isSystem ? "System" : "Custom"}
                                 </Badge>
                               </div>
                             </div>
                           </div>
                           
-                          <p className="text-sm text-gray-500 mb-2">{role.description}</p>
-                          <p className="text-xs text-gray-400 mb-3">Role ID: {role.name}</p>
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">{role.description}</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">Role ID: {role.name}</p>
                           
-                          <div className="flex items-center justify-end space-x-2 pt-3 border-t">
+                          <div className="flex items-center justify-end space-x-2 pt-3 border-t dark:border-gray-700">
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => handleEditRole(role)}
-                              className="text-blue-600 hover:text-blue-700"
+                              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                               data-testid={`button-edit-role-grid-${role.id}`}
                             >
                               <Edit className="h-4 w-4" />
@@ -5604,7 +5604,7 @@ export default function UserManagement() {
                             {role.isSystem === false && canManageRoles && (
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" data-testid={`button-delete-role-grid-${role.id}`}>
+                                  <Button variant="ghost" size="sm" className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300" data-testid={`button-delete-role-grid-${role.id}`}>
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </AlertDialogTrigger>

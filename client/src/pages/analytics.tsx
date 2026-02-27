@@ -47,18 +47,19 @@ function getTenantSubdomain(): string {
   return localStorage.getItem('user_subdomain') || 'demo';
 }
 
-// Custom Tooltip component with white border
+// Custom Tooltip component with theme support
 const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
+    const isDark = document.documentElement.classList.contains('dark');
     return (
       <div style={{
-        backgroundColor: 'white',
-        border: '1px solid white',
+        backgroundColor: isDark ? '#1e293b' : 'white',
+        border: isDark ? '1px solid #475569' : '1px solid white',
         borderRadius: '4px',
         padding: '8px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        boxShadow: isDark ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
       }}>
-        <p style={{ color: '#000', margin: 0 }}>
+        <p style={{ color: isDark ? '#e2e8f0' : '#000', margin: 0 }}>
           {`${payload[0].name} : ${payload[0].value}`}
         </p>
       </div>
@@ -689,9 +690,9 @@ export default function AnalyticsPage() {
           <TabsContent value="patients" className="space-y-4 lg:space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 mb-4 lg:mb-6">
             {/* Patient Growth Trend */}
-            <Card className="border-white">
+            <Card className="border-white dark:border-gray-700 hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Patient Growth Trend</CardTitle>
+                <CardTitle className="dark:text-white">Patient Growth Trend</CardTitle>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   Track the growth of total and new patients over time from the patients database
                 </p>
@@ -699,10 +700,18 @@ export default function AnalyticsPage() {
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
                   <AreaChart data={analytics.trends.patientGrowth}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-600" />
+                    <XAxis dataKey="month" stroke="#64748b" className="dark:stroke-slate-400" />
+                    <YAxis stroke="#64748b" className="dark:stroke-slate-400" />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'var(--card)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '4px',
+                        color: 'var(--foreground)'
+                      }}
+                      labelStyle={{ color: 'var(--muted-foreground)' }}
+                    />
                     <Area type="monotone" dataKey="total" stackId="1" stroke="#0ea5e9" fill="#0ea5e9" fillOpacity={0.8} name="Total Patients" />
                     <Area type="monotone" dataKey="new" stackId="2" stroke="#10b981" fill="#10b981" fillOpacity={0.8} name="New Patients" />
                   </AreaChart>
@@ -711,9 +720,9 @@ export default function AnalyticsPage() {
             </Card>
 
             {/* Appointment Volume */}
-            <Card className="border-white">
+            <Card className="border-white dark:border-gray-700 hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Appointment Volume</CardTitle>
+                <CardTitle className="dark:text-white">Appointment Volume</CardTitle>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   View appointment trends showing scheduled, completed, cancelled, and no-show appointments from the appointments table
                 </p>
@@ -721,10 +730,18 @@ export default function AnalyticsPage() {
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={analytics.trends.appointmentVolume}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" tickFormatter={(value) => format(new Date(value), 'MMM d')} />
-                    <YAxis />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-600" />
+                    <XAxis dataKey="date" tickFormatter={(value) => format(new Date(value), 'MMM d')} stroke="#64748b" className="dark:stroke-slate-400" />
+                    <YAxis stroke="#64748b" className="dark:stroke-slate-400" />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'var(--card)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '4px',
+                        color: 'var(--foreground)'
+                      }}
+                      labelStyle={{ color: 'var(--muted-foreground)' }}
+                    />
                     <Bar dataKey="completed" stackId="a" fill="#10b981" name="Completed" />
                     <Bar dataKey="cancelled" stackId="a" fill="#f59e0b" name="Cancelled" />
                     <Bar dataKey="noShow" stackId="a" fill="#ef4444" name="No Show" />
@@ -736,9 +753,9 @@ export default function AnalyticsPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 mb-4 lg:mb-6">
             {/* Patient Demographics - Age Distribution chart with white border */}
-            <Card data-age-distribution-chart className="rounded-lg bg-card text-card-foreground shadow-sm age-distribution-card-white-border">
+            <Card data-age-distribution-chart className="rounded-lg bg-card text-card-foreground shadow-sm age-distribution-card-white-border hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Age Distribution</CardTitle>
+                <CardTitle className="dark:text-white">Age Distribution</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="age-distribution-chart-wrap rounded-lg overflow-hidden" style={{ border: "2px solid white", boxSizing: "border-box" }}>
@@ -773,9 +790,9 @@ export default function AnalyticsPage() {
             </Card>
 
             {/* Gender Distribution */}
-            <Card className="border-white">
+            <Card className="border-white dark:border-gray-700 hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Gender Distribution</CardTitle>
+                <CardTitle className="dark:text-white">Gender Distribution</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>
@@ -783,10 +800,18 @@ export default function AnalyticsPage() {
                     gender: key,
                     count: value as number
                   }))}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="gender" />
-                    <YAxis />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-600" />
+                    <XAxis dataKey="gender" stroke="#64748b" className="dark:stroke-slate-400" />
+                    <YAxis stroke="#64748b" className="dark:stroke-slate-400" />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'var(--card)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '4px',
+                        color: 'var(--foreground)'
+                      }}
+                      labelStyle={{ color: 'var(--muted-foreground)' }}
+                    />
                     <Bar dataKey="count" fill="#0ea5e9" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -796,21 +821,21 @@ export default function AnalyticsPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
             {/* Top Conditions */}
-            <Card className="border-white">
+            <Card className="border-white dark:border-gray-700 hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Most Common Conditions</CardTitle>
+                <CardTitle className="dark:text-white">Most Common Conditions</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   {analyticsData?.patientAnalytics?.topConditions?.map((condition: any, index: number) => (
-                    <div key={condition.condition} className="flex items-center justify-between">
+                    <div key={condition.condition} className="flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-700/50 p-2 rounded transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="w-4 h-4 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
-                        <span className="font-medium">{condition.condition}</span>
+                        <span className="font-medium dark:text-gray-200">{condition.condition}</span>
                       </div>
                       <div className="text-right">
-                        <div className="font-bold">{condition.count}</div>
-                        <div className="text-sm text-gray-500">
+                        <div className="font-bold dark:text-gray-100">{condition.count}</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
                           {analyticsData?.patientAnalytics?.totalPatients > 0 
                             ? Math.round((condition.count / analyticsData.patientAnalytics.totalPatients) * 100) 
                             : 0}% of patients
@@ -823,32 +848,32 @@ export default function AnalyticsPage() {
             </Card>
 
             {/* Appointment Statistics */}
-            <Card className="border-white">
+            <Card className="border-white dark:border-gray-700 hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Patient Appointment Statistics</CardTitle>
+                <CardTitle className="dark:text-white">Patient Appointment Statistics</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Total Appointments</span>
-                    <span className="font-bold text-lg">{analyticsData?.patientAnalytics?.appointmentStats?.total || 0}</span>
+                  <div className="flex justify-between items-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-2 rounded transition-colors">
+                    <span className="text-gray-600 dark:text-gray-300">Total Appointments</span>
+                    <span className="font-bold text-lg dark:text-gray-100">{analyticsData?.patientAnalytics?.appointmentStats?.total || 0}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Completed</span>
-                    <span className="font-bold text-green-600">{analyticsData?.patientAnalytics?.appointmentStats?.completed || 0}</span>
+                  <div className="flex justify-between items-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-2 rounded transition-colors">
+                    <span className="text-gray-600 dark:text-gray-300">Completed</span>
+                    <span className="font-bold text-green-600 dark:text-green-400">{analyticsData?.patientAnalytics?.appointmentStats?.completed || 0}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">Cancelled</span>
-                    <span className="font-bold text-yellow-600">{analyticsData?.patientAnalytics?.appointmentStats?.cancelled || 0}</span>
+                  <div className="flex justify-between items-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-2 rounded transition-colors">
+                    <span className="text-gray-600 dark:text-gray-300">Cancelled</span>
+                    <span className="font-bold text-yellow-600 dark:text-yellow-400">{analyticsData?.patientAnalytics?.appointmentStats?.cancelled || 0}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600">No Shows</span>
-                    <span className="font-bold text-red-600">{analyticsData?.patientAnalytics?.appointmentStats?.noShow || 0}</span>
+                  <div className="flex justify-between items-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-2 rounded transition-colors">
+                    <span className="text-gray-600 dark:text-gray-300">No Shows</span>
+                    <span className="font-bold text-red-600 dark:text-red-400">{analyticsData?.patientAnalytics?.appointmentStats?.noShow || 0}</span>
                   </div>
-                  <div className="pt-4 border-t">
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Completion Rate</span>
-                      <span className="font-bold text-blue-600">{analyticsData?.patientAnalytics?.appointmentStats?.completionRate || 0}%</span>
+                  <div className="pt-4 border-t dark:border-gray-700">
+                    <div className="flex justify-between items-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-2 rounded transition-colors">
+                      <span className="text-gray-600 dark:text-gray-300">Completion Rate</span>
+                      <span className="font-bold text-blue-600 dark:text-blue-400">{analyticsData?.patientAnalytics?.appointmentStats?.completionRate || 0}%</span>
                     </div>
                   </div>
                 </div>
@@ -856,29 +881,29 @@ export default function AnalyticsPage() {
             </Card>
             </div>
 
-            <Card className="border-white">
+            <Card className="border-white dark:border-gray-700 hover:shadow-md dark:hover:bg-slate-800/50 transition-all">
               <CardHeader>
-                <CardTitle>Patient Summary</CardTitle>
+                <CardTitle className="dark:text-white">Patient Summary</CardTitle>
               </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-blue-600 mb-2">
+                <div className="text-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-4 rounded transition-colors">
+                  <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-2">
                     {analyticsData?.patientAnalytics?.totalPatients || 0}
                   </div>
-                  <div className="text-sm text-gray-600">Total Patients</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-300">Total Patients</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-green-600 mb-2">
+                <div className="text-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-4 rounded transition-colors">
+                  <div className="text-3xl font-bold text-green-600 dark:text-green-400 mb-2">
                     {analyticsData?.patientAnalytics?.newPatients || 0}
                   </div>
-                  <div className="text-sm text-gray-600">New Patients (30 days)</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-300">New Patients (30 days)</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-purple-600 mb-2">
+                <div className="text-center hover:bg-gray-50 dark:hover:bg-slate-700/50 p-4 rounded transition-colors">
+                  <div className="text-3xl font-bold text-purple-600 dark:text-purple-400 mb-2">
                     {analyticsData?.patientAnalytics?.appointmentStats?.completionRate || 0}%
                   </div>
-                  <div className="text-sm text-gray-600">Completion Rate</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-300">Completion Rate</div>
                 </div>
               </div>
               </CardContent>

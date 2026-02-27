@@ -1448,14 +1448,37 @@ export default function Telemedicine() {
   // Start consultation mutation
   const startConsultationMutation = useMutation({
     mutationFn: async (consultationId: string) => {
+      const token = localStorage.getItem("auth_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Tenant-Subdomain": getActiveSubdomain(),
+      };
+      
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch(
         `/api/telemedicine/consultations/${consultationId}/start`,
         {
           method: "POST",
+          headers,
           credentials: "include",
         },
       );
-      if (!response.ok) throw new Error("Failed to start consultation");
+      
+      if (!response.ok) {
+        // Try to get error message from response
+        let errorMessage = "Failed to start consultation";
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
       return response.json();
     },
     onSuccess: (data) => {
@@ -1479,6 +1502,15 @@ export default function Telemedicine() {
       queryClient.invalidateQueries({
         queryKey: ["/api/telemedicine/consultations"],
       });
+      
+      // Show success toast for auto-started consultations
+      if (pending) {
+        toast({
+          title: "Consultation started",
+          description: `Auto-connected with ${callPayload.patientName || "Patient"} (${durationMins} min). Call will end automatically.`,
+        });
+      }
+      
       setSuccessMessage(`Consultation started with ${callPayload.patientName}`);
       setShowSuccessModal(true);
       // Auto-disconnect after consultation duration
@@ -1492,10 +1524,15 @@ export default function Telemedicine() {
         });
       }, durationMins * 60 * 1000);
     },
-    onError: () => {
+    onError: (error: any) => {
       pendingAutoStartRef.current = null;
       autoStartInProgressRef.current = false;
-      toast({ title: "Failed to start consultation", variant: "destructive" });
+      console.error("Failed to start consultation:", error);
+      toast({ 
+        title: "Failed to start consultation", 
+        description: error.message || "Please check your connection and try again.",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -1683,11 +1720,8 @@ export default function Telemedicine() {
           autoStartedConsultationIdsRef.current.add(c.id);
           autoStartInProgressRef.current = true;
           pendingAutoStartRef.current = c;
+          // Don't show toast here - let the mutation's onSuccess handler show it
           startConsultationMutation.mutate(c.id);
-          toast({
-            title: "Consultation started",
-            description: `Auto-connected with ${c.patientName || "Patient"} (${c.duration ?? 15} min). Call will end automatically.`,
-          });
           return;
         }
       }

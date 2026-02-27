@@ -358,6 +358,35 @@ button[data-testid="delete-customer-button"] {
   border: 1px solid white !important;
 }
 
+/* Dark theme tooltip styling for all charts in Patients tab */
+.dark .recharts-tooltip-wrapper,
+.dark .recharts-default-tooltip {
+  background-color: #1e293b !important;
+  border: 1px solid #475569 !important;
+  color: #e2e8f0 !important;
+}
+
+.dark .recharts-tooltip-wrapper .recharts-tooltip-label,
+.dark .recharts-default-tooltip .recharts-tooltip-label {
+  color: #cbd5e1 !important;
+}
+
+.dark .recharts-tooltip-wrapper .recharts-tooltip-item,
+.dark .recharts-default-tooltip .recharts-tooltip-item {
+  color: #e2e8f0 !important;
+}
+
+/* Chart hover effects in dark theme */
+.dark .recharts-bar-rectangle:hover,
+.dark .recharts-area:hover {
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.dark .recharts-active-bar {
+  opacity: 1 !important;
+}
+
 /* ContentEditable placeholder styling */
 [contenteditable][data-placeholder]:empty::before {
   content: attr(data-placeholder);

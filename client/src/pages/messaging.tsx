@@ -61,7 +61,7 @@ import { useTenant } from "@/hooks/use-tenant";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { createRemoteLiveKitRoom } from "@/lib/livekit-room-service";
-import { buildSocketUserIdentifier } from "@/lib/socket-manager";
+import { buildSocketUserIdentifier, socketManager } from "@/lib/socket-manager";
 import { LiveKitVideoCall } from "@/components/telemedicine/livekit-video-call";
 import { LiveKitAudioCall } from "@/components/telemedicine/livekit-audio-call";
 
@@ -339,6 +339,11 @@ export default function MessagingPage() {
     token?: string;
     serverUrl?: string;
   } | null>(null);
+  const [callStatusModal, setCallStatusModal] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+  }>({ open: false, title: "", description: "" });
   const [newMessageContent, setNewMessageContent] = useState("");
   const [showSentConfirmation, setShowSentConfirmation] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -767,6 +772,62 @@ export default function MessagingPage() {
   };
 
   const handleLiveKitVideoCallEnd = () => {
+    // Stop all camera/video tracks before closing
+    // Stop all video tracks from video elements in the document
+    document.querySelectorAll('video').forEach(videoElement => {
+      const video = videoElement as HTMLVideoElement;
+      if (video.srcObject instanceof MediaStream) {
+        const stream = video.srcObject as MediaStream;
+        stream.getVideoTracks().forEach(track => {
+          track.stop();
+          console.log('[Messaging] Stopped video track from video element on call end');
+        });
+        video.srcObject = null;
+      }
+    });
+    
+    // Also stop any active media tracks that might be running
+    // Get all active media streams and stop video tracks
+    const allStreams = new Set<MediaStream>();
+    document.querySelectorAll('video, audio').forEach(element => {
+      const mediaElement = element as HTMLVideoElement | HTMLAudioElement;
+      if (mediaElement.srcObject instanceof MediaStream) {
+        allStreams.add(mediaElement.srcObject as MediaStream);
+      }
+    });
+    
+    allStreams.forEach(stream => {
+      stream.getVideoTracks().forEach(track => {
+        track.stop();
+        console.log('[Messaging] Stopped video track from media stream on call end');
+      });
+    });
+    
+    // Emit both call_ended and call_declined events to ensure recipient's popup closes
+    if (liveKitVideoCall && user) {
+      const initiatorUserId = buildSocketUserIdentifier(user);
+      const participantId = buildSocketUserIdentifier(liveKitVideoCall.participant);
+      
+      if (initiatorUserId && participantId) {
+        // Emit call_declined to close recipient's incoming call popup
+        socketManager.emitToServer('call_declined', {
+          roomId: liveKitVideoCall.roomName,
+          fromUserId: initiatorUserId,
+          toUserId: participantId,
+          isGroup: false,
+        });
+        console.log('[Messaging] Emitted call_declined for video call:', liveKitVideoCall.roomName);
+        
+        // Also emit call_ended for consistency
+        socketManager.emitToServer('call_ended', {
+          roomId: liveKitVideoCall.roomName,
+          initiatorUserId: initiatorUserId,
+          participantIds: [participantId],
+        });
+        console.log('[Messaging] Emitted call_ended for video call:', liveKitVideoCall.roomName);
+      }
+    }
+    
     setLiveKitVideoCall(null);
     toast({
       title: "Call Ended",
@@ -775,12 +836,160 @@ export default function MessagingPage() {
   };
 
   const handleLiveKitAudioCallEnd = () => {
+    // Emit both call_ended and call_declined events to ensure recipient's popup closes
+    if (liveKitAudioCall && user) {
+      const initiatorUserId = buildSocketUserIdentifier(user);
+      const participantId = buildSocketUserIdentifier(liveKitAudioCall.participant);
+      
+      if (initiatorUserId && participantId) {
+        // Emit call_declined to close recipient's incoming call popup
+        socketManager.emitToServer('call_declined', {
+          roomId: liveKitAudioCall.roomName,
+          fromUserId: initiatorUserId,
+          toUserId: participantId,
+          isGroup: false,
+        });
+        console.log('[Messaging] Emitted call_declined for audio call:', liveKitAudioCall.roomName);
+        
+        // Also emit call_ended for consistency
+        socketManager.emitToServer('call_ended', {
+          roomId: liveKitAudioCall.roomName,
+          initiatorUserId: initiatorUserId,
+          participantIds: [participantId],
+        });
+        console.log('[Messaging] Emitted call_ended for audio call:', liveKitAudioCall.roomName);
+      }
+    }
+    
     setLiveKitAudioCall(null);
     toast({
       title: "Call Ended",
       description: "Audio call has been terminated",
     });
   };
+
+  // Listen for call_ended and call_declined events from other participants
+  useEffect(() => {
+    // Handle when the other party ends the call
+    const unsubscribeCallEnded = socketManager.on('call_ended', (data: any) => {
+      console.log('[Messaging] Received call_ended event:', data);
+      
+      // Check if this is for our current video call
+      if (liveKitVideoCall && data.roomId === liveKitVideoCall.roomName) {
+        console.log('[Messaging] Closing video call - other party ended');
+        
+        // Stop all camera/video tracks before closing
+        document.querySelectorAll('video').forEach(videoElement => {
+          const video = videoElement as HTMLVideoElement;
+          if (video.srcObject instanceof MediaStream) {
+            const stream = video.srcObject as MediaStream;
+            stream.getVideoTracks().forEach(track => {
+              track.stop();
+              console.log('[Messaging] Stopped video track from video element on call ended');
+            });
+            video.srcObject = null;
+          }
+        });
+        
+        const allStreams = new Set<MediaStream>();
+        document.querySelectorAll('video, audio').forEach(element => {
+          const mediaElement = element as HTMLVideoElement | HTMLAudioElement;
+          if (mediaElement.srcObject instanceof MediaStream) {
+            allStreams.add(mediaElement.srcObject as MediaStream);
+          }
+        });
+        
+        allStreams.forEach(stream => {
+          stream.getVideoTracks().forEach(track => {
+            track.stop();
+            console.log('[Messaging] Stopped video track from media stream on call ended');
+          });
+        });
+        
+        setLiveKitVideoCall(null);
+        setCallStatusModal({
+          open: true,
+          title: "Call Ended",
+          description: "The other participant ended the call",
+        });
+      }
+      
+      // Check if this is for our current audio call
+      if (liveKitAudioCall && data.roomId === liveKitAudioCall.roomName) {
+        console.log('[Messaging] Closing audio call - other party ended');
+        setLiveKitAudioCall(null);
+        setCallStatusModal({
+          open: true,
+          title: "Call Ended",
+          description: "The other participant ended the call",
+        });
+      }
+    });
+
+    // Handle when an incoming call is declined
+    const unsubscribeCallDeclined = socketManager.on('call_declined', (data: any) => {
+      console.log('[Messaging] Received call_declined event:', data);
+      
+      // Check if this is for our current video call
+      if (liveKitVideoCall && data.roomId === liveKitVideoCall.roomName) {
+        console.log('[Messaging] Closing video call - call was declined');
+        
+        // Stop all camera/video tracks before closing
+        // Stop all video tracks from video elements in the document
+        document.querySelectorAll('video').forEach(videoElement => {
+          const video = videoElement as HTMLVideoElement;
+          if (video.srcObject instanceof MediaStream) {
+            const stream = video.srcObject as MediaStream;
+            stream.getVideoTracks().forEach(track => {
+              track.stop();
+              console.log('[Messaging] Stopped video track from video element on decline');
+            });
+            video.srcObject = null;
+          }
+        });
+        
+        // Also stop any active media tracks that might be running
+        // Get all active media streams and stop video tracks
+        const allStreams = new Set<MediaStream>();
+        document.querySelectorAll('video, audio').forEach(element => {
+          const mediaElement = element as HTMLVideoElement | HTMLAudioElement;
+          if (mediaElement.srcObject instanceof MediaStream) {
+            allStreams.add(mediaElement.srcObject as MediaStream);
+          }
+        });
+        
+        allStreams.forEach(stream => {
+          stream.getVideoTracks().forEach(track => {
+            track.stop();
+            console.log('[Messaging] Stopped video track from media stream on decline');
+          });
+        });
+        
+        setLiveKitVideoCall(null);
+        setCallStatusModal({
+          open: true,
+          title: "Call Declined",
+          description: "The recipient declined the call",
+        });
+      }
+      
+      // Check if this is for our current audio call
+      if (liveKitAudioCall && data.roomId === liveKitAudioCall.roomName) {
+        console.log('[Messaging] Closing audio call - call was declined');
+        setLiveKitAudioCall(null);
+        setCallStatusModal({
+          open: true,
+          title: "Call Declined",
+          description: "The recipient declined the call",
+        });
+      }
+    });
+
+    return () => {
+      unsubscribeCallEnded();
+      unsubscribeCallDeclined();
+    };
+  }, [liveKitVideoCall, liveKitAudioCall]);
 
   // Clear message content when conversation changes
   useEffect(() => {
@@ -8123,6 +8332,31 @@ export default function MessagingPage() {
               onDisconnect={handleLiveKitAudioCallEnd}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Call Status Modal */}
+      <Dialog open={callStatusModal.open} onOpenChange={(open) => {
+        if (!open) {
+          setCallStatusModal({ open: false, title: "", description: "" });
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{callStatusModal.title}</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-gray-700 dark:text-gray-300">{callStatusModal.description}</p>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              onClick={() => {
+                setCallStatusModal({ open: false, title: "", description: "" });
+              }}
+            >
+              Close
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

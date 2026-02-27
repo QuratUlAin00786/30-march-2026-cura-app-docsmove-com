@@ -36,6 +36,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -3005,20 +3011,31 @@ Coverage Details: [Insurance Coverage]`;
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button size="sm" variant="outline" onClick={() => loadFilledForm(doc)}>
+        <div className="flex items-center gap-2 min-w-0">
+          <Button size="sm" variant="outline" onClick={() => loadFilledForm(doc)} className="flex-shrink-0">
             View Form
           </Button>
           {doc.metadata?.headerName && (
-            <span className="text-[11px] text-muted-foreground">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span 
+                    className="text-[10px] text-muted-foreground truncate min-w-0 max-w-[200px] sm:max-w-[300px] cursor-default"
+                  >
               Clinic: {doc.metadata.headerName}
             </span>
+                </TooltipTrigger>
+                <TooltipContent className="text-[10px]">
+                  <p>Clinic: {doc.metadata.headerName}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <Button
             size="sm"
             variant="ghost"
             onClick={() => handleDeleteFilledFormClick(doc)}
-            className="text-rose-500 hover:bg-rose-50/70 dark:text-rose-400 dark:hover:bg-rose-500/10"
+            className="text-rose-500 hover:bg-rose-50/70 dark:text-rose-400 dark:hover:bg-rose-500/10 flex-shrink-0"
             title="Delete PDF"
           >
             <Trash2 className="h-4 w-4" />

@@ -1804,13 +1804,35 @@ export default function PrescriptionsPage() {
         },
       );
 
-      const emailResult = await emailResponse.json();
-      console.log("[PHARMACY EMAIL] Email API response:", emailResult);
+      // Check content type before parsing JSON
+      const contentType = emailResponse.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json");
+
+      let emailResult;
+      if (isJson) {
+        try {
+          emailResult = await emailResponse.json();
+          console.log("[PHARMACY EMAIL] Email API response:", emailResult);
+        } catch (parseError) {
+          console.error("[PHARMACY EMAIL] Failed to parse JSON response:", parseError);
+          const errorText = await emailResponse.text();
+          throw new Error(
+            `Server returned an invalid response. ${errorText.substring(0, 100)}`
+          );
+        }
+      } else {
+        // Response is not JSON (might be HTML error page)
+        const errorText = await emailResponse.text();
+        console.error("[PHARMACY EMAIL] Non-JSON response received:", errorText.substring(0, 200));
+        throw new Error(
+          `Server returned an unexpected response format. The endpoint may not exist or there was a server error. Please contact support.`
+        );
+      }
 
       if (!emailResponse.ok) {
         console.error("[PHARMACY EMAIL] Email API failed:", emailResult);
         throw new Error(
-          emailResult.error || "Failed to send PDF email to pharmacy",
+          emailResult?.error || emailResult?.message || "Failed to send PDF email to pharmacy",
         );
       }
 
@@ -8580,12 +8602,18 @@ export default function PrescriptionsPage() {
       </Dialog>
 
       {/* Send to Pharmacy Dialog */}
-      <Dialog open={showPharmacyDialog} onOpenChange={setShowPharmacyDialog}>
-        <DialogContent className="max-w-md max-h-[650px] overflow-y-auto overflow-x-hidden dark:bg-slate-800 dark:border-gray-700">
-          <DialogHeader>
+      <Dialog open={showPharmacyDialog} onOpenChange={(open) => {
+        setShowPharmacyDialog(open);
+        if (!open) {
+          // Clear attached files when dialog closes
+          setAttachedFiles([]);
+        }
+      }}>
+        <DialogContent className="max-w-md h-[500px] flex flex-col dark:bg-slate-800 dark:border-gray-700">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle className="dark:text-white">Send Prescription to Halo Health Pharmacy</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 min-w-0">
+          <div className="space-y-4 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
             <div className="bg-blue-50 dark:bg-slate-700/50 p-4 rounded-lg border border-blue-200 dark:border-slate-600">
               <h4 className="font-semibold text-blue-900 dark:text-white mb-2">
                 Halo Health Pharmacy
@@ -8738,8 +8766,9 @@ export default function PrescriptionsPage() {
                 </span>
               </div>
             </div>
+          </div>
 
-            <div className="flex gap-2 pt-4">
+          <div className="flex gap-2 pt-4 flex-shrink-0 border-t border-gray-200 dark:border-gray-700 mt-4">
               <Button
                 variant="outline"
                 onClick={() => setShowPharmacyDialog(false)}
@@ -8778,7 +8807,6 @@ export default function PrescriptionsPage() {
                   ? "Sending PDF..."
                   : "Send PDF to Pharmacy"}
               </Button>
-            </div>
           </div>
         </DialogContent>
       </Dialog>
