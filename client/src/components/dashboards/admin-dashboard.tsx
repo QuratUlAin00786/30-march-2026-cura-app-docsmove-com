@@ -261,7 +261,7 @@ export function AdminDashboard() {
     staleTime: 0,
   });
 
-  // Fetch subscription data if user is admin
+  // Fetch subscription data if user is admin (where expire_at is not equal to or past current date)
   const { data: subscription, isLoading: subscriptionLoading } = useQuery({
     queryKey: ["/api/subscriptions/current"],
     queryFn: async () => {
@@ -283,7 +283,107 @@ export function AdminDashboard() {
         throw new Error(`HTTP ${response.status}`);
       }
       
-      return response.json();
+      const subscriptionData = await response.json();
+      
+      // Filter: Get latest subscription where expire_at is not equal to or past current date
+      if (subscriptionData) {
+        // If subscription has expiresAt, check if it's in the future
+        if (subscriptionData.expiresAt) {
+          const expiresAt = new Date(subscriptionData.expiresAt);
+          const now = new Date();
+          
+          // Set time to start of day for date comparison (ignore time component)
+          const expiresAtDate = new Date(expiresAt.getFullYear(), expiresAt.getMonth(), expiresAt.getDate());
+          const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          
+          // Check if expire_at is in the future (not equal to or past current date)
+          // expiresAt must be > current date (not equal to or past)
+          if (expiresAtDate.getTime() > nowDate.getTime()) {
+            return subscriptionData;
+          }
+          // Return null if subscription is expired
+          return null;
+        } else {
+          // If no expiresAt, return the subscription (it doesn't expire)
+          return subscriptionData;
+        }
+      }
+      
+      // Return null if no valid subscription found
+      return null;
+    },
+    retry: false,
+    staleTime: 0,
+    enabled: user?.role === 'admin' // Only fetch if user is admin
+  });
+
+  // Fetch users count (excluding role "patient") for the logged-in user's organization
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ["/api/users/count"],
+    queryFn: async () => {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'X-Tenant-Subdomain': getTenantSubdomain()
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch('/api/users', {
+        headers,
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const users = await response.json();
+      // Filter out users with role "patient" and count
+      const usersExcludingPatients = Array.isArray(users) 
+        ? users.filter((u: any) => u.role !== 'patient')
+        : [];
+      
+      return {
+        count: usersExcludingPatients.length,
+        users: usersExcludingPatients
+      };
+    },
+    retry: false,
+    staleTime: 0,
+    enabled: user?.role === 'admin' // Only fetch if user is admin
+  });
+
+  // Fetch patients count for the logged-in user's organization
+  const { data: patientsCountData, isLoading: patientsCountLoading } = useQuery({
+    queryKey: ["/api/patients/count"],
+    queryFn: async () => {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'X-Tenant-Subdomain': getTenantSubdomain()
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch('/api/patients', {
+        headers,
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const patients = await response.json();
+      // Count all patients
+      const patientsArray = Array.isArray(patients) ? patients : [];
+      
+      return {
+        count: patientsArray.length
+      };
     },
     retry: false,
     staleTime: 0,
@@ -411,7 +511,14 @@ export function AdminDashboard() {
                       <div className="flex justify-between">
                         <span className="text-gray-600 dark:text-gray-400">Users:</span>
                         <span className="font-medium text-gray-900 dark:text-gray-100">
-                          {subscription.currentUsers} / {subscription.userLimit}
+                          {usersLoading ? "..." : (usersData?.count || subscription.currentUsers || 0)} / {subscription.features?.maxUsers || subscription.userLimit || "—"}
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Patients:</span>
+                        <span className="font-medium text-gray-900 dark:text-gray-100">
+                          {patientsCountLoading ? "..." : (patientsCountData?.count || subscription.currentPatients || 0)} / {subscription.features?.maxPatients || "—"}
                         </span>
                       </div>
                       

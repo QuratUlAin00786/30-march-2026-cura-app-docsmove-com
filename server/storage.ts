@@ -2044,7 +2044,8 @@ export class DatabaseStorage implements IStorage {
   async getSubscription(organizationId: number): Promise<Subscription | undefined> {
     return await subscriptionCache.get(organizationId, async () => {
       // Use already-imported tables instead of dynamic import to avoid circular dependency issues
-      const [subscription] = await db
+      // First, get the latest subscription (ordered by createdAt DESC) regardless of expiration
+      const [latestSubscription] = await db
         .select({
           id: saasSubscriptions.id,
           organizationId: saasSubscriptions.organizationId,
@@ -2071,7 +2072,29 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(saasSubscriptions.createdAt))
         .limit(1);
       
-      if (!subscription) return undefined;
+      if (!latestSubscription) return undefined;
+      
+      // Check if the latest subscription is expired
+      // expiresAt must be > current date (not equal to or past current date)
+      if (latestSubscription.expiresAt) {
+        const expiresAt = latestSubscription.expiresAt instanceof Date 
+          ? latestSubscription.expiresAt 
+          : new Date(latestSubscription.expiresAt);
+        const now = new Date();
+        
+        // Set time to start of day for date comparison (ignore time component)
+        const expiresAtDate = new Date(expiresAt.getFullYear(), expiresAt.getMonth(), expiresAt.getDate());
+        const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        
+        // If expiresAt is equal to or past current date, subscription is expired
+        // Return undefined (don't fall back to older subscriptions)
+        if (expiresAtDate.getTime() <= nowDate.getTime()) {
+          return undefined;
+        }
+      }
+      
+      // Latest subscription is not expired, use it
+      const subscription = latestSubscription;
       
       // Count actual active users in the organization (excluding SaaS owners, inactive users, and patient role)
       const userCountResult = await db

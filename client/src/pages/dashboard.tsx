@@ -72,6 +72,60 @@ export default function Dashboard() {
     ? activePatients.length
     : 0;
 
+  // Fetch latest subscription for admin users (where expire_at is not equal to or past current date)
+  const { data: latestSubscription, isLoading: subscriptionLoading } = useQuery({
+    queryKey: ["/api/subscription"],
+    queryFn: async () => {
+      const token = localStorage.getItem("auth_token");
+      const headers: Record<string, string> = {
+        "X-Tenant-Subdomain": getActiveSubdomain(),
+      };
+
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch("/api/subscription", {
+        headers,
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const subscription = await response.json();
+      
+      // Filter: Get latest subscription where expire_at is not equal to or past current date
+      if (subscription) {
+        // If subscription has expiresAt, check if it's in the future
+        if (subscription.expiresAt) {
+          const expiresAt = new Date(subscription.expiresAt);
+          const now = new Date();
+          
+          // Set time to start of day for date comparison (ignore time component)
+          const expiresAtDate = new Date(expiresAt.getFullYear(), expiresAt.getMonth(), expiresAt.getDate());
+          const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          
+          // Check if expire_at is in the future (not equal to or past current date)
+          // expiresAt must be > current date (not equal to or past)
+          if (expiresAtDate.getTime() > nowDate.getTime()) {
+            return subscription;
+          }
+        } else {
+          // If no expiresAt, return the subscription (it doesn't expire)
+          return subscription;
+        }
+      }
+      
+      // Return null if no valid subscription found
+      return null;
+    },
+    enabled: user?.role === 'admin', // Only fetch if user is admin
+    retry: false,
+    staleTime: 0,
+  });
+
   // Check if user has permission to view dashboard
   // Even for admin, check stored permissions to respect role edits
   // This allows Admin to see access restriction when they edit Admin role permissions

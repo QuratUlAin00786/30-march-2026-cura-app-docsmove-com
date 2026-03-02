@@ -1019,11 +1019,64 @@ export default function Subscription() {
     return dateB - dateA; // Most recent first
   });
 
-  // Get the latest invoice (most recent)
-  const latestInvoice = sortedBillingHistory.length > 0 ? sortedBillingHistory[0] : null;
+  // Helper function to check if invoice is expired
+  // Invoice end date is subscription.expiresAt (from saas_subscription) for the latest invoice
+  const isInvoiceExpired = (invoice: any, isLatest: boolean = false) => {
+    // For latest invoice, use subscription.expiresAt as invoice end date
+    // For other invoices, use invoice.expiresAt or periodEnd as fallback
+    const invoiceEndDate = isLatest 
+      ? (subscription?.expiresAt || invoice.expiresAt || invoice.periodEnd)
+      : (invoice.expiresAt || invoice.periodEnd || subscription?.expiresAt);
+    
+    if (!invoiceEndDate) return false;
 
-  // Get previous invoices (all except the latest)
-  const previousInvoices = sortedBillingHistory.length > 1 ? sortedBillingHistory.slice(1) : [];
+    // Parse invoice end date
+    const endDateStr = String(invoiceEndDate).trim();
+    const hasTimezone = /[Z+-]\d{2}:?\d{2}$/.test(endDateStr);
+    let endDate: Date;
+    
+    if (hasTimezone) {
+      endDate = new Date(endDateStr);
+    } else {
+      const isoMatch = endDateStr.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?/);
+      if (isoMatch) {
+        const [, y, mo, d, hh, mm, ss, ms] = isoMatch;
+        endDate = new Date(Date.UTC(
+          Number(y),
+          Number(mo) - 1,
+          Number(d),
+          Number(hh),
+          Number(mm),
+          ss ? Number(ss) : 0,
+          ms ? Number(ms.substring(0, 3)) : 0
+        ));
+      } else {
+        endDate = new Date(endDateStr);
+      }
+    }
+
+    // Set time to start of day for date comparison (ignore time component)
+    const now = new Date();
+    const endDateOnly = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Invoice is expired if end date is equal to or past current date
+    return endDateOnly.getTime() <= nowDate.getTime();
+  };
+
+  // Get the latest invoice (most recent)
+  const latestInvoiceRaw = sortedBillingHistory.length > 0 ? sortedBillingHistory[0] : null;
+  
+  // Check if latest invoice is expired (use subscription.expiresAt as invoice end date)
+  const isLatestInvoiceExpired = latestInvoiceRaw ? isInvoiceExpired(latestInvoiceRaw, true) : false;
+  
+  // Only show latest invoice in "Current Invoice" if it's not expired
+  const latestInvoice = latestInvoiceRaw && !isLatestInvoiceExpired ? latestInvoiceRaw : null;
+
+  // Get previous invoices (all except the latest, plus expired latest invoice)
+  const previousInvoices = isLatestInvoiceExpired 
+    ? sortedBillingHistory // Include expired latest invoice in billing history
+    : sortedBillingHistory.length > 1 ? sortedBillingHistory.slice(1) : [];
 
   // Split packages into subscription plans (have maxUsers) and add-ons (don't have maxUsers)
   const dbPlans = dbPackages.filter(pkg => pkg.features?.maxUsers);
@@ -1148,40 +1201,100 @@ export default function Subscription() {
       />
       <div className="w-full flex-1 overflow-auto bg-white dark:bg-gray-900 px-3 sm:px-4 lg:px-5 py-4">
         <div className="space-y-4">
-          {/* Subscription name and active dates at top (from saas_subscriptions: plan name, active dates, expires_at as end date) */}
-          {(subscription?.status === "active" || subscription?.status === "trial") && subscription?.planName && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30 px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 relative">
-              {/* Countdown in top right corner */}
-              <div className="absolute top-4 right-6">
-                <div className="space-y-1 text-right">
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Countdown</p>
-                  <p className={`text-sm font-semibold ${countdown.isDanger ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-300"}`}>
-                    {countdown.label}
+          {/* Check if subscription is expired */}
+          {(() => {
+            if (!subscription?.expiresAt) return null;
+            
+            // Parse expiresAt as UTC
+            const expiresAtStr = String(subscription.expiresAt).trim();
+            const hasTimezone = /[Z+-]\d{2}:?\d{2}$/.test(expiresAtStr);
+            let expiresDate: Date;
+            
+            if (hasTimezone) {
+              expiresDate = new Date(expiresAtStr);
+            } else {
+              // No timezone - treat as UTC
+              const isoMatch = expiresAtStr.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?/);
+              if (isoMatch) {
+                const [, y, mo, d, hh, mm, ss, ms] = isoMatch;
+                expiresDate = new Date(Date.UTC(
+                  Number(y),
+                  Number(mo) - 1,
+                  Number(d),
+                  Number(hh),
+                  Number(mm),
+                  ss ? Number(ss) : 0,
+                  ms ? Number(ms.substring(0, 3)) : 0
+                ));
+              } else {
+                expiresDate = new Date(expiresAtStr);
+              }
+            }
+            
+            // Set time to start of day for date comparison (ignore time component)
+            const now = new Date();
+            const expiresAtDate = new Date(expiresDate.getFullYear(), expiresDate.getMonth(), expiresDate.getDate());
+            const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            
+            // Check if expiresAt is equal to or past current date
+            const isExpired = expiresAtDate.getTime() <= nowDate.getTime();
+            
+            if (isExpired) {
+              // Show expiration message in red
+              return (
+                <div className="rounded-lg border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 px-6 py-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                    <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                      Your subscription has expired
+                    </p>
+                  </div>
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    Your active subscription has expired on {formatDateTime(subscription.expiresAt)}. Please subscribe to a package again to continue using the service.
                   </p>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Crown className="h-6 w-6 text-emerald-600 dark:text-emerald-500" />
-                <span className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 capitalize">
-                  {subscription.planName}
-                </span>
-                <Badge className="bg-emerald-600 text-white">
-                  {subscription.status === "trial" ? "Trial" : "Active"}
-                </Badge>
-                <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-                  Subscription active
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 text-sm text-emerald-800 dark:text-emerald-200">
-                <span>
-                  <strong>Active from:</strong> {formatDateTime(subscription.currentPeriodStart ?? subscription.createdAt)}
-                </span>
-                <span>
-                  <strong>End date:</strong> {formatDateTime(subscription.expiresAt ?? subscription.nextBillingAt)}
-                </span>
-              </div>
-            </div>
-          )}
+              );
+            }
+            
+            // Show active subscription banner
+            if ((subscription?.status === "active" || subscription?.status === "trial") && subscription?.planName) {
+              return (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30 px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 relative">
+                  {/* Countdown in top right corner */}
+                  <div className="absolute top-4 right-6">
+                    <div className="space-y-1 text-right">
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Countdown</p>
+                      <p className={`text-sm font-semibold ${countdown.isDanger ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-300"}`}>
+                        {countdown.label}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Crown className="h-6 w-6 text-emerald-600 dark:text-emerald-500" />
+                    <span className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 capitalize">
+                      {subscription.planName}
+                    </span>
+                    <Badge className="bg-emerald-600 text-white">
+                      {subscription.status === "trial" ? "Trial" : "Active"}
+                    </Badge>
+                    <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                      Subscription active
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 text-sm text-emerald-800 dark:text-emerald-200">
+                    <span>
+                      <strong>Active from:</strong> {formatDateTime(subscription.currentPeriodStart ?? subscription.createdAt)}
+                    </span>
+                    <span>
+                      <strong>End date:</strong> {formatDateTime(subscription.expiresAt ?? subscription.nextBillingAt)}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+            
+            return null;
+          })()}
 
           {postCheckoutLoading && (
             <Alert>
@@ -1206,6 +1319,21 @@ export default function Subscription() {
                 Your subscription has been activated. Subscription ID: {safeSessionLabel(postCheckoutSession.subscription)}. Invoice: {safeSessionLabel(postCheckoutSession.invoice)}.
               </AlertDescription>
             </Alert>
+          )}
+
+          {/* Package Expired Message */}
+          {!subscription && !isLoading && (
+            <div className="rounded-lg border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 px-6 py-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                  Your package is expired
+                </p>
+              </div>
+              <p className="text-sm text-red-700 dark:text-red-300">
+                Your latest subscription package has expired. Please subscribe to a package again to continue using the service.
+              </p>
+            </div>
           )}
 
           {/* Current Subscription */}
@@ -1323,7 +1451,7 @@ export default function Subscription() {
                 </div>
 
                 {/* Current Invoice */}
-                {latestInvoice && (
+                {latestInvoice ? (
                   <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100">Current Invoice</h4>
@@ -1331,7 +1459,9 @@ export default function Subscription() {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          const dueDate = new Date(latestInvoice.periodEnd);
+                          // Use subscription.expiresAt as invoice end date, fallback to periodEnd
+                          const invoiceEndDate = latestInvoice.expiresAt || latestInvoice.periodEnd || subscription?.expiresAt;
+                          const dueDate = invoiceEndDate ? new Date(invoiceEndDate) : new Date(latestInvoice.periodEnd);
                           dueDate.setDate(dueDate.getDate() + 30);
                           setSelectedInvoice({
                             id: latestInvoice.id,
@@ -1394,13 +1524,27 @@ export default function Subscription() {
                         <div className="col-span-2">
                           <p className="text-base font-medium text-muted-foreground mb-1">Period</p>
                           <p className="font-medium text-base">
-                            Active from: {formatDateTime(latestInvoice.periodStart)} · End date: {formatDateTime(latestInvoice.periodEnd)}
+                            Active from: {formatDateTime(latestInvoice.periodStart)} · End date: {formatDateTime(latestInvoice.expiresAt || latestInvoice.periodEnd || subscription?.expiresAt)}
                           </p>
                         </div>
                       </div>
                     </div>
                   </div>
-                )}
+                ) : isLatestInvoiceExpired && latestInvoiceRaw ? (
+                  <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <div className="rounded-lg border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 px-6 py-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                        <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                          Your invoice is expired
+                        </p>
+                      </div>
+                      <p className="text-sm text-red-700 dark:text-red-300">
+                        Your invoice has expired on {formatDateTime(latestInvoiceRaw.expiresAt || latestInvoiceRaw.periodEnd || subscription?.expiresAt)}. This invoice has been moved to Billing History.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           )}
@@ -1638,6 +1782,7 @@ export default function Subscription() {
                       const isNotCancelled = status !== "cancelled";
                       
                       // Check if subscription is not expired
+                      // expiresAt must be > current date (not equal to or past current date)
                       // Parse dates as UTC to match database storage
                       const now = new Date();
                       let isNotExpired = true;
@@ -1668,7 +1813,13 @@ export default function Subscription() {
                             expiresDate = new Date(expiresAtStr);
                           }
                         }
-                        isNotExpired = expiresDate.getTime() > now.getTime();
+                        
+                        // Set time to start of day for date comparison (ignore time component)
+                        const expiresAtDate = new Date(expiresDate.getFullYear(), expiresDate.getMonth(), expiresDate.getDate());
+                        const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        
+                        // expiresAt must be > current date (not equal to or past current date)
+                        isNotExpired = expiresAtDate.getTime() > nowDate.getTime();
                       } else if (subscription?.nextBillingAt) {
                         // Parse nextBillingAt as UTC
                         const nextBillingStr = String(subscription.nextBillingAt).trim();
@@ -1695,7 +1846,13 @@ export default function Subscription() {
                             nextBillingDate = new Date(nextBillingStr);
                           }
                         }
-                        isNotExpired = nextBillingDate.getTime() > now.getTime();
+                        
+                        // Set time to start of day for date comparison (ignore time component)
+                        const nextBillingDateOnly = new Date(nextBillingDate.getFullYear(), nextBillingDate.getMonth(), nextBillingDate.getDate());
+                        const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        
+                        // nextBillingAt must be > current date (not equal to or past current date)
+                        isNotExpired = nextBillingDateOnly.getTime() > nowDate.getTime();
                       }
                       
                       // Also check status - if status is "expired", it's expired regardless of dates
@@ -1704,7 +1861,7 @@ export default function Subscription() {
                       }
                       
                       // Determine if this is the currently subscribed plan
-                      // Must match plan ID, be active, not expired, and not cancelled
+                      // Must match plan ID, be active, not expired (expiresAt > current date), and not cancelled
                       const isCurrentlySubscribed = isActive && isNotExpired && isNotCancelled;
                       
                       // Debug logging (only for admin users)
@@ -1729,21 +1886,32 @@ export default function Subscription() {
                       // This is the current plan
                       return (
                         <div className="space-y-2">
-                          <Button
-                            className="w-full text-sm"
-                            variant="outline"
-                            disabled={isCurrentlySubscribed}
-                      data-testid={`button-plan-${plan.id}`}
-                    >
-                            {isCurrentlySubscribed ? "Currently Subscribed" : "Expired"}
-                    </Button>
-                          {isCurrentlySubscribed && (
+                          {isCurrentlySubscribed ? (
+                            <>
+                              <Button
+                                className="w-full text-sm"
+                                variant="outline"
+                                disabled={true}
+                                data-testid={`button-plan-${plan.id}`}
+                              >
+                                Currently Subscribed
+                              </Button>
+                              <Button
+                                className="w-full text-sm"
+                                variant="destructive"
+                                onClick={() => setShowCancelDialog(true)}
+                              >
+                                Cancel Subscription
+                              </Button>
+                            </>
+                          ) : (
                             <Button
                               className="w-full text-sm"
-                              variant="destructive"
-                              onClick={() => setShowCancelDialog(true)}
+                              variant="default"
+                              onClick={() => handleStripeCheckout(plan)}
+                              data-testid={`button-plan-${plan.id}`}
                             >
-                              Cancel Subscription
+                              Subscribe Again
                             </Button>
                           )}
                         </div>

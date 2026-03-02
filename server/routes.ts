@@ -3687,37 +3687,88 @@ The Cura EMR Team`,
     }
   });
 
-  // Get current organization's subscription
+  // Get current organization's subscription (latest subscription where expire_at is not equal to or past current date)
   app.get("/api/subscriptions/current", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
 
-      // Query the database for the subscription
+      // Query the database for the latest subscription where expiresAt is not equal to or past current date
       const result = await db
-        .select()
-        .from(subscriptions)
-        .where(eq(subscriptions.organizationId, organizationId))
+        .select({
+          id: saasSubscriptions.id,
+          organizationId: saasSubscriptions.organizationId,
+          packageId: saasSubscriptions.packageId,
+          plan: saasPackages.name,
+          planName: saasPackages.name,
+          status: saasSubscriptions.status,
+          paymentStatus: saasSubscriptions.paymentStatus,
+          userLimit: saasSubscriptions.maxUsers,
+          monthlyPrice: saasPackages.price,
+          trialEndsAt: saasSubscriptions.trialEnd,
+          currentPeriodStart: saasSubscriptions.currentPeriodStart,
+          nextBillingAt: saasSubscriptions.currentPeriodEnd,
+          expiresAt: saasSubscriptions.expiresAt,
+          stripeSubscriptionId: saasSubscriptions.stripeSubscriptionId,
+          features: saasPackages.features,
+          createdAt: saasSubscriptions.createdAt,
+          updatedAt: saasSubscriptions.updatedAt,
+        })
+        .from(saasSubscriptions)
+        .leftJoin(saasPackages, eq(saasSubscriptions.packageId, saasPackages.id))
+        .where(
+          and(
+            eq(saasSubscriptions.organizationId, organizationId),
+            // Filter: expiresAt is NULL (doesn't expire) OR expiresAt > current date (not equal to or past)
+            // Compare dates only (ignore time component) - expiresAt date must be > current date
+            or(
+              isNull(saasSubscriptions.expiresAt),
+              sql`DATE(${saasSubscriptions.expiresAt}) > CURRENT_DATE`
+            )
+          )
+        )
+        .orderBy(desc(saasSubscriptions.createdAt))
         .limit(1);
 
       if (result.length === 0) {
-        return res.status(404).json({ error: "No subscription found for this organization" });
+        return res.status(404).json({ error: "No valid subscription found for this organization" });
       }
 
-      // Count actual users in the organization (excluding SaaS owners)
+      // Count actual users in the organization (excluding SaaS owners and patient role)
       const userCountResult = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(users)
         .where(and(
           eq(users.organizationId, organizationId),
-          eq(users.isSaaSOwner, false)
+          eq(users.isSaaSOwner, false),
+          ne(users.role, 'patient') // Exclude patient role - patients are counted separately
         ));
 
       const actualUserCount = userCountResult[0]?.count || 0;
 
-      // Return subscription with actual user count
+      // Count actual patients in the organization
+      const patientCountResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(patients)
+        .where(eq(patients.organizationId, organizationId));
+
+      const actualPatientCount = patientCountResult[0]?.count || 0;
+
+      // Get maxUsers and maxPatients from package features
+      const packageFeatures = result[0].features as any || {};
+      const maxUsers = packageFeatures.maxUsers || result[0].userLimit || 0;
+      const maxPatients = packageFeatures.maxPatients || 0;
+
+      // Return subscription with actual counts and limits
       res.json({
         ...result[0],
-        currentUsers: actualUserCount
+        currentUsers: actualUserCount,
+        currentPatients: actualPatientCount,
+        userLimit: maxUsers,
+        features: {
+          ...packageFeatures,
+          maxUsers: maxUsers,
+          maxPatients: maxPatients
+        }
       });
     } catch (error) {
       console.error("Subscription fetch error:", error);
@@ -3731,6 +3782,23 @@ The Cura EMR Team`,
       const organizationId = req.tenant!.id;
       const { saasPayments } = await import("../shared/schema");
 
+      // Get the latest subscription's expiresAt to use as invoice end date
+      const latestSubscription = await db
+        .select({
+          expiresAt: saasSubscriptions.expiresAt,
+        })
+        .from(saasSubscriptions)
+        .where(eq(saasSubscriptions.organizationId, organizationId))
+        .orderBy(desc(saasSubscriptions.createdAt))
+        .limit(1);
+
+      const invoiceEndDate = latestSubscription.length > 0 && latestSubscription[0].expiresAt
+        ? (latestSubscription[0].expiresAt instanceof Date 
+            ? latestSubscription[0].expiresAt.toISOString() 
+            : new Date(latestSubscription[0].expiresAt).toISOString())
+        : null;
+
+      // Get payments
       const payments = await db
         .select()
         .from(saasPayments)
@@ -3738,6 +3806,7 @@ The Cura EMR Team`,
         .orderBy(desc(saasPayments.paymentDate));
 
       // Format dates as UTC ISO strings to ensure no timezone conversion
+      // Use subscription.expiresAt as invoice end date for all invoices
       const formattedPayments = payments.map(payment => ({
         ...payment,
         paymentDate: payment.paymentDate 
@@ -3760,6 +3829,7 @@ The Cura EMR Team`,
               ? payment.periodEnd.toISOString() 
               : new Date(payment.periodEnd).toISOString())
           : null,
+        expiresAt: invoiceEndDate, // Invoice end date from latest subscription
         createdAt: payment.createdAt instanceof Date 
           ? payment.createdAt.toISOString() 
           : payment.createdAt,
