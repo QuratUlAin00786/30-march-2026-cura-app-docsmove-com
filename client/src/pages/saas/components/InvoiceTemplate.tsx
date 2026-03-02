@@ -48,6 +48,19 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
       });
     };
 
+    const formatDateTime = (date: string) => {
+      const d = new Date(date);
+      return d.toLocaleDateString("en-GB", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }) + ", " + d.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    };
+
     const getStatusBadge = (status: string) => {
       switch (status.toLowerCase()) {
         case "completed":
@@ -93,7 +106,7 @@ const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <div className="text-sm text-gray-600">
               <p>Invoice #{invoice.invoiceNumber}</p>
               <p>Date: {formatDate(invoice.createdAt)}</p>
-              <p>Due: {formatDate(invoice.dueDate)}</p>
+              <p>Due: {formatDateTime(invoice.dueDate)}</p>
             </div>
           </div>
         </div>

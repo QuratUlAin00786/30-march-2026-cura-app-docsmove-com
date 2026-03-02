@@ -1459,10 +1459,11 @@ export default function Subscription() {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          // Use subscription.expiresAt as invoice end date, fallback to periodEnd
-                          const invoiceEndDate = latestInvoice.expiresAt || latestInvoice.periodEnd || subscription?.expiresAt;
-                          const dueDate = invoiceEndDate ? new Date(invoiceEndDate) : new Date(latestInvoice.periodEnd);
-                          dueDate.setDate(dueDate.getDate() + 30);
+                          // Use subscription.expiresAt as invoice due date (at the time of invoice generation)
+                          // This is the expires_at datetime from saas_subscription
+                          const invoiceDueDate = subscription?.expiresAt || latestInvoice.expiresAt || latestInvoice.periodEnd;
+                          const dueDate = invoiceDueDate ? new Date(invoiceDueDate) : new Date(latestInvoice.periodEnd);
+                          
                           setSelectedInvoice({
                             id: latestInvoice.id,
                             invoiceNumber: latestInvoice.invoiceNumber,
@@ -1690,15 +1691,20 @@ export default function Subscription() {
                       if (!subscription) {
                         return (
                     <Button
+                      key={`upgrade-no-sub-${plan.id}`}
                       className="w-full text-sm"
                       variant={plan.popular ? "default" : "outline"}
                       disabled={loadingPlanId === plan.id}
-                            onClick={() => handleStripeCheckout(plan)}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleStripeCheckout(plan);
+                            }}
                             data-testid={`button-plan-${plan.id}`}
                           >
                             {loadingPlanId === plan.id 
                               ? "Loading..." 
-                              : `Upgrade (${plan.name}) Package`
+                              : `Upgrade ${plan.name} Package`
                             }
                           </Button>
                         );
@@ -1728,15 +1734,20 @@ export default function Subscription() {
                           // Upgrade button
                           return (
                             <Button
+                              key={`upgrade-${plan.id}`}
                               className="w-full text-sm"
                               variant={plan.popular ? "default" : "outline"}
                               disabled={upgradeLoading === plan.id}
-                              onClick={() => handleUpgrade(plan)}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleUpgrade(plan);
+                              }}
                               data-testid={`button-plan-${plan.id}`}
                             >
                               {upgradeLoading === plan.id 
                                 ? "Processing..." 
-                                : `Upgrade to ${plan.name}`
+                                : `Upgrade ${plan.name} Package`
                               }
                             </Button>
                           );
@@ -1762,9 +1773,14 @@ export default function Subscription() {
                           // Same price - switch plan
                           return (
                             <Button
+                              key={`switch-${plan.id}`}
                               className="w-full text-sm"
                               variant="outline"
-                              onClick={() => handleStripeCheckout(plan)}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleStripeCheckout(plan);
+                              }}
                             >
                               Switch to {plan.name}
                             </Button>
@@ -2056,8 +2072,12 @@ export default function Subscription() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => {
-                                  const dueDate = new Date(payment.periodEnd);
-                                  dueDate.setDate(dueDate.getDate() + 30);
+                                  // Use subscription.expiresAt as invoice due date (at the time of invoice generation)
+                                  // This is the expires_at datetime from saas_subscription
+                                  // For historical invoices, use invoice.expiresAt if available, otherwise subscription.expiresAt
+                                  const invoiceDueDate = payment.expiresAt || subscription?.expiresAt || payment.periodEnd;
+                                  const dueDate = invoiceDueDate ? new Date(invoiceDueDate) : new Date(payment.periodEnd);
+                                  
                                   setSelectedInvoice({
                                     id: payment.id,
                                     invoiceNumber: payment.invoiceNumber,

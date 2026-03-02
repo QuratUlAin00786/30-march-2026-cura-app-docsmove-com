@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Users, Calendar, Brain, CreditCard, Settings, UserCog, Crown, BarChart3, Plus, UserPlus, ClipboardPlus, Pill, Trash2 } from "lucide-react";
+import { Users, Calendar, Brain, CreditCard, Settings, UserCog, Crown, BarChart3, Plus, UserPlus, ClipboardPlus, Pill, Trash2, AlertTriangle } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -261,8 +261,8 @@ export function AdminDashboard() {
     staleTime: 0,
   });
 
-  // Fetch subscription data if user is admin (where expire_at is not equal to or past current date)
-  const { data: subscription, isLoading: subscriptionLoading } = useQuery({
+  // Fetch latest subscription data if user is admin (get latest subscription, then check if expired)
+  const { data: subscriptionResponse, isLoading: subscriptionLoading } = useQuery({
     queryKey: ["/api/subscriptions/current"],
     queryFn: async () => {
       const token = localStorage.getItem('auth_token');
@@ -280,42 +280,53 @@ export function AdminDashboard() {
       });
       
       if (!response.ok) {
+        // If 404, no subscription found
+        if (response.status === 404) {
+          return { expired: true, data: null };
+        }
         throw new Error(`HTTP ${response.status}`);
       }
       
       const subscriptionData = await response.json();
       
-      // Filter: Get latest subscription where expire_at is not equal to or past current date
-      if (subscriptionData) {
-        // If subscription has expiresAt, check if it's in the future
-        if (subscriptionData.expiresAt) {
-          const expiresAt = new Date(subscriptionData.expiresAt);
-          const now = new Date();
-          
-          // Set time to start of day for date comparison (ignore time component)
-          const expiresAtDate = new Date(expiresAt.getFullYear(), expiresAt.getMonth(), expiresAt.getDate());
-          const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          
-          // Check if expire_at is in the future (not equal to or past current date)
-          // expiresAt must be > current date (not equal to or past)
-          if (expiresAtDate.getTime() > nowDate.getTime()) {
-            return subscriptionData;
-          }
-          // Return null if subscription is expired
-          return null;
-        } else {
-          // If no expiresAt, return the subscription (it doesn't expire)
-          return subscriptionData;
+      // Check if the latest subscription is expired
+      // expiresAt datetime must be > current datetime (not equal to or past)
+      if (!subscriptionData) {
+        // No subscription data found
+        return { expired: true, data: null };
+      }
+      
+      // Check if subscription has expiresAt field
+      if (subscriptionData.expiresAt) {
+        const expiresAt = new Date(subscriptionData.expiresAt);
+        const now = new Date();
+        
+        // Validate the date
+        if (isNaN(expiresAt.getTime())) {
+          // Invalid date, treat as not expired
+          return { expired: false, data: subscriptionData };
+        }
+        
+        // Compare datetime (not just date) - expiresAt must be > current datetime
+        // If expiresAt <= now, subscription is expired
+        if (expiresAt.getTime() <= now.getTime()) {
+          // Subscription is expired - return with expired flag and data
+          return { expired: true, data: subscriptionData };
         }
       }
       
-      // Return null if no valid subscription found
-      return null;
+      // If subscription exists but has no expiresAt, it doesn't expire (return as not expired)
+      // Subscription is not expired
+      return { expired: false, data: subscriptionData };
     },
     retry: false,
     staleTime: 0,
     enabled: user?.role === 'admin' // Only fetch if user is admin
   });
+
+  // Extract subscription data and expired flag
+  const subscription = subscriptionResponse?.data;
+  const isSubscriptionExpired = subscriptionResponse?.expired || false;
 
   // Fetch users count (excluding role "patient") for the logged-in user's organization
   const { data: usersData, isLoading: usersLoading } = useQuery({
@@ -495,6 +506,29 @@ export function AdminDashboard() {
                 {subscriptionLoading ? (
                   <div className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
                     Loading subscription...
+                  </div>
+                ) : isSubscriptionExpired ? (
+                  <div className="rounded-lg border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 px-4 py-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                      <p className="text-base font-bold text-red-600 dark:text-red-400">
+                        Your subscription is expired
+                      </p>
+                    </div>
+                    <p className="text-sm text-red-700 dark:text-red-300">
+                      {subscription && subscription.expiresAt ? (
+                        <>Your subscription has expired on {new Date(subscription.expiresAt).toLocaleString('en-GB', { 
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric', 
+                          hour: '2-digit', 
+                          minute: '2-digit',
+                          hour12: true 
+                        })}. Please subscribe to a package again to continue using the service.</>
+                      ) : (
+                        <>Your subscription has expired. Please subscribe to a package again to continue using the service.</>
+                      )}
+                    </p>
                   </div>
                 ) : subscription ? (
                   <div className="space-y-3">

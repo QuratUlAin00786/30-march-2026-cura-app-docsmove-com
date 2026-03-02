@@ -3687,12 +3687,12 @@ The Cura EMR Team`,
     }
   });
 
-  // Get current organization's subscription (latest subscription where expire_at is not equal to or past current date)
+  // Get current organization's subscription (latest subscription, check expiration on client)
   app.get("/api/subscriptions/current", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
       const organizationId = req.tenant!.id;
 
-      // Query the database for the latest subscription where expiresAt is not equal to or past current date
+      // Query the database for the latest subscription (ordered by createdAt DESC) regardless of expiration
       const result = await db
         .select({
           id: saasSubscriptions.id,
@@ -3715,22 +3715,12 @@ The Cura EMR Team`,
         })
         .from(saasSubscriptions)
         .leftJoin(saasPackages, eq(saasSubscriptions.packageId, saasPackages.id))
-        .where(
-          and(
-            eq(saasSubscriptions.organizationId, organizationId),
-            // Filter: expiresAt is NULL (doesn't expire) OR expiresAt > current date (not equal to or past)
-            // Compare dates only (ignore time component) - expiresAt date must be > current date
-            or(
-              isNull(saasSubscriptions.expiresAt),
-              sql`DATE(${saasSubscriptions.expiresAt}) > CURRENT_DATE`
-            )
-          )
-        )
+        .where(eq(saasSubscriptions.organizationId, organizationId))
         .orderBy(desc(saasSubscriptions.createdAt))
         .limit(1);
 
       if (result.length === 0) {
-        return res.status(404).json({ error: "No valid subscription found for this organization" });
+        return res.status(404).json({ error: "No subscription found for this organization" });
       }
 
       // Count actual users in the organization (excluding SaaS owners and patient role)
