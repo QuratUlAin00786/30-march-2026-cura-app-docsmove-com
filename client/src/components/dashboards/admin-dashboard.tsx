@@ -10,6 +10,7 @@ import { AiInsightsPanel } from "../dashboard/ai-insights-panel";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
+import { format } from "date-fns";
 
 // Helper function to get the correct tenant subdomain
 function getTenantSubdomain(): string {
@@ -172,7 +173,7 @@ export function AdminDashboard() {
 
     deleteRoleMutation.mutate(roleId);
   };
-  const { data: stats, isLoading, error } = useQuery({
+  const { data: stats, isLoading, error, isFetching } = useQuery({
     queryKey: ["/api/dashboard/stats"],
     queryFn: async () => {
       const token = localStorage.getItem('auth_token');
@@ -201,6 +202,13 @@ export function AdminDashboard() {
     },
     retry: false,
     staleTime: 0,
+    // Only refetch when user returns to the tab, not continuously
+    // This prevents blinking and only updates when there's actual user interaction
+    refetchOnWindowFocus: true,
+    // Don't auto-refresh continuously - only fetch when database entry occurs via manual invalidation
+    refetchInterval: false,
+    // Keep previous data visible while refetching (prevents showing "--" during refetch)
+    keepPreviousData: true,
   });
 
   // Fetch all patients from the patients table to get total count
@@ -230,6 +238,9 @@ export function AdminDashboard() {
     },
     retry: false,
     staleTime: 0,
+    // Auto-refresh for admin role: poll every 10 seconds to get new patients
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
   });
 
   // Fetch active patients from the patients table to get active count
@@ -259,6 +270,9 @@ export function AdminDashboard() {
     },
     retry: false,
     staleTime: 0,
+    // Auto-refresh for admin role: poll every 10 seconds to get new active patients
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
   });
 
   // Fetch latest subscription data if user is admin (get latest subscription, then check if expired)
@@ -401,38 +415,100 @@ export function AdminDashboard() {
     enabled: user?.role === 'admin' // Only fetch if user is admin
   });
 
+  // Fetch appointments to calculate today's appointments client-side (more accurate than backend stats)
+  const { data: appointmentsData, isLoading: appointmentsLoading } = useQuery({
+    queryKey: ["/api/appointments"],
+    queryFn: async () => {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'X-Tenant-Subdomain': getTenantSubdomain()
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch('/api/appointments', {
+        headers,
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      return response.json();
+    },
+    retry: false,
+    staleTime: 0,
+    // Only refetch when user returns to the tab, not continuously
+    // This prevents blinking and only updates when there's actual user interaction
+    refetchOnWindowFocus: true,
+    // Don't auto-refresh continuously - only fetch when database entry occurs via manual invalidation
+    refetchInterval: false,
+    // Keep previous data visible while refetching (prevents showing "--" during refetch)
+    keepPreviousData: true,
+  });
+
+  // Calculate today's appointments client-side (matches calendar logic exactly)
+  // Calendar uses: apt.scheduledAt.substring(0, 10) === format(date, 'yyyy-MM-dd')
+  const today = new Date();
+  const todayDateString = format(today, 'yyyy-MM-dd');
+  
+  const todayAppointmentsCount = Array.isArray(appointmentsData)
+    ? appointmentsData.filter((apt: any) => {
+        // Extract date without timezone conversion: "2025-11-17T22:45:00" -> "2025-11-17"
+        const aptDateString = apt.scheduledAt ? apt.scheduledAt.substring(0, 10) : '';
+        return aptDateString === todayDateString && apt.status === 'scheduled';
+      }).length
+    : 0;
+
+  // Calculate today's cancelled appointments client-side
+  const todayCancelledAppointmentsCount = Array.isArray(appointmentsData)
+    ? appointmentsData.filter((apt: any) => {
+        // Extract date without timezone conversion: "2025-11-17T22:45:00" -> "2025-11-17"
+        const aptDateString = apt.scheduledAt ? apt.scheduledAt.substring(0, 10) : '';
+        return aptDateString === todayDateString && apt.status === 'cancelled';
+      }).length
+    : 0;
+
   const subdomain = getTenantSubdomain();
 
   const dashboardCards = [
     {
       title: "Total Patients",
       // Use stats.totalPatients if available (from database count), otherwise fall back to fetched patients count
-      value: isLoading || patientsLoading ? "--" : (stats?.totalPatients?.toString() || (Array.isArray(allPatients) ? allPatients.length.toString() : "0")),
-      description: isLoading || patientsLoading || activePatientsLoading ? "Loading..." : `${stats?.totalPatients || (Array.isArray(allPatients) ? allPatients.length : 0)} total patients • ${stats?.activePatients || (Array.isArray(activePatients) ? activePatients.length : 0)} active patients`,
+      // Only show "--" on initial load when no data exists yet
+      value: (isLoading && !stats) || (patientsLoading && !allPatients) ? "--" : (stats?.totalPatients?.toString() || (Array.isArray(allPatients) ? allPatients.length.toString() : "0")),
+      description: (isLoading && !stats) || (patientsLoading && !allPatients) || (activePatientsLoading && !activePatients) ? "Loading..." : `${stats?.totalPatients || (Array.isArray(allPatients) ? allPatients.length : 0)} total patients • ${stats?.activePatients || (Array.isArray(activePatients) ? activePatients.length : 0)} active patients`,
       icon: Users,
       href: `/${subdomain}/patients`,
       color: "text-blue-500"
     },
     {
       title: "Today's Appointments", 
-      value: isLoading ? "--" : (stats?.todayAppointments?.toString() || "0"),
-      description: isLoading ? "Loading..." : `${stats?.todayAppointments || 0} scheduled today${stats?.todayCancelledAppointments ? ` • ${stats.todayCancelledAppointments} cancelled today` : ''}`,
+      // Calculate from appointments data client-side (more accurate than backend stats)
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: (!appointmentsData && appointmentsLoading) ? "--" : todayAppointmentsCount.toString(),
+      description: (!appointmentsData && appointmentsLoading) ? "Loading..." : `${todayAppointmentsCount} scheduled today${todayCancelledAppointmentsCount > 0 ? ` • ${todayCancelledAppointmentsCount} cancelled today` : ''}`,
       icon: Calendar,
       href: `/${subdomain}/appointments`,
       color: "text-green-500"
     },
     {
       title: "AI Suggestions",
-      value: isLoading ? "--" : (stats?.aiSuggestions?.toString() || "0"), 
-      description: isLoading ? "Loading..." : `${stats?.aiSuggestions || 0} active insights`,
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: isLoading && !stats ? "--" : (stats?.aiSuggestions?.toString() || "0"), 
+      description: isLoading && !stats ? "Loading..." : `${stats?.aiSuggestions || 0} active insights`,
       icon: Brain,
       href: `/${subdomain}/clinical-decision-support?tab=insights`,
       color: "text-purple-500"
     },
     {
       title: "Total Revenue",
-      value: isLoading ? "--" : `£${(stats?.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      description: isLoading ? "Loading..." : "Total revenue received",
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: isLoading && !stats ? "--" : `£${(stats?.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      description: isLoading && !stats ? "Loading..." : "Total revenue received",
       icon: CreditCard,
       href: `/${subdomain}/billing`,
       color: "text-yellow-500"

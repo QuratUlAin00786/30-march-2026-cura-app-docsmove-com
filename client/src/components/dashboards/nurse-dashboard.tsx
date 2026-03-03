@@ -10,10 +10,18 @@ export function NurseDashboard() {
   const { user } = useAuth();
   const { data: stats, isLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
+    // Auto-refresh for nurse role: poll every 10 seconds to get new dashboard stats
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
+    // Keep previous data visible during refetch (prevents showing "--" during refetch)
+    keepPreviousData: true,
   });
 
   const { data: appointmentsData } = useQuery({
     queryKey: ["/api/appointments"],
+    // Auto-refresh for nurse role: poll every 10 seconds to get new appointments
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
   });
 
   const todayOwnAppointmentsCount = Array.isArray(appointmentsData)
@@ -39,7 +47,8 @@ export function NurseDashboard() {
     },
     {
       title: "Vital Signs Due",
-      value: isLoading ? "--" : "0",
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: isLoading && !stats ? "--" : "0",
       description: "Pending measurements",
       icon: Heart,
       href: "/patients",
@@ -47,7 +56,8 @@ export function NurseDashboard() {
     },
     {
       title: "Medication Admin",
-      value: isLoading ? "--" : "0",
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: isLoading && !stats ? "--" : "0",
       description: "Scheduled today",
       icon: Pill,
       href: "/prescriptions",

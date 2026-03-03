@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
 import AIChatbot from "@/components/ai-chatbot";
 import jsPDF from 'jspdf';
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
@@ -22,6 +23,13 @@ const statusColors = {
 export function PatientDashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  
+  // Track previous counts for auto-refresh notifications
+  const prevAppointmentsCountRef = useRef<number>(0);
+  const prevPrescriptionsCountRef = useRef<number>(0);
+  const prevPendingResultsCountRef = useRef<number>(0);
+  
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
   const [isPrescriptionsPopupOpen, setIsPrescriptionsPopupOpen] = useState(false);
   const [isLabResultsPopupOpen, setIsLabResultsPopupOpen] = useState(false);
@@ -133,6 +141,9 @@ export function PatientDashboard() {
     enabled: !!user, // Enable for any authenticated user
     staleTime: 0,
     refetchOnMount: true,
+    // Auto-refresh for patient role: poll every 10 seconds to get new appointments
+    refetchInterval: user?.role === "patient" ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: user?.role === "patient", // Continue polling even when tab is in background
   });
 
 
@@ -167,6 +178,9 @@ export function PatientDashboard() {
     enabled: !!user && user.role === 'patient',
     staleTime: 0,
     refetchOnMount: true,
+    // Auto-refresh for patient role: poll every 10 seconds to get new prescriptions
+    refetchInterval: user?.role === "patient" ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: user?.role === "patient", // Continue polling even when tab is in background
   });
 
   const { data: labResultsData } = useQuery({
@@ -297,6 +311,9 @@ export function PatientDashboard() {
     enabled: !!user && user.role === 'patient' && !!currentPatientId,
     staleTime: 0,
     refetchOnMount: true,
+    // Auto-refresh for patient role: poll every 10 seconds to get new pending results
+    refetchInterval: user?.role === "patient" && currentPatientId ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: user?.role === "patient", // Continue polling even when tab is in background
   });
 
   // Medical Imaging data query for patient - now dynamic based on current patient
@@ -436,6 +453,69 @@ export function PatientDashboard() {
 
   // Calculate total pending results count
   const totalPendingCount = (pendingResultsData?.totalCount || 0);
+
+  // Notify patient when new appointments are detected
+  useEffect(() => {
+    if (user?.role === "patient" && upcomingAppointmentsData) {
+      const currentCount = upcomingAppointmentsData.count || 0;
+      const previousCount = prevAppointmentsCountRef.current;
+
+      // Only show notification if count increased (new appointments added)
+      if (previousCount > 0 && currentCount > previousCount) {
+        const newAppointmentsCount = currentCount - previousCount;
+        toast({
+          title: "New Appointment Available",
+          description: `${newAppointmentsCount} new appointment${newAppointmentsCount > 1 ? 's' : ''} ${newAppointmentsCount > 1 ? 'have' : 'has'} been scheduled.`,
+          variant: "default",
+        });
+      }
+
+      // Update the ref with current count
+      prevAppointmentsCountRef.current = currentCount;
+    }
+  }, [upcomingAppointmentsData, user?.role, toast]);
+
+  // Notify patient when new prescriptions are detected
+  useEffect(() => {
+    if (user?.role === "patient" && totalPrescriptions !== undefined) {
+      const currentCount = totalPrescriptions;
+      const previousCount = prevPrescriptionsCountRef.current;
+
+      // Only show notification if count increased (new prescriptions added)
+      if (previousCount > 0 && currentCount > previousCount) {
+        const newPrescriptionsCount = currentCount - previousCount;
+        toast({
+          title: "New Prescription Available",
+          description: `${newPrescriptionsCount} new prescription${newPrescriptionsCount > 1 ? 's' : ''} ${newPrescriptionsCount > 1 ? 'have' : 'has'} been added.`,
+          variant: "default",
+        });
+      }
+
+      // Update the ref with current count
+      prevPrescriptionsCountRef.current = currentCount;
+    }
+  }, [totalPrescriptions, user?.role, toast]);
+
+  // Notify patient when new pending results are detected
+  useEffect(() => {
+    if (user?.role === "patient" && totalPendingCount !== undefined) {
+      const currentCount = totalPendingCount;
+      const previousCount = prevPendingResultsCountRef.current;
+
+      // Only show notification if count increased (new pending results added)
+      if (previousCount > 0 && currentCount > previousCount) {
+        const newPendingCount = currentCount - previousCount;
+        toast({
+          title: "New Pending Results Available",
+          description: `${newPendingCount} new pending result${newPendingCount > 1 ? 's' : ''} ${newPendingCount > 1 ? 'have' : 'has'} been added.`,
+          variant: "default",
+        });
+      }
+
+      // Update the ref with current count
+      prevPendingResultsCountRef.current = currentCount;
+    }
+  }, [totalPendingCount, user?.role, toast]);
 
   const patientCards = [
     {

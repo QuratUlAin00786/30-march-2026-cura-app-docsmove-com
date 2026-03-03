@@ -14,14 +14,25 @@ export function DoctorDashboard() {
   const { user } = useAuth();
   const { data: stats, isLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
+    // Auto-refresh for doctor role: poll every 10 seconds to get new dashboard stats
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
+    // Keep previous data visible during refetch (prevents showing "--" during refetch)
+    keepPreviousData: true,
   });
 
   const { data: appointmentsData } = useQuery({
     queryKey: ["/api/appointments"],
+    // Auto-refresh for doctor role: poll every 10 seconds to get new appointments
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
   });
 
   const { data: upcomingAppointments } = useQuery({
     queryKey: ["/api/appointments"],
+    // Auto-refresh for doctor role: poll every 10 seconds to get new appointments
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
     select: (data) => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -63,6 +74,11 @@ export function DoctorDashboard() {
     },
     retry: false,
     staleTime: 0,
+    // Auto-refresh for doctor role: poll every 10 seconds to get new patients
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
+    // Keep previous data visible during refetch (prevents showing "--" during refetch)
+    keepPreviousData: true,
   });
 
   // Fetch active patients from the patients table to get active count
@@ -92,6 +108,11 @@ export function DoctorDashboard() {
     },
     retry: false,
     staleTime: 0,
+    // Auto-refresh for doctor role: poll every 10 seconds to get new active patients
+    refetchInterval: 10000, // 10 seconds = 10000ms
+    refetchIntervalInBackground: true, // Continue polling even when tab is in background
+    // Keep previous data visible during refetch (prevents showing "--" during refetch)
+    keepPreviousData: true,
   });
 
   const subdomain = getTenantSubdomain();
@@ -107,8 +128,9 @@ export function DoctorDashboard() {
     },
     {
       title: "Total Patients",
-      value: patientsLoading ? "--" : (Array.isArray(allPatients) ? allPatients.length.toString() : "0"),
-      description: patientsLoading || activePatientsLoading ? "Loading..." : `${Array.isArray(allPatients) ? allPatients.length : 0} total patients • ${Array.isArray(activePatients) ? activePatients.length : 0} active patients`,
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: patientsLoading && !allPatients ? "--" : (Array.isArray(allPatients) ? allPatients.length.toString() : "0"),
+      description: (patientsLoading && !allPatients) || (activePatientsLoading && !activePatients) ? "Loading..." : `${Array.isArray(allPatients) ? allPatients.length : 0} total patients • ${Array.isArray(activePatients) ? activePatients.length : 0} active patients`,
       icon: Users,
       href: `/${subdomain}/patients`,
       color: "bg-green-100 text-green-800"
@@ -123,7 +145,8 @@ export function DoctorDashboard() {
     },
     {
       title: "Pending Prescriptions",
-      value: isLoading ? "--" : "0",
+      // Only show "--" on initial load when no data exists yet, keep previous value during refetch
+      value: isLoading && !stats ? "--" : "0",
       description: "Awaiting review",
       icon: Pill,
       href: `/${subdomain}/prescriptions`,

@@ -725,6 +725,9 @@ export default function ImagingPage() {
       }
     },
     enabled: !!user, // Only fetch when user is authenticated
+    // Auto-refresh for patient/admin/nurse/doctor roles: poll every 10 seconds to get new imaging results
+    refetchInterval: (user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)) ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: (user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)), // Continue polling even when tab is in background
   });
 
   // Filter medical images: patient = own only; nurse/doctor = own only; admin = all
@@ -752,6 +755,31 @@ export default function ImagingPage() {
     // For admin (and any other role), show all images
     return medicalImagesRaw;
   }, [medicalImagesRaw, user?.role, user?.id, currentPatient]);
+
+  // Track previous imaging results count for patient role to detect new entries
+  const prevImagingCountRef = React.useRef<number>(0);
+
+  // Notify patient/admin/nurse/doctor when new imaging results are detected
+  useEffect(() => {
+    const shouldNotify = user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role);
+    if (shouldNotify && Array.isArray(medicalImages)) {
+      const currentCount = medicalImages.length;
+      const previousCount = prevImagingCountRef.current;
+
+      // Only show notification if count increased (new imaging results added)
+      if (previousCount > 0 && currentCount > previousCount) {
+        const newImagingCount = currentCount - previousCount;
+        toast({
+          title: "New Imaging Results Available",
+          description: `${newImagingCount} new imaging result${newImagingCount > 1 ? 's' : ''} ${newImagingCount > 1 ? 'have' : 'has'} been added.`,
+          variant: "default",
+        });
+      }
+
+      // Update the ref with current count
+      prevImagingCountRef.current = currentCount;
+    }
+  }, [medicalImages, user?.role, toast]);
 
   // Derive selectedStudy from React Query cache (single source of truth)
   const selectedStudy = useMemo<ImagingStudy | null>(() => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -47,6 +47,7 @@ import { useTenant } from "@/hooks/use-tenant";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
+import { isDoctorLike } from "@/lib/role-utils";
 
 const statusColors = {
   scheduled: "text-white",
@@ -180,6 +181,7 @@ export default function AppointmentCalendar({ onNewAppointment }: { onNewAppoint
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
   const [dialogStable, setDialogStable] = useState(true);
   const [activeTab, setActiveTab] = useState("basic");
+  const [appointmentToDelete, setAppointmentToDelete] = useState<{ id: number; title: string } | null>(null);
   const [, setLocation] = useLocation();
 
   const { user } = useAuth();
@@ -873,9 +875,28 @@ const parseShiftTimeToMinutes = (time?: string): number => {
 
   // Handle delete appointment
   const handleDeleteAppointment = (appointmentId: number, appointmentTitle: string) => {
-    if (window.confirm(`Are you sure you want to delete "${appointmentTitle}"? This action cannot be undone.`)) {
-      deleteAppointmentMutation.mutate(appointmentId);
+    // Only show modal for admin role
+    if (user?.role === 'admin') {
+      setAppointmentToDelete({ id: appointmentId, title: appointmentTitle });
+    } else {
+      // For non-admin roles, use the old window.confirm as fallback
+      if (window.confirm(`Are you sure you want to delete "${appointmentTitle}"? This action cannot be undone.`)) {
+        deleteAppointmentMutation.mutate(appointmentId);
+      }
     }
+  };
+
+  // Confirm delete appointment
+  const confirmDeleteAppointment = () => {
+    if (appointmentToDelete) {
+      deleteAppointmentMutation.mutate(appointmentToDelete.id);
+      setAppointmentToDelete(null);
+    }
+  };
+
+  // Cancel delete appointment
+  const cancelDeleteAppointment = () => {
+    setAppointmentToDelete(null);
   };
 
   // Handle cancel appointment
@@ -1139,7 +1160,9 @@ Medical License: [License Number]
   const { data: appointmentsData, isLoading, refetch, error } = useQuery({
     queryKey: ["/api/appointments"],
     staleTime: 30000,
-    refetchInterval: 60000,
+    // Auto-refresh for admin/nurse/doctor roles: poll every 10 seconds to get new appointments
+    refetchInterval: (user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)) ? 10000 : 60000, // 10 seconds for admin/nurse/doctor, 60 seconds for others
+    refetchIntervalInBackground: (user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)), // Continue polling even when tab is in background
     retry: 3,
     retryDelay: 1000,
     queryFn: async () => {
@@ -4637,6 +4660,35 @@ Medical License: [License Number]
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Appointment Confirmation Modal - Admin Only */}
+      {user?.role === 'admin' && (
+        <Dialog open={appointmentToDelete !== null} onOpenChange={(open) => !open && setAppointmentToDelete(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete Appointment</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete "{appointmentToDelete?.title}"? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                onClick={cancelDeleteAppointment}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDeleteAppointment}
+                disabled={deleteAppointmentMutation.isPending}
+              >
+                {deleteAppointmentMutation.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Insufficient Time Available Warning Dialog */}
       <Dialog open={showInsufficientTimeWarning} onOpenChange={setShowInsufficientTimeWarning}>

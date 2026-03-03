@@ -1034,7 +1034,36 @@ export default function LabResultsPage() {
       }
     },
     enabled: !!user && patients.length > 0, // Wait for user and patients data to be loaded
+    // Auto-refresh for patient/admin/nurse/doctor roles: poll every 10 seconds to get new lab results
+    refetchInterval: (user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)) ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: (user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)), // Continue polling even when tab is in background
   });
+
+  // Track previous lab results count for patient/admin/nurse/doctor roles to detect new entries
+  const prevLabResultsCountRef = React.useRef<number>(0);
+  const { toast } = useToast();
+
+  // Notify patient/admin/nurse/doctor when new lab results are detected
+  useEffect(() => {
+    const shouldNotify = user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role);
+    if (shouldNotify && Array.isArray(labResults)) {
+      const currentCount = labResults.length;
+      const previousCount = prevLabResultsCountRef.current;
+
+      // Only show notification if count increased (new results added)
+      if (previousCount > 0 && currentCount > previousCount) {
+        const newResultsCount = currentCount - previousCount;
+        toast({
+          title: "New Lab Results Available",
+          description: `${newResultsCount} new lab result${newResultsCount > 1 ? 's' : ''} ${newResultsCount > 1 ? 'have' : 'has'} been added.`,
+          variant: "default",
+        });
+      }
+
+      // Update the ref with current count
+      prevLabResultsCountRef.current = currentCount;
+    }
+  }, [labResults, user?.role, toast]);
 
   // Compute unique test IDs for filter dropdown
   const uniqueTestIds = useMemo(() => {
@@ -1180,7 +1209,6 @@ export default function LabResultsPage() {
   // Use dynamic test types if available, otherwise fall back to default TEST_TYPES
   const availableTestTypes = dynamicTestTypes.length > 0 ? dynamicTestTypes : TEST_TYPES;
 
-  const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const createLabOrderMutation = useMutation({

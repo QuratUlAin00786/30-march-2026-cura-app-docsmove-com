@@ -2062,6 +2062,7 @@ export class DatabaseStorage implements IStorage {
           nextBillingAt: saasSubscriptions.currentPeriodEnd,
           expiresAt: saasSubscriptions.expiresAt,
           stripeSubscriptionId: saasSubscriptions.stripeSubscriptionId,
+          billingCycle: saasSubscriptions.billingCycle,
           features: saasPackages.features,
           createdAt: saasSubscriptions.createdAt,
           updatedAt: saasSubscriptions.updatedAt,

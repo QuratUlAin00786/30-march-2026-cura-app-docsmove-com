@@ -4592,16 +4592,98 @@ export default function BillingPage() {
               variant: "default",
             });
             
-            // Invalidate queries to refresh invoice list
-            queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
-            queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+            // Immediately update the invoice in the cache with optimistic update
+            // The invoices query returns an array directly, not an object
+            queryClient.setQueryData(["/api/billing/invoices"], (oldData: Invoice[] | undefined) => {
+              if (!oldData || !Array.isArray(oldData)) return oldData;
+              
+              return oldData.map((inv: Invoice) => 
+                inv.id === parseInt(invoiceId) 
+                  ? { 
+                      ...inv, 
+                      status: 'paid' as const, 
+                      paidAmount: inv.totalAmount,
+                      paymentMethod: 'Online Payment',
+                      paidDate: new Date().toISOString()
+                    }
+                  : inv
+              );
+            });
             
-            // Wait a moment for database to update, then refetch the invoice
+            // Also update doctor invoices cache if it exists (for doctor/nurse roles)
+            queryClient.setQueryData(["/api/billing/doctor-invoices"], (oldData: any) => {
+              if (!oldData) return oldData;
+              
+              // Update in all categories (overall, appointments, labResults, imaging)
+              const updateCategory = (category: Invoice[] | undefined) => {
+                if (!category || !Array.isArray(category)) return category;
+                return category.map((inv: Invoice) => 
+                  inv.id === parseInt(invoiceId) 
+                    ? { 
+                        ...inv, 
+                        status: 'paid' as const, 
+                        paidAmount: inv.totalAmount,
+                        paymentMethod: 'Online Payment',
+                        paidDate: new Date().toISOString()
+                      }
+                    : inv
+                );
+              };
+              
+              return {
+                ...oldData,
+                overall: updateCategory(oldData.overall),
+                appointments: updateCategory(oldData.appointments),
+                labResults: updateCategory(oldData.labResults),
+                imaging: updateCategory(oldData.imaging),
+              };
+            });
+            
+            // Invalidate and refetch queries to ensure data is fresh
+            await queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+            await queryClient.invalidateQueries({ queryKey: ["/api/billing/doctor-invoices"] });
+            await queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+            
+            // Force immediate refetch to update the UI
+            await queryClient.refetchQueries({ queryKey: ["/api/billing/invoices"] });
+            await queryClient.refetchQueries({ queryKey: ["/api/billing/doctor-invoices"] });
+            await queryClient.refetchQueries({ queryKey: ["/api/billing"] });
+            
+            // Wait a moment for database to update, then refetch the invoice for accuracy
             setTimeout(async () => {
               try {
                 const invoiceResponse = await apiRequest('GET', `/api/billing/invoices/${invoiceId}`);
                 if (invoiceResponse.ok) {
                   const updatedInvoice = await invoiceResponse.json();
+                  
+                  // Update cache with fresh data from server
+                  queryClient.setQueryData(["/api/billing/invoices"], (oldData: Invoice[] | undefined) => {
+                    if (!oldData || !Array.isArray(oldData)) return oldData;
+                    return oldData.map((inv: Invoice) => 
+                      inv.id === parseInt(invoiceId) ? updatedInvoice : inv
+                    );
+                  });
+                  
+                  // Update doctor invoices cache
+                  queryClient.setQueryData(["/api/billing/doctor-invoices"], (oldData: any) => {
+                    if (!oldData) return oldData;
+                    
+                    const updateCategory = (category: Invoice[] | undefined) => {
+                      if (!category || !Array.isArray(category)) return category;
+                      return category.map((inv: Invoice) => 
+                        inv.id === parseInt(invoiceId) ? updatedInvoice : inv
+                      );
+                    };
+                    
+                    return {
+                      ...oldData,
+                      overall: updateCategory(oldData.overall),
+                      appointments: updateCategory(oldData.appointments),
+                      labResults: updateCategory(oldData.labResults),
+                      imaging: updateCategory(oldData.imaging),
+                    };
+                  });
+                  
                   // Open the invoice view dialog with updated invoice data
                   setSelectedInvoice(updatedInvoice);
                 }
@@ -4861,6 +4943,108 @@ export default function BillingPage() {
     setEditedStatus(invoice.status);
     setIsEditingStatus(false);
     setIsInvoiceSaved(false);
+  };
+
+  const handlePayNow = async (invoice: Invoice) => {
+    try {
+      // Only allow payment for unpaid invoices
+      if (invoice.status === 'paid') {
+        toast({
+          title: "Invoice Already Paid",
+          description: "This invoice has already been paid.",
+          variant: "default",
+        });
+        return;
+      }
+
+      // Create Stripe Checkout session and redirect
+      const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+      const apiUrl = buildUrl('/api/billing/create-checkout-session');
+      const token = localStorage.getItem('auth_token');
+      
+      const checkoutResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+          'X-Tenant-Subdomain': subdomain,
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          invoiceId: invoice.id,
+          patientId: invoice.patientId
+        })
+      });
+      
+      const contentType = checkoutResponse.headers.get('content-type') || '';
+      
+      if (!checkoutResponse.ok) {
+        let errorMessage = 'Failed to create payment session';
+        
+        if (contentType.includes('application/json')) {
+          try {
+            const errorData = await checkoutResponse.json();
+            console.error('❌ [BILLING] Checkout error details:', errorData);
+            
+            // If onboarding URL is provided, handle onboarding redirect (same as admin/doctor/nurse)
+            if (errorData.onboardingUrl) {
+              const shouldRedirect = window.confirm(
+                'Your organization\'s Stripe account needs to complete onboarding to accept payments.\n\n' +
+                'Would you like to complete the onboarding process now?\n\n' +
+                'Click OK to go to Stripe onboarding, or Cancel to see error details.'
+              );
+              
+              if (shouldRedirect) {
+                // Redirect to onboarding - show toast first, then redirect
+                toast({
+                  title: "Redirecting to Stripe",
+                  description: "Please complete the onboarding process to enable payments.",
+                  variant: "default",
+                });
+                // Use setTimeout to allow toast to show before redirect
+                setTimeout(() => {
+                  window.location.href = errorData.onboardingUrl;
+                }, 500);
+                // Exit early - don't throw error if redirecting
+                return;
+              }
+            }
+            
+            // Show the actual error message from Stripe or server
+            errorMessage = errorData.message || errorData.error || errorData.stripeError || errorMessage;
+            
+            // Include details if available
+            if (errorData.details) {
+              errorMessage += `\n\n${errorData.details}`;
+            }
+          } catch (parseError) {
+            console.error('Failed to parse error response:', parseError);
+          }
+        } else {
+          const errorText = await checkoutResponse.text();
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const checkoutData = contentType.includes('application/json')
+        ? await checkoutResponse.json()
+        : JSON.parse(await checkoutResponse.text());
+      
+      if (checkoutData.url) {
+        // Redirect to Stripe Checkout
+        window.location.href = checkoutData.url;
+      } else {
+        throw new Error('No checkout URL received from server');
+      }
+    } catch (error: any) {
+      console.error('Error creating checkout session:', error);
+      toast({
+        title: "Payment Error",
+        description: error.message || "Failed to initiate payment. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleUpdateStatus = async () => {
@@ -5324,10 +5508,6 @@ export default function BillingPage() {
     }
   };
 
-  const handlePayNow = (invoice: Invoice) => {
-    setInvoiceToPay(invoice);
-    setShowPaymentModal(true);
-  };
 
   // Insurance claims handlers
   const handleSubmitClaim = (invoice: Invoice) => {
@@ -8902,6 +9082,15 @@ export default function BillingPage() {
                                         <Eye className="h-4 w-4 mr-2" />
                                         View
                                       </DropdownMenuItem>
+                                      {isPatient && invoice.status !== 'paid' && (
+                                        <DropdownMenuItem
+                                          onClick={() => handlePayNow(invoice)}
+                                          data-testid="button-pay-now-list"
+                                        >
+                                          <CreditCard className="h-4 w-4 mr-2" />
+                                          Pay Now
+                                        </DropdownMenuItem>
+                                      )}
                                       {!isPatient && canDelete('billing') && (
                                         <DropdownMenuItem
                                           onClick={() => handleDeleteInvoice(invoice.id)}
@@ -9108,6 +9297,18 @@ export default function BillingPage() {
                               </Button>
                               {isPatient && (
                                 <>
+                                  {invoice.status !== 'paid' && (
+                                    <Button 
+                                      variant="default" 
+                                      size="sm" 
+                                      onClick={() => handlePayNow(invoice)} 
+                                      data-testid="button-pay-now-grid"
+                                      className="bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                      <CreditCard className="h-4 w-4 mr-1" />
+                                      Pay Now
+                                    </Button>
+                                  )}
                                   {savedInvoiceIds.has(invoice.id) && (
                                     <Button 
                                       variant="outline" 

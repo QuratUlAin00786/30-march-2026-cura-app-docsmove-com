@@ -33,7 +33,9 @@ export default function NurseAppointments({ onNewAppointment }: { onNewAppointme
   const { data: appointmentsData, isLoading } = useQuery({
     queryKey: ["/api/appointments"],
     staleTime: 30000,
-    refetchInterval: 60000,
+    // Auto-refresh for nurse role: poll every 10 seconds to get new appointments
+    refetchInterval: user?.role === "nurse" ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: user?.role === "nurse", // Continue polling even when tab is in background
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/appointments');
       const data = await response.json();

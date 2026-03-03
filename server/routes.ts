@@ -55,7 +55,7 @@ import sharp from 'sharp';
 // Initialize Stripe with secret key only if provided (conditional to avoid crashes)
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: '2025-07-30.basil',
+    apiVersion: '2024-12-18.acacia', // Use stable API version that supports retrieveUpcoming
   })
   : null;
 
@@ -3361,7 +3361,14 @@ The Cura EMR Team`,
   });
 
   // Protected routes (auth required)
-  app.use("/api", authMiddleware);
+  // Exclude /saas/ routes - they have their own auth middleware chain
+  app.use("/api", (req, res, next) => {
+    // Skip auth middleware for SaaS routes (they handle their own auth)
+    if (req.path.startsWith('/saas/')) {
+      return next();
+    }
+    return authMiddleware(req, res, next);
+  });
 
   // POST /api/radiology-images (must be after app.use("/api", authMiddleware) so it uses the same auth as all /api routes)
   app.post("/api/radiology-images", async (req: TenantRequest, res) => {
@@ -10408,6 +10415,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           nextBillingAt: null,
           expiresAt: null,
           stripeSubscriptionId: null,
+          billingCycle: "monthly",
           features: {
             aiInsights: true,
             advancedReporting: true,
@@ -10485,10 +10493,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
-  // Upgrade subscription (immediate effect with proration)
-  app.post("/api/saas/billing/upgrade", tenantMiddleware, authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+  // Preview upcoming invoice for upgrade (before actually upgrading)
+  app.post("/api/saas/billing/preview-upgrade", tenantMiddleware, authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
+      console.log("[PREVIEW UPGRADE] Preview request received:", {
+        body: req.body,
+        organizationId: req.organizationId,
+        userId: req.user?.id,
+      });
+
       if (!stripe) {
+        console.error("[PREVIEW UPGRADE] Stripe is not configured");
         return res.status(500).json({ error: "Stripe is not configured" });
       }
 
@@ -10496,7 +10511,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const organizationId = requireOrgId(req);
 
       if (!subscriptionId || !newPackageId || !billingCycle) {
-        return res.status(400).json({ error: "Missing required fields: subscriptionId, newPackageId, billingCycle" });
+        console.error("[PREVIEW UPGRADE] Missing required fields:", { subscriptionId, newPackageId, billingCycle });
+        return res.status(400).json({ 
+          error: "Missing required fields",
+          details: { subscriptionId, newPackageId, billingCycle }
+        });
       }
 
       // Get current subscription
@@ -10519,28 +10538,160 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: "Subscription does not have Stripe ID" });
       }
 
+      // Get Stripe subscription first to check items
+      let stripeSubscription;
+      try {
+        stripeSubscription = await stripe.subscriptions.retrieve(
+          currentSubscription.stripeSubscriptionId
+        );
+        console.log("[PREVIEW UPGRADE] Stripe subscription retrieved:", stripeSubscription.id);
+      } catch (stripeRetrieveError: any) {
+        console.error("[PREVIEW UPGRADE] Error retrieving Stripe subscription:", stripeRetrieveError);
+        return res.status(500).json({
+          error: "Failed to retrieve Stripe subscription",
+          message: stripeRetrieveError.message || "Stripe API error",
+        });
+      }
+
+      if (!stripeSubscription.items.data[0]?.id) {
+        console.error("[PREVIEW UPGRADE] Stripe subscription has no items:", stripeSubscription.id);
+        return res.status(400).json({ error: "Stripe subscription has no items" });
+      }
+
       // Get new package and price ID
-      const newPriceId = await getStripePriceId(newPackageId, billingCycle);
+      // Normalize billing cycle: 'yearly' -> 'annual'
+      const normalizedBillingCycle = (billingCycle === 'yearly' || billingCycle === 'annual') ? 'annual' : 'monthly';
+      let newPriceId: string;
+      try {
+        newPriceId = await getStripePriceId(newPackageId, normalizedBillingCycle as "monthly" | "annual");
+        console.log("[PREVIEW UPGRADE] New price ID retrieved:", newPriceId);
+      } catch (priceError: any) {
+        console.error("[PREVIEW UPGRADE] Error getting Stripe price ID:", priceError);
+        return res.status(500).json({
+          error: "Failed to get Stripe price ID",
+          message: priceError.message || "Package does not have a Stripe Price ID configured",
+        });
+      }
 
-      // Get Stripe subscription
-      const stripeSubscription = await stripe.subscriptions.retrieve(
-        currentSubscription.stripeSubscriptionId
-      );
+      // Preview upcoming invoice with proration
+      // Use manual calculation as primary method since retrieveUpcoming may not be available
+      let upcomingInvoice: any;
+      
+      const customerId =
+        typeof stripeSubscription.customer === "string"
+          ? stripeSubscription.customer
+          : (stripeSubscription.customer as any)?.id;
 
-      // Update Stripe subscription with proration (immediate upgrade)
-      const updatedSubscription = await stripe.subscriptions.update(
-        currentSubscription.stripeSubscriptionId,
-        {
-          items: [{
-            id: stripeSubscription.items.data[0].id,
-            price: newPriceId,
-          }],
-          proration_behavior: 'create_prorations', // Immediate upgrade with credit
+      if (!customerId) {
+        console.error("[PREVIEW UPGRADE] Missing Stripe customer on subscription:", {
+          stripeSubscriptionId: stripeSubscription.id,
+          customer: stripeSubscription.customer,
+        });
+        return res.status(500).json({
+          error: "Failed to preview upgrade invoice",
+          message: "Stripe subscription is missing customer ID",
+        });
+      }
+
+      console.log("[PREVIEW UPGRADE] Calculating proration for upgrade:", {
+        customer: customerId,
+        subscription: currentSubscription.stripeSubscriptionId,
+        itemId: stripeSubscription.items.data[0].id,
+        newPriceId,
+      });
+      
+      // Always use manual calculation (more reliable and doesn't depend on Stripe SDK method availability)
+      try {
+        // Get current and new price details
+        const currentPrice = stripeSubscription.items.data[0].price;
+        const currentPriceAmount = currentPrice?.unit_amount || 0;
+        const newPrice = await stripe.prices.retrieve(newPriceId);
+        const newPriceAmount = newPrice.unit_amount || 0;
+        
+        // Calculate proration
+        const now = Math.floor(Date.now() / 1000);
+        const periodEnd = stripeSubscription.current_period_end;
+        const periodStart = stripeSubscription.current_period_start;
+        
+        if (!periodEnd || !periodStart || periodEnd <= periodStart) {
+          throw new Error("Invalid subscription period dates");
         }
-      );
+        
+        const periodLength = periodEnd - periodStart;
+        const remainingTime = Math.max(0, periodEnd - now);
+        const remainingRatio = periodLength > 0 ? remainingTime / periodLength : 0;
+        
+        // Calculate credit for unused portion of current plan
+        const unusedCredit = Math.round(currentPriceAmount * remainingRatio);
+        // Calculate cost for new plan for remaining period
+        const newPlanCost = Math.round(newPriceAmount * remainingRatio);
+        // Amount due is the difference
+        const amountDue = Math.max(0, newPlanCost - unusedCredit);
+        
+        // Create invoice preview object for the response
+        upcomingInvoice = {
+          id: 'preview_' + Date.now(),
+          amount_due: amountDue,
+          currency: newPrice.currency || 'gbp',
+          subtotal: newPlanCost,
+          total: amountDue,
+          prorationCredit: unusedCredit / 100, // Store for easy access in response
+          lines: {
+            data: [
+              {
+                amount: -unusedCredit,
+                description: 'Unused credit from current plan',
+                proration: true,
+              },
+              {
+                amount: newPlanCost,
+                description: `Prorated charge for new plan (${Math.ceil(remainingTime / 86400)} days remaining)`,
+              },
+            ],
+          },
+        };
+        
+        console.log("[PREVIEW UPGRADE] Calculated proration manually:", {
+          unusedCredit: unusedCredit / 100,
+          newPlanCost: newPlanCost / 100,
+          amountDue: amountDue / 100,
+          daysRemaining: Math.ceil(remainingTime / 86400),
+        });
+      } catch (calcError: any) {
+        console.error("[PREVIEW UPGRADE] Error in proration calculation:", {
+          message: calcError.message,
+          stack: calcError.stack,
+        });
+        return res.status(500).json({
+          error: "Failed to calculate upgrade preview",
+          message: calcError.message || "Error calculating proration",
+        });
+      }
 
-      // Get old and new package details for history
-      const [oldPackage] = currentSubscription.packageId
+      // Calculate days remaining
+      const now = Math.floor(Date.now() / 1000);
+      const periodEnd = stripeSubscription.current_period_end;
+      
+      // Safely calculate days remaining with validation
+      let daysRemaining = 0;
+      if (periodEnd && typeof periodEnd === 'number' && !isNaN(periodEnd)) {
+        daysRemaining = Math.max(0, Math.ceil((periodEnd - now) / (60 * 60 * 24)));
+      } else {
+        // Fallback: use subscription's currentPeriodEnd from database
+        if (currentSubscription.currentPeriodEnd) {
+          const dbPeriodEnd = currentSubscription.currentPeriodEnd instanceof Date
+            ? currentSubscription.currentPeriodEnd
+            : new Date(currentSubscription.currentPeriodEnd);
+          if (!isNaN(dbPeriodEnd.getTime())) {
+            const dbPeriodEndUnix = Math.floor(dbPeriodEnd.getTime() / 1000);
+            daysRemaining = Math.max(0, Math.ceil((dbPeriodEndUnix - now) / (60 * 60 * 24)));
+          }
+        }
+        console.warn("[PREVIEW UPGRADE] Invalid periodEnd from Stripe, using database value. Stripe periodEnd:", periodEnd);
+      }
+
+      // Get current and new package details
+      const [currentPackage] = currentSubscription.packageId
         ? await db
             .select()
             .from(saasPackages)
@@ -10553,56 +10704,428 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         .where(eq(saasPackages.id, newPackageId))
         .limit(1);
 
-      // Update database
-      await db
-        .update(saasSubscriptions)
-        .set({
-          packageId: newPackageId,
-          stripePriceId: newPriceId,
-          billingCycle: billingCycle,
-          currentPeriodStart: new Date(updatedSubscription.current_period_start * 1000),
-          currentPeriodEnd: new Date(updatedSubscription.current_period_end * 1000),
-          updatedAt: new Date(),
-        })
-        .where(eq(saasSubscriptions.id, subscriptionId));
-
-      // Log subscription history
-      await logSubscriptionHistory({
-        organizationId,
-        subscriptionId,
-        action: "upgrade",
-        performedBy: req.user?.id,
-        performedByType: "org_admin",
-        oldPackageId: currentSubscription.packageId || undefined,
-        newPackageId: newPackageId,
-        oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
-        newBillingCycle: billingCycle as "monthly" | "annual",
-        oldStatus: currentSubscription.status || undefined,
-        newStatus: currentSubscription.status || undefined,
-        oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
-        newPrice: newPackage?.price ? Number(newPackage.price) : undefined,
-        details: {
-          prorationAmount: updatedSubscription.latest_invoice?.amount_due ? updatedSubscription.latest_invoice.amount_due / 100 : undefined,
-          stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
-        },
-        ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
-        userAgent: req.headers["user-agent"] || undefined,
-      });
-
       res.json({
         success: true,
-        message: "Subscription upgraded successfully. New features are now active.",
-        subscription: {
-          packageId: newPackageId,
-          billingCycle: billingCycle,
-          currentPeriodEnd: updatedSubscription.current_period_end * 1000,
+        amountDue: upcomingInvoice.amount_due / 100, // Convert from cents
+        currency: upcomingInvoice.currency,
+        daysRemaining,
+        currentPlan: {
+          name: currentPackage?.name || 'Current Plan',
+          price: currentPackage?.price ? Number(currentPackage.price) : 0,
+        },
+        newPlan: {
+          name: newPackage?.name || 'New Plan',
+          price: newPackage?.price ? Number(newPackage.price) : 0,
+        },
+        // Proration credit (unused portion of current plan)
+        prorationCredit: (() => {
+          // Extract from manual calculation or Stripe invoice
+          const prorationLine = upcomingInvoice.lines?.data?.find((line: any) => line.proration === true);
+          if (prorationLine && prorationLine.amount < 0) {
+            return Math.abs(prorationLine.amount) / 100;
+          }
+          // Fallback: calculate from invoice if not in lines
+          // For manual calculation, unusedCredit is already calculated
+          return upcomingInvoice.prorationCredit || 0;
+        })(),
+        invoicePreview: {
+          subtotal: upcomingInvoice.subtotal / 100,
+          total: upcomingInvoice.total / 100,
+          amountDue: upcomingInvoice.amount_due / 100,
         },
       });
     } catch (error: any) {
-      console.error("Upgrade subscription error:", error);
+      console.error("[PREVIEW UPGRADE] Unexpected error:", {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
+      res.status(500).json({
+        error: "Failed to preview upgrade",
+        message: error.message || "An unexpected error occurred",
+      });
+    }
+  });
+
+  // Upgrade subscription (immediate effect with proration)
+  app.post("/api/saas/billing/upgrade", tenantMiddleware, authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      console.log("[UPGRADE] Upgrade request received:", {
+        body: req.body,
+        organizationId: req.organizationId,
+        userId: req.user?.id,
+      });
+
+      if (!stripe) {
+        console.error("[UPGRADE] Stripe is not configured");
+        return res.status(500).json({ error: "Stripe is not configured" });
+      }
+
+      const { subscriptionId, newPackageId, billingCycle } = req.body;
+      
+      if (!subscriptionId || !newPackageId || !billingCycle) {
+        console.error("[UPGRADE] Missing required fields:", { subscriptionId, newPackageId, billingCycle });
+        return res.status(400).json({ 
+          error: "Missing required fields",
+          details: { subscriptionId, newPackageId, billingCycle }
+        });
+      }
+
+      const organizationId = requireOrgId(req);
+      console.log("[UPGRADE] Organization ID:", organizationId);
+
+      // Get current subscription
+      const [currentSubscription] = await db
+        .select()
+        .from(saasSubscriptions)
+        .where(
+          and(
+            eq(saasSubscriptions.id, subscriptionId),
+            eq(saasSubscriptions.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (!currentSubscription) {
+        console.error("[UPGRADE] Subscription not found:", { subscriptionId, organizationId });
+        return res.status(404).json({ error: "Subscription not found" });
+      }
+
+      if (!currentSubscription.stripeSubscriptionId) {
+        console.error("[UPGRADE] Subscription does not have Stripe ID:", subscriptionId);
+        return res.status(400).json({ error: "Subscription does not have Stripe ID" });
+      }
+
+      console.log("[UPGRADE] Current subscription found:", {
+        id: currentSubscription.id,
+        stripeSubscriptionId: currentSubscription.stripeSubscriptionId,
+        packageId: currentSubscription.packageId,
+      });
+
+      // Get Stripe subscription first
+      let stripeSubscription;
+      try {
+        stripeSubscription = await stripe.subscriptions.retrieve(
+          currentSubscription.stripeSubscriptionId
+        );
+        console.log("[UPGRADE] Stripe subscription retrieved:", stripeSubscription.id);
+      } catch (stripeRetrieveError: any) {
+        console.error("[UPGRADE] Error retrieving Stripe subscription:", stripeRetrieveError);
+        return res.status(500).json({
+          error: "Failed to retrieve Stripe subscription",
+          message: stripeRetrieveError.message || "Stripe API error",
+        });
+      }
+
+      if (!stripeSubscription.items.data[0]?.id) {
+        console.error("[UPGRADE] Stripe subscription has no items:", stripeSubscription.id);
+        return res.status(400).json({ error: "Stripe subscription has no items" });
+      }
+
+      // Get new package and price ID
+      // Normalize billing cycle: 'yearly' -> 'annual'
+      const normalizedBillingCycle = (billingCycle === 'yearly' || billingCycle === 'annual') ? 'annual' : 'monthly';
+      let newPriceId: string;
+      try {
+        newPriceId = await getStripePriceId(newPackageId, normalizedBillingCycle as "monthly" | "annual");
+        console.log("[UPGRADE] New price ID retrieved:", newPriceId);
+      } catch (priceError: any) {
+        console.error("[UPGRADE] Error getting Stripe price ID:", priceError);
+        return res.status(500).json({
+          error: "Failed to get Stripe price ID",
+          message: priceError.message || "Package does not have a Stripe Price ID configured",
+        });
+      }
+
+      // Create Stripe Checkout Session for upgrade (recommended approach)
+      // This handles payment UI and subscription update automatically
+      const customerId = typeof stripeSubscription.customer === "string"
+        ? stripeSubscription.customer
+        : (stripeSubscription.customer as any)?.id;
+
+      if (!customerId) {
+        console.error("[UPGRADE] Missing customer ID on subscription");
+        return res.status(500).json({
+          error: "Failed to upgrade subscription",
+          message: "Subscription is missing customer ID",
+        });
+      }
+
+      // Get frontend URL for redirects
+      const baseUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
+      const subscriptionPath = '/subscription'; // Adjust if your path is different
+
+      console.log("[UPGRADE] Creating Checkout Session for upgrade:", {
+        customer: customerId,
+        subscription: currentSubscription.stripeSubscriptionId,
+        newPriceId,
+        baseUrl,
+      });
+
+      let checkoutSession;
+      try {
+        // Create Checkout Session that updates the existing subscription
+        // For upgrades, we update the subscription and handle payment via Checkout
+        checkoutSession = await stripe.checkout.sessions.create({
+          mode: "subscription",
+          customer: customerId,
+          line_items: [
+            {
+              price: newPriceId,
+              quantity: 1,
+            },
+          ],
+          payment_method_types: ["card"],
+          success_url: `${baseUrl}${subscriptionPath}?success=true&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}${subscriptionPath}?canceled=true`,
+          metadata: {
+            subscriptionId: subscriptionId.toString(),
+            organizationId: organizationId.toString(),
+            newPackageId: newPackageId.toString(),
+            billingCycle: billingCycle,
+            action: "upgrade",
+            existingSubscriptionId: currentSubscription.stripeSubscriptionId,
+          },
+          // Update the existing subscription with proration
+          subscription_data: {
+            // Note: To update an existing subscription, we'll handle it via webhook
+            // or update it after checkout completes
+            metadata: {
+              upgrade_from_subscription: currentSubscription.stripeSubscriptionId,
+              upgrade_subscription_id: subscriptionId.toString(),
+            },
+          },
+        });
+
+        console.log("[UPGRADE] Checkout Session created:", checkoutSession.id);
+
+        // Return the checkout URL for frontend redirect
+        return res.json({
+          success: true,
+          message: "Redirecting to payment...",
+          url: checkoutSession.url,
+          sessionId: checkoutSession.id,
+        });
+      } catch (stripeError: any) {
+        console.error("[UPGRADE] Stripe Checkout Session creation error:", {
+          message: stripeError.message,
+          type: stripeError.type,
+          code: stripeError.code,
+          stack: stripeError.stack,
+        });
+        return res.status(500).json({
+          error: "Failed to create checkout session",
+          message: stripeError.message || "Stripe API error",
+          details: stripeError.type === 'StripeInvalidRequestError' ? 'Invalid price ID or subscription configuration' : undefined,
+        });
+      }
+
+      // Get old and new package details for history
+      let oldPackage = null;
+      let newPackage = null;
+      try {
+        if (currentSubscription.packageId) {
+          const [oldPkg] = await db
+            .select()
+            .from(saasPackages)
+            .where(eq(saasPackages.id, currentSubscription.packageId))
+            .limit(1);
+          oldPackage = oldPkg || null;
+        }
+        
+        const [newPkg] = await db
+          .select()
+          .from(saasPackages)
+          .where(eq(saasPackages.id, newPackageId))
+          .limit(1);
+        newPackage = newPkg || null;
+
+        if (!newPackage) {
+          console.error("[UPGRADE] New package not found:", newPackageId);
+          return res.status(404).json({ error: "New package not found" });
+        }
+      } catch (packageError: any) {
+        console.error("[UPGRADE] Error fetching package details:", packageError);
+        return res.status(500).json({
+          error: "Failed to fetch package details",
+          message: packageError.message,
+        });
+      }
+
+      // Update database
+      let currentPeriodStart: Date;
+      let currentPeriodEnd: Date;
+      try {
+        // Safely convert Stripe timestamps to Date objects
+        currentPeriodStart = updatedSubscription.current_period_start
+          ? new Date(updatedSubscription.current_period_start * 1000)
+          : currentSubscription.currentPeriodStart || new Date();
+        
+        currentPeriodEnd = updatedSubscription.current_period_end
+          ? new Date(updatedSubscription.current_period_end * 1000)
+          : currentSubscription.currentPeriodEnd || new Date();
+
+        // Validate dates are valid
+        if (isNaN(currentPeriodStart.getTime())) {
+          console.error("[UPGRADE] Invalid currentPeriodStart:", updatedSubscription.current_period_start);
+          throw new Error("Invalid current period start date from Stripe");
+        }
+        if (isNaN(currentPeriodEnd.getTime())) {
+          console.error("[UPGRADE] Invalid currentPeriodEnd:", updatedSubscription.current_period_end);
+          throw new Error("Invalid current period end date from Stripe");
+        }
+
+        console.log("[UPGRADE] Updating database with dates:", {
+          currentPeriodStart: currentPeriodStart.toISOString(),
+          currentPeriodEnd: currentPeriodEnd.toISOString(),
+        });
+
+        await db
+          .update(saasSubscriptions)
+          .set({
+            packageId: newPackageId,
+            stripePriceId: newPriceId,
+            billingCycle: billingCycle,
+            currentPeriodStart: currentPeriodStart,
+            currentPeriodEnd: currentPeriodEnd,
+            updatedAt: new Date(),
+          })
+          .where(eq(saasSubscriptions.id, subscriptionId));
+        console.log("[UPGRADE] Database updated successfully");
+      } catch (dbError: any) {
+        console.error("[UPGRADE] Error updating database:", {
+          message: dbError.message,
+          stack: dbError.stack,
+          error: dbError,
+        });
+        return res.status(500).json({
+          error: "Failed to update subscription in database",
+          message: dbError.message || "Database update failed",
+        });
+      }
+
+      // Log subscription history (non-blocking)
+      try {
+        await logSubscriptionHistory({
+          organizationId,
+          subscriptionId,
+          action: "upgrade",
+          performedBy: req.user?.id,
+          performedByType: "org_admin",
+          oldPackageId: currentSubscription.packageId || undefined,
+          newPackageId: newPackageId,
+          oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+          newBillingCycle: billingCycle as "monthly" | "annual",
+          oldStatus: currentSubscription.status || undefined,
+          newStatus: currentSubscription.status || undefined,
+          oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+          newPrice: newPackage?.price ? Number(newPackage.price) : undefined,
+          details: {
+            prorationAmount: updatedSubscription.latest_invoice && typeof updatedSubscription.latest_invoice === 'object' && 'amount_due' in updatedSubscription.latest_invoice
+              ? (updatedSubscription.latest_invoice.amount_due as number) / 100
+              : undefined,
+            stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+          },
+          ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+          userAgent: req.headers["user-agent"] || undefined,
+        });
+        console.log("[UPGRADE] Subscription history logged");
+      } catch (historyError: any) {
+        // Log but don't fail - history logging is non-critical
+        console.error("[UPGRADE] Error logging subscription history (non-blocking):", historyError);
+      }
+
+      console.log("[UPGRADE] Upgrade completed successfully");
+      
+      // Check if payment is required for the upgrade invoice
+      let paymentUrl: string | null = null;
+      let requiresPayment = false;
+      let invoiceIdForPayment: string | null = null;
+      
+      try {
+        // Retrieve the latest invoice if it exists
+        const latestInvoiceId = updatedSubscription.latest_invoice;
+        if (latestInvoiceId) {
+          const invoiceId = typeof latestInvoiceId === 'string' 
+            ? latestInvoiceId 
+            : (latestInvoiceId as any)?.id;
+          
+          if (invoiceId) {
+            console.log("[UPGRADE] Checking invoice for payment requirement:", invoiceId);
+            let invoice = await stripe.invoices.retrieve(invoiceId, {
+              expand: ['payment_intent']
+            });
+
+            // If Stripe created a draft invoice for the proration, finalize it so it has a hosted payment page.
+            if (invoice.status === 'draft') {
+              console.log("[UPGRADE] Finalizing draft invoice for hosted payment page:", invoice.id);
+              invoice = await stripe.invoices.finalizeInvoice(invoice.id, {
+                expand: ['payment_intent'],
+              });
+            }
+            
+            // Check if invoice requires payment
+            if ((invoice.status === 'open' || invoice.status === 'uncollectible') && invoice.amount_due > 0) {
+              requiresPayment = true;
+              invoiceIdForPayment = invoice.id;
+              
+              // Use hosted invoice URL (Stripe-native: handles retries, receipts, tax, etc.)
+              if (invoice.hosted_invoice_url) {
+                paymentUrl = invoice.hosted_invoice_url;
+                console.log("[UPGRADE] Using hosted invoice URL for payment");
+              } else {
+                console.warn("[UPGRADE] Invoice missing hosted_invoice_url; cannot redirect. Invoice:", {
+                  id: invoice.id,
+                  status: invoice.status,
+                  amount_due: invoice.amount_due,
+                });
+              }
+            } else if (invoice.status === 'paid') {
+              console.log("[UPGRADE] Invoice already paid");
+            }
+          }
+        }
+      } catch (paymentCheckError: any) {
+        // Log but don't fail - payment check is non-critical
+        console.error("[UPGRADE] Error checking payment requirements (non-blocking):", paymentCheckError);
+      }
+      
+      // Safely get currentPeriodEnd for response
+      let responsePeriodEnd: number;
+      if (updatedSubscription.current_period_end && typeof updatedSubscription.current_period_end === 'number') {
+        responsePeriodEnd = updatedSubscription.current_period_end * 1000;
+      } else if (currentPeriodEnd && !isNaN(currentPeriodEnd.getTime())) {
+        responsePeriodEnd = currentPeriodEnd.getTime();
+      } else {
+        // Fallback to current subscription's period end or current time
+        responsePeriodEnd = currentSubscription.currentPeriodEnd
+          ? new Date(currentSubscription.currentPeriodEnd).getTime()
+          : Date.now();
+      }
+
+      res.json({
+        success: true,
+        message: requiresPayment 
+          ? "Subscription upgraded. Please complete payment to activate new features."
+          : "Subscription upgraded successfully. New features are now active.",
+        requiresPayment,
+        paymentUrl,
+        invoiceId: invoiceIdForPayment,
+        subscription: {
+          packageId: newPackageId,
+          billingCycle: billingCycle,
+          currentPeriodEnd: responsePeriodEnd,
+        },
+      });
+    } catch (error: any) {
+      console.error("[UPGRADE] Unexpected error:", {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
       res.status(500).json({
         error: "Failed to upgrade subscription",
-        message: error.message,
+        message: error.message || "An unexpected error occurred",
       });
     }
   });
@@ -10711,38 +11234,57 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         currentSubscription.stripeSubscriptionId
       );
 
-      if (immediate === true) {
-        // Immediate downgrade: cancel current, refund, create new subscription
-        // This is complex - consider if you really need this
-        return res.status(400).json({
-          error: "Immediate downgrade requires manual processing. Please contact support.",
-        });
-      }
-
-      // Standard downgrade: takes effect at next billing cycle
+      // Handle immediate vs scheduled downgrade
       let updatedSubscription: Stripe.Subscription;
       try {
         console.log("[DOWNGRADE] Step 4: Updating Stripe subscription...", {
           subscriptionId: currentSubscription.stripeSubscriptionId,
           newPriceId,
           currentItemId: stripeSubscription.items.data[0]?.id,
+          immediate: immediate === true,
         });
         
         if (!stripeSubscription.items.data[0]?.id) {
           throw new Error("Stripe subscription has no items");
         }
         
-        updatedSubscription = await stripe.subscriptions.update(
-          currentSubscription.stripeSubscriptionId,
-          {
-            items: [{
-              id: stripeSubscription.items.data[0].id,
-              price: newPriceId,
-            }],
-            proration_behavior: 'none', // No immediate charge
-            billing_cycle_anchor: 'unchanged', // Keep current billing date
-          }
-        );
+        if (immediate === true) {
+          // Option A: Immediate downgrade with credit (proration)
+          // Stripe calculates unused higher-plan time and applies credit
+          // May reduce next invoice or provide credit
+          updatedSubscription = await stripe.subscriptions.update(
+            currentSubscription.stripeSubscriptionId,
+            {
+              items: [{
+                id: stripeSubscription.items.data[0].id,
+                price: newPriceId,
+              }],
+              proration_behavior: 'create_prorations', // Calculate unused credit
+            }
+          );
+          console.log("[DOWNGRADE] ✅ Immediate downgrade with proration applied:", {
+            id: updatedSubscription.id,
+            status: updatedSubscription.status,
+          });
+        } else {
+          // Option B: Downgrade at end of billing period (Recommended)
+          // Avoids mid-cycle credits and refund complexity
+          updatedSubscription = await stripe.subscriptions.update(
+            currentSubscription.stripeSubscriptionId,
+            {
+              items: [{
+                id: stripeSubscription.items.data[0].id,
+                price: newPriceId,
+              }],
+              proration_behavior: 'none', // No immediate charge
+              billing_cycle_anchor: 'unchanged', // Keep current billing date
+            }
+          );
+          console.log("[DOWNGRADE] ✅ Downgrade scheduled for next billing cycle:", {
+            id: updatedSubscription.id,
+            status: updatedSubscription.status,
+          });
+        }
         console.log("[DOWNGRADE] ✅ Stripe subscription updated:", {
           id: updatedSubscription.id,
           status: updatedSubscription.status,

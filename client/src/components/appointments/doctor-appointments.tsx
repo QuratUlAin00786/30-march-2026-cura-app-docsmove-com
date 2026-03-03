@@ -69,7 +69,9 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   const { data: appointmentsData, isLoading } = useQuery({
     queryKey: ["/api/appointments", "doctor", user?.id],
     staleTime: 30000,
-    refetchInterval: 60000,
+    // Auto-refresh for doctor role: poll every 10 seconds to get new appointments
+    refetchInterval: isDoctorLike(user?.role) ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: isDoctorLike(user?.role), // Continue polling even when tab is in background
     enabled: !!user?.id && isDoctorLike(user?.role),
     queryFn: async () => {
       // Backend automatically filters appointments for doctors (returns only their own appointments)

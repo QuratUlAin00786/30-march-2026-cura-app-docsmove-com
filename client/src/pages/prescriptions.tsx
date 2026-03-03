@@ -1168,7 +1168,36 @@ export default function PrescriptionsPage() {
       }
     },
     enabled: !!user && patients.length > 0, // Wait for user and patients data to be loaded
+    // Auto-refresh for patient/admin/nurse/doctor roles: poll every 10 seconds to get new prescriptions
+    refetchInterval: (user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)) ? 10000 : false, // 10 seconds = 10000ms
+    refetchIntervalInBackground: (user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role)), // Continue polling even when tab is in background
   });
+
+  // Track previous prescriptions count for patient/admin/nurse/doctor roles to detect new entries
+  const prevPrescriptionsCountRef = React.useRef<number>(0);
+  const { toast } = useToast();
+
+  // Notify patient/admin/nurse/doctor when new prescriptions are detected
+  useEffect(() => {
+    const shouldNotify = user?.role === "patient" || user?.role === "admin" || user?.role === "nurse" || isDoctorLike(user?.role);
+    if (shouldNotify && Array.isArray(rawPrescriptions)) {
+      const currentCount = rawPrescriptions.length;
+      const previousCount = prevPrescriptionsCountRef.current;
+
+      // Only show notification if count increased (new prescriptions added)
+      if (previousCount > 0 && currentCount > previousCount) {
+        const newPrescriptionsCount = currentCount - previousCount;
+        toast({
+          title: "New Prescriptions Available",
+          description: `${newPrescriptionsCount} new prescription${newPrescriptionsCount > 1 ? 's' : ''} ${newPrescriptionsCount > 1 ? 'have' : 'has'} been added.`,
+          variant: "default",
+        });
+      }
+
+      // Update the ref with current count
+      prevPrescriptionsCountRef.current = currentCount;
+    }
+  }, [rawPrescriptions, user?.role, toast]);
 
   // Fetch drug interactions count from database
   const { data: drugInteractionsData } = useQuery({
@@ -1931,8 +1960,6 @@ export default function PrescriptionsPage() {
     setSuccessModalMessage(message);
     setShowGenericSuccessModal(true);
   };
-
-  const { toast } = useToast();
 
   // Form validation helper functions
   const validateMedication = (medication: any, index: number) => {

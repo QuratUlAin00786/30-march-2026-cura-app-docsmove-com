@@ -226,6 +226,20 @@ export default function Subscription() {
   const [requiredDeletions, setRequiredDeletions] = useState<{ users: number; patients: number } | null>(null);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showChangeCycleDialog, setShowChangeCycleDialog] = useState(false);
+  const [selectedBillingCycleFilter, setSelectedBillingCycleFilter] = useState<'monthly' | 'yearly' | null>(null);
+  const [showNoPackagesDialog, setShowNoPackagesDialog] = useState(false);
+  const [noPackagesMessage, setNoPackagesMessage] = useState<{ title: string; description: string } | null>(null);
+  const [showUpgradeConfirmDialog, setShowUpgradeConfirmDialog] = useState(false);
+  const [selectedUpgradePlan, setSelectedUpgradePlan] = useState<any>(null);
+  const [upgradeDetails, setUpgradeDetails] = useState<{
+    currentPlanName: string;
+    currentPlanPrice: number;
+    newPlanName: string;
+    newPlanPrice: number;
+    daysRemaining: number;
+    remainingCredit: number;
+    amountDueToday: number;
+  } | null>(null);
 
   // Signature box state
   const [showSignatureDialog, setShowSignatureDialog] = useState(false);
@@ -507,8 +521,6 @@ export default function Subscription() {
 
   // Subscription management functions
   const handleUpgrade = async (plan: any) => {
-    // Always use Stripe Checkout for upgrades - redirects to Stripe payment page
-    // The checkout endpoint will get stripe_price_id from database table saas_packages
     setUpgradeLoading(plan.id);
     try {
       const token = localStorage.getItem('auth_token');
@@ -521,7 +533,83 @@ export default function Subscription() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Use Stripe Checkout - endpoint will get stripe_price_id from database
+      // If user has an existing subscription, use direct upgrade endpoint with proration
+      if (subscription && subscription.id && subscription.stripeSubscriptionId) {
+        const response = await fetch('/api/saas/billing/upgrade', {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({
+            subscriptionId: subscription.id,
+            newPackageId: plan.id,
+            billingCycle: subscription.billingCycle || 'monthly',
+          }),
+        });
+
+        // Try to parse JSON response, handle non-JSON responses
+        let data: any;
+        try {
+          const text = await response.text();
+          data = text ? JSON.parse(text) : {};
+        } catch (parseError) {
+          console.error('[UPGRADE] Failed to parse response:', parseError);
+          throw new Error(`Server error (${response.status}): ${response.statusText || 'Invalid response'}`);
+        }
+
+        if (!response.ok) {
+          // Log detailed error for debugging
+          console.error('[UPGRADE] Upgrade failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: data.error,
+            message: data.message,
+            details: data.details,
+            fullResponse: data,
+          });
+          
+          // Construct a more detailed error message
+          let errorMessage = 'Failed to upgrade subscription';
+          if (data.error) {
+            errorMessage = data.error;
+            if (data.message && data.message !== data.error) {
+              errorMessage += `: ${data.message}`;
+            }
+          } else if (data.message) {
+            errorMessage = data.message;
+          }
+          
+          // Add details if available
+          if (data.details) {
+            errorMessage += ` (${data.details})`;
+          }
+          
+          throw new Error(errorMessage);
+        }
+
+        // Check if payment is required - redirect to Checkout Session
+        // Support both 'url' (new) and 'paymentUrl' (old) for compatibility
+        const checkoutUrl = data.url || data.paymentUrl;
+        if (checkoutUrl) {
+          // Redirect to Stripe Checkout for payment
+          console.log('[UPGRADE] Redirecting to Stripe Checkout:', checkoutUrl);
+          window.location.href = checkoutUrl;
+          return;
+        }
+        
+        // Success - refresh subscription data
+        queryClient.invalidateQueries({ queryKey: ["/api/subscription"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/billing-history"] });
+        
+        toast({
+          title: "Upgrade Successful",
+          description: data.message || "Your subscription has been upgraded successfully. New features are now active.",
+        });
+        
+        setUpgradeLoading(null);
+        return;
+      }
+
+      // If no existing subscription, use Stripe Checkout for new subscription
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers,
@@ -529,9 +617,7 @@ export default function Subscription() {
         body: JSON.stringify({
           planId: plan.id,
           planName: plan.name,
-          // Don't pass stripePriceId - let backend get it from database
-          isUpgrade: subscription ? true : false,
-          existingSubscriptionId: subscription?.id,
+          isUpgrade: false,
         }),
       });
 
@@ -551,8 +637,33 @@ export default function Subscription() {
         setUpgradeLoading(null);
       }
     } catch (error: any) {
-      console.error('Upgrade error:', error);
-      setStripeAlertMessage(error.message || 'Failed to upgrade subscription');
+      console.error('[UPGRADE] Upgrade error:', error);
+      
+      // Handle different error types
+      let errorMessage = 'Failed to upgrade subscription';
+      
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.error) {
+        errorMessage = error.error;
+        if (error.message && error.message !== error.error) {
+          errorMessage += `: ${error.message}`;
+        }
+      }
+      
+      // Handle network errors
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      }
+      
+      // Handle authentication errors
+      if (error.message?.includes('401') || error.message?.includes('Unauthorized') || error.message?.includes('Authentication')) {
+        errorMessage = 'Authentication error. Please refresh the page and log in again, then try upgrading your subscription.';
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_subdomain');
+      }
+      
+      setStripeAlertMessage(errorMessage);
       setStripeAlertOpen(true);
       setUpgradeLoading(null);
     }
@@ -1082,8 +1193,24 @@ export default function Subscription() {
   const dbPlans = dbPackages.filter(pkg => pkg.features?.maxUsers);
   const dbAddons = dbPackages.filter(pkg => !pkg.features?.maxUsers);
 
+  // Determine the billing cycle filter (default to subscription's billing cycle, or 'monthly' if no subscription)
+  const billingCycleFilter = selectedBillingCycleFilter || 
+    (subscription?.billingCycle === 'annual' ? 'yearly' : 'monthly');
+
+  // Filter plans by billing cycle if filter is set
+  const filteredDbPlans = billingCycleFilter 
+    ? dbPlans.filter(pkg => {
+        // Normalize billing cycle values: 'annual' -> 'yearly', 'monthly' -> 'monthly'
+        const pkgCycle = pkg.billingCycle?.toLowerCase();
+        const filterCycle = billingCycleFilter.toLowerCase();
+        return (pkgCycle === filterCycle) || 
+               (pkgCycle === 'annual' && filterCycle === 'yearly') ||
+               (pkgCycle === 'yearly' && filterCycle === 'annual');
+      })
+    : dbPlans;
+
   // Transform database plans to component format for "Available Plans" section
-  const plans = dbPlans.map(pkg => ({
+  const plans = filteredDbPlans.map(pkg => ({
     id: pkg.id.toString(),
     name: pkg.name,
     price: parseFloat(pkg.price),
@@ -1092,6 +1219,7 @@ export default function Subscription() {
     features: formatPackageFeatures(pkg.features),
     notIncluded: [] as string[], // Database doesn't store not-included features
     stripePriceId: pkg.stripePriceId || "",
+    billingCycle: pkg.billingCycle, // Include billing cycle for reference
   }));
 
   // Transform database add-ons to component format for "Add-on Packages" section
@@ -1731,17 +1859,140 @@ export default function Subscription() {
                         const isLowerPlan = planPrice < currentPlanPrice;
 
                         if (isHigherPlan) {
-                          // Upgrade button
+                          // Upgrade button - show confirmation dialog
                           return (
                             <Button
                               key={`upgrade-${plan.id}`}
                               className="w-full text-sm"
                               variant={plan.popular ? "default" : "outline"}
                               disabled={upgradeLoading === plan.id}
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleUpgrade(plan);
+                                
+                                try {
+                                  // Fetch preview invoice from Stripe to get exact amounts
+                                  const token = localStorage.getItem('auth_token');
+                                  const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+                                  if (!token) {
+                                    // Don't call preview endpoint without auth; it will always 401 and spam console
+                                    setStripeAlertMessage('Your session has expired. Please refresh and log in again to preview/upgrade your subscription.');
+                                    setStripeAlertOpen(true);
+                                    return;
+                                  }
+                                  const headers: Record<string, string> = {
+                                    'Content-Type': 'application/json',
+                                    'X-Tenant-Subdomain': subdomain
+                                  };
+                                  headers['Authorization'] = `Bearer ${token}`;
+
+                                  const previewResponse = await fetch('/api/saas/billing/preview-upgrade', {
+                                    method: 'POST',
+                                    headers,
+                                    credentials: 'include',
+                                    body: JSON.stringify({
+                                      subscriptionId: subscription?.id,
+                                      newPackageId: plan.id,
+                                      billingCycle: subscription?.billingCycle || 'monthly',
+                                    }),
+                                  });
+
+                                  // Handle auth failures explicitly (avoid falling back and then failing on confirm)
+                                  if (previewResponse.status === 401) {
+                                    localStorage.removeItem('auth_token');
+                                    localStorage.removeItem('user_subdomain');
+                                    localStorage.removeItem('lastActivityTime');
+                                    localStorage.removeItem('sessionStartTime');
+                                    setStripeAlertMessage('Authentication required. Please log in again, then retry the upgrade.');
+                                    setStripeAlertOpen(true);
+                                    return;
+                                  }
+                                  if (previewResponse.status === 403) {
+                                    setStripeAlertMessage('You do not have permission to upgrade subscriptions. Please contact your administrator.');
+                                    setStripeAlertOpen(true);
+                                    return;
+                                  }
+
+                                  if (previewResponse.ok) {
+                                    // Try to parse JSON response, handle non-JSON responses
+                                    let previewData: any;
+                                    try {
+                                      const text = await previewResponse.text();
+                                      previewData = text ? JSON.parse(text) : {};
+                                    } catch (parseError) {
+                                      console.error('[PREVIEW] Failed to parse preview response:', parseError);
+                                      throw new Error(`Server error (${previewResponse.status}): Invalid response`);
+                                    }
+                                    
+                                    setUpgradeDetails({
+                                      currentPlanName: previewData.currentPlan?.name || 'Current Plan',
+                                      currentPlanPrice: previewData.currentPlan?.price || 0,
+                                      newPlanName: previewData.newPlan?.name || plan.name,
+                                      newPlanPrice: previewData.newPlan?.price || planPrice,
+                                      daysRemaining: previewData.daysRemaining || 0,
+                                      remainingCredit: previewData.prorationCredit || 0,
+                                      amountDueToday: previewData.amountDue || 0,
+                                    });
+                                  } else {
+                                    // Log error for debugging
+                                    let errorData: any = {};
+                                    try {
+                                      const text = await previewResponse.text();
+                                      try {
+                                        errorData = text ? JSON.parse(text) : {};
+                                      } catch {
+                                        errorData = { message: text };
+                                      }
+                                    } catch (parseError) {
+                                      console.error('[PREVIEW] Failed to parse error response:', parseError);
+                                    }
+                                    
+                                    console.warn('[PREVIEW] Preview upgrade failed, using fallback calculation:', {
+                                      status: previewResponse.status,
+                                      error: errorData.error,
+                                      message: errorData.message,
+                                      code: errorData.code,
+                                    });
+                                    
+                                    // Fallback to manual calculation if preview fails
+                                    const currentPlan = dbPackages.find(p => p.id === subscription.packageId);
+                                    const currentPlanName = currentPlan?.name || subscription?.planName || subscription?.plan || 'Current Plan';
+                                    const currentPlanPriceValue = currentPlanPrice || 0;
+                                    const newPlanPrice = planPrice;
+                                    
+                                    const periodEnd = subscription?.currentPeriodEnd || subscription?.expiresAt || subscription?.nextBillingAt;
+                                    const now = new Date();
+                                    const endDate = periodEnd ? new Date(periodEnd) : null;
+                                    const daysRemaining = endDate ? Math.max(0, Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+                                    
+                                    const billingCycleDays = subscription?.billingCycle === 'annual' ? 365 : 30;
+                                    const remainingCredit = daysRemaining > 0 && billingCycleDays > 0
+                                      ? (currentPlanPriceValue * daysRemaining) / billingCycleDays
+                                      : 0;
+                                    
+                                    const amountDueToday = Math.max(0, newPlanPrice - remainingCredit);
+                                    
+                                    setUpgradeDetails({
+                                      currentPlanName,
+                                      currentPlanPrice: currentPlanPriceValue,
+                                      newPlanName: plan.name,
+                                      newPlanPrice,
+                                      daysRemaining,
+                                      remainingCredit,
+                                      amountDueToday,
+                                    });
+                                  }
+                                  
+                                  setSelectedUpgradePlan(plan);
+                                  setShowUpgradeConfirmDialog(true);
+                                } catch (error) {
+                                  console.error('Error previewing upgrade:', error);
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to preview upgrade details. Please try again.",
+                                    variant: "destructive",
+                                  });
+                                }
                               }}
                               data-testid={`button-plan-${plan.id}`}
                             >
@@ -2266,7 +2517,7 @@ export default function Subscription() {
 
       {/* Invoice Viewer Dialog */}
       <Dialog open={showInvoiceDialog} onOpenChange={setShowInvoiceDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto [&>button.absolute]:hidden">
           <DialogHeader className="flex flex-row items-center justify-between gap-4">
             <DialogTitle>Invoice #{selectedInvoice?.invoiceNumber}</DialogTitle>
             <div className="flex items-center gap-2">
@@ -2565,9 +2816,6 @@ export default function Subscription() {
                 <Printer className="h-4 w-4" />
                 Print
               </Button>
-              <Button onClick={() => setShowInvoiceDialog(false)} variant="outline" size="sm">
-                Close
-              </Button>
             </div>
           </DialogHeader>
           {selectedInvoice && (
@@ -2749,10 +2997,134 @@ export default function Subscription() {
                 Cancel
               </Button>
               <Button
-                onClick={() => handleChangeCycle(subscription?.billingCycle === 'annual' ? 'monthly' : 'annual')}
+                onClick={() => {
+                  const newCycle = subscription?.billingCycle === 'annual' ? 'monthly' : 'annual';
+                  const newCycleFilter: 'monthly' | 'yearly' = newCycle === 'annual' ? 'yearly' : 'monthly';
+                  
+                  // Check if packages exist for the new billing cycle
+                  const availablePackages = dbPackages.filter(pkg => {
+                    const pkgCycle = pkg.billingCycle?.toLowerCase();
+                    if (!pkgCycle) return false;
+                    // Normalize 'annual' to 'yearly' for comparison
+                    const normalizedPkgCycle = pkgCycle === 'annual' ? 'yearly' : pkgCycle;
+                    return normalizedPkgCycle === newCycleFilter;
+                  });
+                  
+                  if (availablePackages.length === 0) {
+                    setNoPackagesMessage({
+                      title: "No packages available",
+                      description: `No ${newCycleFilter === 'yearly' ? 'yearly' : 'monthly'} packages are available. Please contact support.`,
+                    });
+                    setShowNoPackagesDialog(true);
+                    return;
+                  }
+                  
+                  // Set the billing cycle filter to show/hide packages
+                  setSelectedBillingCycleFilter(newCycleFilter);
+                  
+                  // Change the billing cycle
+                  handleChangeCycle(newCycle);
+                }}
                 disabled={changeCycleLoading}
               >
                 {changeCycleLoading ? "Processing..." : `Switch to ${subscription?.billingCycle === 'annual' ? 'Monthly' : 'Annual'}`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* No Packages Available Dialog */}
+      <Dialog open={showNoPackagesDialog} onOpenChange={setShowNoPackagesDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{noPackagesMessage?.title || "No packages available"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {noPackagesMessage?.description || "No packages are available. Please contact support."}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowNoPackagesDialog(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upgrade Confirmation Dialog */}
+      <Dialog open={showUpgradeConfirmDialog} onOpenChange={setShowUpgradeConfirmDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upgrade to {upgradeDetails?.newPlanName || 'New Plan'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {upgradeDetails && (
+              <>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    You are upgrading from <strong>{upgradeDetails.currentPlanName}</strong> (£{upgradeDetails.currentPlanPrice.toFixed(2)}/month) to <strong>{upgradeDetails.newPlanName}</strong> (£{upgradeDetails.newPlanPrice.toFixed(2)}/month).
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Your current billing cycle has <strong>{upgradeDetails.daysRemaining} days</strong> remaining.
+                  </p>
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
+                  <h4 className="font-semibold text-sm">Billing Breakdown:</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Current Plan:</span>
+                      <span>£{upgradeDetails.currentPlanPrice.toFixed(2)}/month</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Remaining Credit:</span>
+                      <span>£{upgradeDetails.remainingCredit.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">New Plan Price:</span>
+                      <span>£{upgradeDetails.newPlanPrice.toFixed(2)}/month</span>
+                    </div>
+                    <div className="flex justify-between font-semibold border-t border-gray-200 dark:border-gray-700 pt-2">
+                      <span>Amount Due Today:</span>
+                      <span>£{upgradeDetails.amountDueToday.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-1">
+                  <p className="text-xs text-blue-800 dark:text-blue-200">
+                    ✓ Your {upgradeDetails.newPlanName} benefits will activate immediately after confirmation.
+                  </p>
+                  <p className="text-xs text-blue-800 dark:text-blue-200">
+                    ✓ Your next billing date will remain the same.
+                  </p>
+                </div>
+
+                <p className="text-sm text-muted-foreground">
+                  Do you want to proceed with the upgrade?
+                </p>
+              </>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setShowUpgradeConfirmDialog(false);
+                setSelectedUpgradePlan(null);
+                setUpgradeDetails(null);
+              }}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (selectedUpgradePlan) {
+                    setShowUpgradeConfirmDialog(false);
+                    handleUpgrade(selectedUpgradePlan);
+                  }
+                }}
+                disabled={upgradeLoading === selectedUpgradePlan?.id}
+              >
+                {upgradeLoading === selectedUpgradePlan?.id ? "Processing..." : "Confirm Upgrade"}
               </Button>
             </div>
           </div>
