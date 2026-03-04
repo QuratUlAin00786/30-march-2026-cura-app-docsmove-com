@@ -65,7 +65,7 @@ export default function HRAppointments({ onNewAppointment }: { onNewAppointment?
 
   const getPatientName = (patientId: number) => {
     const patient = patients.find((p: any) => p.id === patientId);
-    return patient ? `${patient.firstName} ${patient.lastName}` : `Patient ${patientId}`;
+    return patient ? `${patient.firstName} ${patient.lastName}` : "Patient not found";
   };
 
   const getPatientContact = (patientId: number) => {

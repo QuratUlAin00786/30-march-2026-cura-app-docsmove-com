@@ -5331,59 +5331,59 @@ Report generated from Cura EMR System`;
 
       {/* Summary Dialog */}
       <Dialog open={showSummaryDialog} onOpenChange={setShowSummaryDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-medical-blue">Order Summary</DialogTitle>
+            <DialogTitle className="text-lg font-semibold text-medical-blue">Order Summary</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Order Details */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <h3 className="font-semibold text-lg border-b pb-2">Order Information</h3>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="border rounded-lg p-3 space-y-2">
+              <h3 className="font-semibold text-sm border-b pb-1.5">Order Information</h3>
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-sm text-gray-600 dark:text-gray-400">Patient Name</Label>
-                  <p className="font-medium">{pendingOrderData?.patientName}</p>
+                  <Label className="text-xs text-gray-600 dark:text-gray-400">Patient Name</Label>
+                  <p className="font-medium text-sm">{pendingOrderData?.patientName}</p>
                 </div>
                 <div>
-                  <Label className="text-sm text-gray-600 dark:text-gray-400">Priority</Label>
-                  <p className="font-medium capitalize">{pendingOrderData?.priority}</p>
+                  <Label className="text-xs text-gray-600 dark:text-gray-400">Priority</Label>
+                  <p className="font-medium text-sm capitalize">{pendingOrderData?.priority}</p>
                 </div>
                 <div className="col-span-2">
-                  <Label className="text-sm text-gray-600 dark:text-gray-400">Test Types</Label>
-                  <p className="font-medium">{pendingOrderData?.testTypes?.join(' | ')}</p>
+                  <Label className="text-xs text-gray-600 dark:text-gray-400">Test Types</Label>
+                  <p className="font-medium text-sm">{pendingOrderData?.testTypes?.join(' | ')}</p>
                 </div>
                 {pendingOrderData?.notes && (
                   <div className="col-span-2">
-                    <Label className="text-sm text-gray-600 dark:text-gray-400">Notes</Label>
-                    <p className="font-medium">{pendingOrderData.notes}</p>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Notes</Label>
+                    <p className="font-medium text-sm">{pendingOrderData.notes}</p>
                   </div>
                 )}
               </div>
             </div>
 
             {/* Lab Results Summary */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <h3 className="font-semibold text-lg border-b pb-2">Lab Results Summary</h3>
-              <div className="space-y-2">
+            <div className="border rounded-lg p-3 space-y-2">
+              <h3 className="font-semibold text-sm border-b pb-1.5">Lab Results Summary</h3>
+              <div className="space-y-1.5">
                 {invoiceData.items.map((item: any, index: number) => (
-                  <div key={index} className="flex justify-between items-center py-2 border-b last:border-0">
+                  <div key={index} className="flex justify-between items-center py-1.5 border-b last:border-0">
                     <div>
-                      <p className="font-medium">{item.description}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Code: {item.code}</p>
+                      <p className="font-medium text-sm">{item.description}</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">Code: {item.code}</p>
                     </div>
-                    <p className="font-semibold">£{item.total.toFixed(2)}</p>
+                    <p className="font-semibold text-sm">£{item.total.toFixed(2)}</p>
                   </div>
                 ))}
               </div>
-              <div className="flex justify-between items-center pt-3 border-t-2">
-                <p className="text-lg font-bold">Total Amount:</p>
-                <p className="text-2xl font-bold text-medical-blue">£{invoiceData.totalAmount.toFixed(2)}</p>
+              <div className="flex justify-between items-center pt-2 border-t-2">
+                <p className="text-sm font-bold">Total Amount:</p>
+                <p className="text-lg font-bold text-medical-blue">£{invoiceData.totalAmount.toFixed(2)}</p>
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex gap-2 pt-2">
               <Button
                 onClick={async () => {
                   // Get patient name from pendingOrderData or find from patients list

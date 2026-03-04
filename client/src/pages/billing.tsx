@@ -4532,6 +4532,9 @@ export default function BillingPage() {
   const [activeTab, setActiveTab] = useState("invoices");
   const queryClient = useQueryClient();
 
+  // Store appointment ID from URL to set after appointments load
+  const [pendingAppointmentId, setPendingAppointmentId] = useState<string | null>(null);
+
   // Sync active tab with URL ?tab= (e.g. /billing?tab=invoices from "Click here to add invoice")
   useEffect(() => {
     const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
@@ -4539,6 +4542,36 @@ export default function BillingPage() {
     const validTabs = ["invoices", "outstanding", "payment-history", "insurance-claims", "custom-reports", "pricing-management"];
     if (tab && validTabs.includes(tab)) {
       setActiveTab(tab);
+    }
+    
+    // Check if we should auto-open Create New Invoice dialog with pre-filled data
+    const createInvoice = params.get("createInvoice");
+    if (createInvoice === "true") {
+      const patientId = params.get("patientId");
+      const appointmentId = params.get("appointmentId");
+      const serviceDateParam = params.get("serviceDate");
+      
+      if (patientId && serviceDateParam) {
+        // Pre-fill form data
+        setSelectedPatient(patientId);
+        setServiceDate(serviceDateParam);
+        setInvoiceDate(new Date().toISOString().split('T')[0]);
+        setDueDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+        
+        // Store appointment ID to set after appointments load (will set service type later)
+        if (appointmentId) {
+          setPendingAppointmentId(appointmentId);
+        }
+        
+        // Open the dialog
+        setShowNewInvoice(true);
+        
+        // Clean up URL parameters
+        const cleanParams = new URLSearchParams();
+        cleanParams.set("tab", tab || "invoices");
+        const subdomain = localStorage.getItem('user_subdomain') || 'demo';
+        window.history.replaceState({}, document.title, `/${subdomain}/billing?${cleanParams.toString()}`);
+      }
     }
   }, []);
 
@@ -7584,6 +7617,34 @@ export default function BillingPage() {
       handleAddService();
     }
   }, [selectedImagingId, selectedServiceType, handleAddService, patientImagingLoading]);
+
+  // Set appointment ID once appointments are loaded (for auto-fill from URL)
+  useEffect(() => {
+    if (
+      pendingAppointmentId &&
+      selectedServiceType === "appointments" &&
+      availableAppointments.length > 0 &&
+      !patientAppointmentsLoading
+    ) {
+      // Check if the appointment exists in available appointments
+      const appointment = availableAppointments.find((apt: any) => 
+        String(apt.id) === pendingAppointmentId || 
+        String(apt.appointmentId) === pendingAppointmentId
+      );
+      
+      if (appointment) {
+        setSelectedAppointmentId(String(appointment.id));
+        setPendingAppointmentId(null); // Clear pending ID
+      }
+    }
+  }, [pendingAppointmentId, selectedServiceType, availableAppointments, patientAppointmentsLoading]);
+
+  // Auto-set service type to appointments when pendingAppointmentId is set
+  useEffect(() => {
+    if (pendingAppointmentId && selectedServiceType !== "appointments") {
+      setSelectedServiceType("appointments");
+    }
+  }, [pendingAppointmentId, selectedServiceType]);
 
   // Fetch payments for Payment History tab
   const { data: payments = [], isLoading: paymentsLoading } = useQuery({

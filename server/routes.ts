@@ -6134,38 +6134,67 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Get unique patient IDs from appointments
       const uniquePatientIds = [...new Set(appointments.map(apt => apt.patientId))];
 
-      // Fetch patients in parallel for better performance and reliability
-      // This handles cases where getPatientsByOrganization limit might exclude some patients
-      const patientPromises = uniquePatientIds.map(patientId =>
-        storage.getPatient(patientId, req.tenant!.id).catch(error => {
-          console.warn(`[Appointments] Failed to fetch patient ${patientId}:`, error);
-          return undefined;
-        })
-      );
-      const patientResults = await Promise.all(patientPromises);
+      // Fetch all patients for the organization to enable matching by both id and userId
+      const allPatients = await storage.getPatientsByOrganization(req.tenant!.id, 1000);
 
-      // Create a map for quick lookup
-      const patientMap = new Map();
-      patientResults.forEach((patient, index) => {
-        if (patient) {
-          patientMap.set(uniquePatientIds[index], patient);
+      // Also fetch all users in case patientId is actually a userId
+      const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
+
+      // Create maps for quick lookup
+      const patientMapById = new Map();
+      const patientMapByUserId = new Map();
+      const userMapById = new Map();
+      
+      allPatients.forEach((patient: any) => {
+        if (patient.id) {
+          patientMapById.set(patient.id, patient);
+        }
+        if (patient.userId) {
+          patientMapByUserId.set(patient.userId, patient);
+        }
+      });
+      
+      allUsers.forEach((user: any) => {
+        if (user.id) {
+          userMapById.set(user.id, user);
         }
       });
 
       const enrichedAppointments = appointments.map(apt => {
-        const patient = patientMap.get(apt.patientId);
+        // Try to find patient by id first, then by userId (in case patientId is actually a userId)
+        let patient = patientMapById.get(apt.patientId);
+        if (!patient) {
+          patient = patientMapByUserId.get(apt.patientId);
+        }
+        
         if (patient) {
           const name = `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
-          return {
-            ...apt,
-            patientName: name || `Patient ${apt.patientId}`
-          };
+          if (name) {
+            return {
+              ...apt,
+              patientName: name
+            };
+          }
         }
-        // Log warning if patient not found for debugging
-        console.warn(`[Appointments] Patient not found for appointment ${apt.id}, patientId: ${apt.patientId}`);
+        
+        // If patient not found, try to get name from users table (in case patientId is actually a userId)
+        const user = userMapById.get(apt.patientId);
+        if (user) {
+          const name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+          if (name) {
+            return {
+              ...apt,
+              patientName: name
+            };
+          }
+        }
+        
+        // Log warning if patient/user not found for debugging
+        console.warn(`[Appointments] Patient/User not found for appointment ${apt.id}, patientId: ${apt.patientId}. Tried patient.id, patient.userId, and user.id.`);
+        // Final fallback - patient record not available or deleted
         return {
           ...apt,
-          patientName: `Patient ${apt.patientId}`
+          patientName: "Patient not found"
         };
       });
 
@@ -15199,11 +15228,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
 
         // Document Title (centered, black, normal)
-        doc.setFontSize(14);
+        doc.setFontSize(16);
         doc.setTextColor(0, 0, 0);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Laboratory Test Prescription', pageWidth / 2, yPos, { align: 'center' });
-        yPos += 8;
+        doc.setFont('helvetica', 'bold');
+        const titleText = 'Laboratory Test Prescription';
+        doc.text(titleText, pageWidth / 2, yPos, { align: 'center' });
+        yPos += 10;
 
         // Contact Information (centered, small font)
         if (clinicHeader) {
@@ -15233,36 +15263,36 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         yPos += 3;
         doc.setDrawColor(200, 200, 200);
         doc.line(20, yPos, pageWidth - 20, yPos);
-        yPos += 10;
+        yPos += 8; // Reduced from 10
 
         // PHYSICIAN INFORMATION Section
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(0, 0, 0);
         doc.text('Physician Information', 20, yPos);
-        yPos += 8;
+        yPos += 6; // Reduced from 8
 
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
         const doctorName = labResult.doctorName || (orderedByUser ? `${orderedByUser.firstName || ''} ${orderedByUser.lastName || ''}`.trim() : 'N/A');
         doc.text(`Name: ${doctorName}`, 20, yPos);
-        yPos += 6;
+        yPos += 5; // Reduced from 6
 
         // Priority
         const priority = labResult.priority || 'routine';
         doc.text(`Priority: ${priority}`, 20, yPos);
-        yPos += 12;
+        yPos += 8; // Reduced from 12
 
         // PATIENT INFORMATION Section
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.text('Patient Information', 20, yPos);
-        yPos += 8;
+        yPos += 6; // Reduced from 8
 
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
         doc.text(`Name: ${patient.firstName} ${patient.lastName}`, 20, yPos);
-        yPos += 6;
+        yPos += 5; // Reduced from 6
 
         // Date
         const orderedDate = labResult.orderedAt
@@ -15277,7 +15307,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             year: 'numeric'
           });
         doc.text(`Date: ${orderedDate}`, 20, yPos);
-        yPos += 6;
+        yPos += 5; // Reduced from 6
 
         // Time
         const orderedTime = labResult.orderedAt
@@ -15292,7 +15322,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             hour12: false
           });
         doc.text(`Time: ${orderedTime}`, 20, yPos);
-        yPos += 12;
+        yPos += 8; // Reduced from 12
 
         // Main Content Box - Laboratory Test Prescription
         const boxX = 20;
@@ -15310,11 +15340,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
         // Box content
         let boxContentY = boxY + 10;
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(0, 0, 0);
-        doc.text('℞ Laboratory Test Prescription', boxX + boxWidth / 2, boxContentY, { align: 'center' });
-        boxContentY += 12;
+        // Removed box title to prevent encoding issues - title already shown at top of document
+        // No need to add title here as it's already displayed in the header
 
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
@@ -15383,10 +15410,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           doc.rect(boxX, boxY, boxWidth, boxHeight);
         }
 
-        yPos = boxY + boxHeight + 20;
+        yPos = boxY + boxHeight + 15; // Reduced spacing
 
-        // Signature Section
-        if (yPos > pageHeight - 80) {
+        // Calculate total height needed for signature section
+        const signatureHeight = 25; // Signature image height
+        const signatureSectionHeight = signatureHeight + 5 + 8 + 6 + 6 + 15; // signature + spacing + line + label + doctor name + spacing
+        const estimatedTotalHeight = yPos + signatureSectionHeight;
+        const footerSpace = 20; // Space needed for footer
+
+        // Only add new page if content would actually overflow (not just for footer)
+        if (estimatedTotalHeight > pageHeight - footerSpace) {
           doc.addPage();
           yPos = 20;
         }
@@ -15399,13 +15432,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             // Signature is base64 encoded image
             const signatureImg = signatureData.startsWith('data:') ? signatureData : `data:image/png;base64,${signatureData}`;
             const signatureWidth = 60;
-            const signatureHeight = 25;
+            const signatureImgHeight = 25;
             const signatureX = pageWidth / 2 - signatureWidth / 2;
             const signatureY = yPos;
 
-            doc.addImage(signatureImg, 'PNG', signatureX, signatureY, signatureWidth, signatureHeight);
+            doc.addImage(signatureImg, 'PNG', signatureX, signatureY, signatureWidth, signatureImgHeight);
             hasSignature = true;
-            yPos += signatureHeight + 5;
+            yPos += signatureImgHeight + 5;
           } catch (error) {
             console.error('Error adding signature to PDF:', error);
           }
@@ -15430,26 +15463,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
         doc.text(doctorName, pageWidth / 2, yPos, { align: 'center' });
-        yPos += 15;
+        yPos += 10; // Reduced spacing
 
-        // Footer - Generated by Cura EMR System
-        const currentDate = new Date().toLocaleString('en-GB', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-        doc.setFontSize(9);
-        doc.setTextColor(0, 0, 0);
-        doc.text('Generated by Cura EMR System', pageWidth / 2, pageHeight - 20, { align: 'center' });
-        doc.text(`Date: ${currentDate}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-
-        // Add clinic footer if available
+        // Add clinic footer if available - place at proper footer position (bottom of current page)
         if (clinicFooter?.footerText) {
           doc.setFontSize(9);
           doc.setTextColor(0, 0, 0);
-          const footerY = pageHeight - (yPos < pageHeight - 50 ? 20 : 30);
+          // Place footer at bottom of current page (same page as content)
+          const footerY = pageHeight - 15;
+          // Always place footer on current page if content fits
           doc.text(clinicFooter.footerText, pageWidth / 2, footerY, { align: 'center' });
         }
 
@@ -15501,6 +15523,21 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           console.error('Error fetching report creator:', error);
         }
       }
+
+      // Report Created Date/Time at top right corner (before header)
+      const reportCreatedDate = new Date().toLocaleString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Report Created: ${reportCreatedDate}`, pageWidth - 20, yPos, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+      yPos += 6; // Move down slightly to avoid overlap with header
 
       // Logo dimensions
       const logoWidth = 35;
@@ -15570,13 +15607,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Add a separator line after header
       doc.setDrawColor(200, 200, 200);
       doc.line(20, yPos, pageWidth - 20, yPos);
-      yPos += 10;
+      yPos += 8;
 
       // Title - "Lab Test Result Report"
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
       doc.text('Lab Test Result Report', pageWidth / 2, yPos, { align: 'center' });
-      yPos += 12;
+      yPos += 10;
 
       // PATIENT INFORMATION Section
       doc.setFontSize(9);
@@ -15618,7 +15655,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // DOCTOR DETAILS Section
       doc.setFont('helvetica', 'bold');
       doc.text('DOCTOR DETAILS', 20, yPos);
-      yPos += 6;
+      yPos += 5;
 
       doc.setFont('helvetica', 'normal');
       const doctorName = labResult.doctorName || (orderedByUser ? `${orderedByUser.firstName || ''} ${orderedByUser.lastName || ''}`.trim() : 'N/A');
@@ -15626,7 +15663,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       doc.text('Name:', 20, yPos);
       doc.setFont('helvetica', 'normal');
       doc.text(doctorName ? `Dr. ${doctorName}` : 'N/A', 70, yPos);
-      yPos += 5;
+      yPos += 4;
 
       const doctorEmail = orderedByUser?.email || 'N/A';
       if (doctorEmail !== 'N/A') {
@@ -15634,14 +15671,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         doc.text('Email:', 20, yPos);
         doc.setFont('helvetica', 'normal');
         doc.text(doctorEmail, 70, yPos);
-        yPos += 5;
+        yPos += 4;
       }
-      yPos += 8;
+      yPos += 6;
 
       // REPORT CREATED BY Section
       doc.setFont('helvetica', 'bold');
       doc.text('REPORT CREATED BY', 20, yPos);
-      yPos += 6;
+      yPos += 5;
 
       doc.setFont('helvetica', 'normal');
       const creatorName = reportCreator
@@ -15651,7 +15688,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       doc.text('Name:', 20, yPos);
       doc.setFont('helvetica', 'normal');
       doc.text(creatorName, 70, yPos);
-      yPos += 5;
+      yPos += 4;
 
       const creatorEmail = reportCreator?.email || req.user?.email || 'N/A';
       if (creatorEmail !== 'N/A') {
@@ -15659,7 +15696,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         doc.text('Email:', 20, yPos);
         doc.setFont('helvetica', 'normal');
         doc.text(creatorEmail, 70, yPos);
-        yPos += 5;
+        yPos += 4;
       }
 
       const creatorRole = reportCreator?.role || req.user?.role || 'N/A';
@@ -15667,7 +15704,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       doc.text('Role:', 20, yPos);
       doc.setFont('helvetica', 'normal');
       doc.text(creatorRole, 70, yPos);
-      yPos += 8;
+      yPos += 6;
 
       // Results Table - Group by test type
       if (labResult.results) {
@@ -15709,7 +15746,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
             // Test Results - Each test type gets its own section
             Object.entries(resultsByTestType).forEach(([testType, groupResults]) => {
-              if (yPos > 240) {
+              // Check if we need a new page (leave space for footer ~25mm from bottom)
+              if (yPos > pageHeight - 50) {
                 doc.addPage();
                 yPos = 20;
               }
@@ -15720,11 +15758,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               doc.setTextColor(66, 133, 244);
               doc.text(testType, 20, yPos);
               doc.setTextColor(0, 0, 0);
-              yPos += 6;
+              yPos += 5;
 
               // Table Header
               const tableStartY = yPos;
-              const rowHeight = 6;
+              const rowHeight = 5; // Reduced from 6 to 5
               const colWidths = [60, 30, 30, 50]; // Parameter, Value, Unit, Reference Range
               const tableX = 20;
               const tableWidth = colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
@@ -15737,13 +15775,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               doc.setDrawColor(200, 200, 200);
               doc.rect(tableX, tableStartY, tableWidth, rowHeight);
 
-              // Header text
+              // Header text - smaller font
               doc.setFont('helvetica', 'bold');
-              doc.setFontSize(9);
-              doc.text('Parameter', tableX + 2, tableStartY + 4);
-              doc.text('Value', tableX + colWidths[0] + 2, tableStartY + 4);
-              doc.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 4);
-              doc.text('Reference Range', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, tableStartY + 4);
+              doc.setFontSize(8); // Reduced from 9 to 8
+              doc.text('Parameter', tableX + 2, tableStartY + 3.5);
+              doc.text('Value', tableX + colWidths[0] + 2, tableStartY + 3.5);
+              doc.text('Unit', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 3.5);
+              doc.text('Reference Range', tableX + colWidths[0] + colWidths[1] + 2, tableStartY + 3.5);
 
               yPos = tableStartY + rowHeight;
 
@@ -15754,11 +15792,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
                 return nameA.localeCompare(nameB);
               });
 
-              // Table rows
+              // Table rows - smaller font
               doc.setFont('helvetica', 'normal');
-              doc.setFontSize(9);
+              doc.setFontSize(8); // Reduced from 9 to 8
               sortedResults.forEach((result: any, index: number) => {
-                if (yPos > 270) {
+                // Check if we need a new page (leave space for footer ~25mm from bottom)
+                if (yPos > pageHeight - 50) {
                   doc.addPage();
                   yPos = 20;
                 }
@@ -15774,16 +15813,42 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
                 // Row data - use the displayName (parameter name without test type prefix)
                 const paramName = result.displayName || result.testName || result.name || '';
+                
+                // Handle Parameter column overflow - truncate if too long
+                // Use splitTextToSize to check if text fits, then truncate if needed
+                const maxParamWidth = colWidths[0] - 4; // Leave 2mm margin on each side
+                let displayParamName = paramName;
+                let paramFontSize = 8;
+                
+                // Check if parameter name is too long using splitTextToSize
+                doc.setFontSize(8);
+                const splitText = doc.splitTextToSize(paramName, maxParamWidth);
+                if (splitText.length > 1) {
+                  // Text doesn't fit, try with smaller font first
+                  paramFontSize = 7;
+                  doc.setFontSize(7);
+                  const splitTextSmall = doc.splitTextToSize(paramName, maxParamWidth);
+                  if (splitTextSmall.length > 1) {
+                    // Still too long, truncate with ellipsis
+                    // Estimate: ~0.5mm per character at 7pt font
+                    const maxChars = Math.floor(maxParamWidth / 0.5) - 3; // -3 for "..."
+                    if (paramName.length > maxChars) {
+                      displayParamName = paramName.substring(0, maxChars) + '...';
+                    }
+                  }
+                }
 
-                doc.text(paramName, tableX + 2, yPos + 4);
-                doc.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 4);
-                doc.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 4);
-                doc.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 4);
+                doc.setFontSize(paramFontSize);
+                doc.text(displayParamName, tableX + 2, yPos + 3.5);
+                doc.setFontSize(8); // Reset to normal table font for other columns
+                doc.text(String(result.value || ''), tableX + colWidths[0] + 2, yPos + 3.5);
+                doc.text(result.unit || '', tableX + colWidths[0] + colWidths[1] + 2, yPos + 3.5);
+                doc.text(result.referenceRange || '', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, yPos + 3.5);
 
                 yPos += rowHeight;
               });
 
-              yPos += 6;
+              yPos += 4; // Reduced spacing between test types
             });
           }
         } catch (e) {
@@ -15797,14 +15862,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Clinical Notes
       if (labResult.notes) {
         yPos += 4;
-        if (yPos > 270) {
+        // Check if we need a new page (leave space for footer ~25mm from bottom)
+        if (yPos > pageHeight - 50) {
           doc.addPage();
           yPos = 20;
         }
         doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
         doc.text('Clinical Notes', 20, yPos);
-        yPos += 6;
+        yPos += 5;
 
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');

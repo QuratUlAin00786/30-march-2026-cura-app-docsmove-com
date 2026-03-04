@@ -500,7 +500,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
       }
     }
     
-    return '';
+    return 'Patient not found';
   }, [patientsData, usersData]);
 
   const getDoctorNameWithSpecialization = React.useCallback((doctorId: number) => {

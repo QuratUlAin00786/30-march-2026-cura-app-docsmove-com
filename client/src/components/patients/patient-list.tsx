@@ -3720,24 +3720,119 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteConfirmDialog.open} onOpenChange={(open) => setDeleteConfirmDialog({ open, patient: open ? deleteConfirmDialog.patient : null })}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-xl font-semibold text-gray-900 dark:text-white">
               Delete Patient
             </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <p className="text-gray-700 dark:text-gray-300 mb-4">
-              Are you sure you want to delete{" "}
-              <span className="font-semibold">
-                {deleteConfirmDialog.patient?.firstName} {deleteConfirmDialog.patient?.lastName}
-              </span>?
-            </p>
-            <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
-              This action cannot be undone. The patient and their associated user account will be permanently deleted from the system.
-            </p>
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+            {/* Patient Data Display - Scrollable if content exceeds 550px */}
+            <div className="flex-1 overflow-y-auto pr-2" style={{ maxHeight: '550px' }}>
+              {deleteConfirmDialog.patient && (
+                <div className="space-y-4 py-4">
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-3">
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Patient Information</h3>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">First Name:</span>
+                        <p className="text-gray-900 dark:text-gray-100">{deleteConfirmDialog.patient.firstName || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Last Name:</span>
+                        <p className="text-gray-900 dark:text-gray-100">{deleteConfirmDialog.patient.lastName || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Email:</span>
+                        <p className="text-gray-900 dark:text-gray-100">{deleteConfirmDialog.patient.email || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Phone:</span>
+                        <p className="text-gray-900 dark:text-gray-100">{deleteConfirmDialog.patient.phone || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Date of Birth:</span>
+                        <p className="text-gray-900 dark:text-gray-100">
+                          {deleteConfirmDialog.patient.dateOfBirth 
+                            ? new Date(deleteConfirmDialog.patient.dateOfBirth).toLocaleDateString() 
+                            : "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Gender:</span>
+                        <p className="text-gray-900 dark:text-gray-100">{deleteConfirmDialog.patient.gender || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Patient ID:</span>
+                        <p className="text-gray-900 dark:text-gray-100">{deleteConfirmDialog.patient.patientId || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Status:</span>
+                        <p className="text-gray-900 dark:text-gray-100">
+                          {deleteConfirmDialog.patient.isActive ? "Active" : "Inactive"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {deleteConfirmDialog.patient.address && (
+                      <div className="mt-3">
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Address:</span>
+                        <p className="text-gray-900 dark:text-gray-100">
+                          {[
+                            deleteConfirmDialog.patient.address.street,
+                            deleteConfirmDialog.patient.address.city,
+                            deleteConfirmDialog.patient.address.postcode,
+                            deleteConfirmDialog.patient.address.country
+                          ].filter(Boolean).join(", ") || "N/A"}
+                        </p>
+                      </div>
+                    )}
+
+                    {deleteConfirmDialog.patient.medicalHistory && (
+                      <div className="mt-3">
+                        <span className="font-medium text-gray-600 dark:text-gray-400">Medical History:</span>
+                        <div className="text-gray-900 dark:text-gray-100 mt-1">
+                          {deleteConfirmDialog.patient.medicalHistory.allergies?.length > 0 && (
+                            <p><strong>Allergies:</strong> {deleteConfirmDialog.patient.medicalHistory.allergies.join(", ")}</p>
+                          )}
+                          {deleteConfirmDialog.patient.medicalHistory.conditions?.length > 0 && (
+                            <p><strong>Conditions:</strong> {deleteConfirmDialog.patient.medicalHistory.conditions.join(", ")}</p>
+                          )}
+                          {deleteConfirmDialog.patient.medicalHistory.medications?.length > 0 && (
+                            <p><strong>Medications:</strong> {deleteConfirmDialog.patient.medicalHistory.medications.join(", ")}</p>
+                          )}
+                          {(!deleteConfirmDialog.patient.medicalHistory.allergies?.length && 
+                            !deleteConfirmDialog.patient.medicalHistory.conditions?.length && 
+                            !deleteConfirmDialog.patient.medicalHistory.medications?.length) && (
+                            <p>No medical history recorded</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Warning Message */}
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3 mb-3">
+                <strong>⚠️ Warning:</strong> Deleting this patient will permanently delete all related data including:
+                <ul className="list-disc list-inside mt-2 space-y-1 ml-2">
+                  <li>All appointments for this patient</li>
+                  <li>All lab results for this patient</li>
+                  <li>All imaging/medical images for this patient</li>
+                  <li>All prescriptions for this patient</li>
+                  <li>All medical records for this patient</li>
+                  <li>The patient's user account (if exists)</li>
+                </ul>
+                <p className="mt-2 font-semibold">This action cannot be undone.</p>
+              </p>
+            </div>
           </div>
-          <div className="flex gap-3 justify-end">
+
+          <div className="flex gap-3 justify-end pt-4 border-t border-gray-200 dark:border-gray-700">
             <Button
               variant="outline"
               onClick={() => setDeleteConfirmDialog({ open: false, patient: null })}
@@ -3751,7 +3846,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
               disabled={deletePatientMutation.isPending}
               data-testid="button-confirm-delete"
             >
-              {deletePatientMutation.isPending ? "Deleting..." : "Yes, Delete"}
+              {deletePatientMutation.isPending ? "Deleting..." : "Yes, Delete All"}
             </Button>
           </div>
         </DialogContent>

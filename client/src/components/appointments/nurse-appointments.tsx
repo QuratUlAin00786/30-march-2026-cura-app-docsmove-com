@@ -69,9 +69,9 @@ export default function NurseAppointments({ onNewAppointment }: { onNewAppointme
   };
 
   const getPatientName = (patientId: number) => {
-    if (!patientsData || !Array.isArray(patientsData)) return `Patient ${patientId}`;
+    if (!patientsData || !Array.isArray(patientsData)) return "Patient not found";
     const patient = patientsData.find((p: any) => p.id === patientId);
-    return patient ? `${patient.firstName} ${patient.lastName}` : `Patient ${patientId}`;
+    return patient ? `${patient.firstName} ${patient.lastName}` : "Patient not found";
   };
 
   const formatTime = (timeString: string) => {

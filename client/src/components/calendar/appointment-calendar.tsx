@@ -1710,20 +1710,29 @@ Medical License: [License Number]
   const getPatientName = (patientId: number | string) => {
     if (!patientsData || !Array.isArray(patientsData)) {
       console.warn(`[Calendar] patientsData not available, returning fallback for patientId: ${patientId}`);
-      return `Patient ${patientId}`;
+      return "Patient not found";
     }
-    // Try both number and string comparison to handle type mismatches
+    // Try multiple matching strategies:
+    // 1. Match by patient.id (primary)
+    // 2. Match by patient.userId (in case patientId is actually a userId)
+    // 3. Try both number and string comparison to handle type mismatches
     const patient = patientsData.find((p: any) => 
       p.id === patientId || 
       p.id === Number(patientId) || 
-      String(p.id) === String(patientId)
+      String(p.id) === String(patientId) ||
+      p.userId === patientId ||
+      p.userId === Number(patientId) ||
+      String(p.userId) === String(patientId)
     );
     if (patient) {
       const name = `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
-      return name || `Patient ${patientId}`;
+      if (name) {
+        return name;
+      }
     }
     console.warn(`[Calendar] Patient not found for patientId: ${patientId}, patientsData length: ${patientsData.length}`);
-    return `Patient ${patientId}`;
+    // Return "Patient not found" when patient record is not available or deleted
+    return "Patient not found";
   };
 
   const selectedProvider = useMemo(() => {
@@ -2145,7 +2154,7 @@ Medical License: [License Number]
                         <div className="flex items-center space-x-2 mt-1">
                           <User className="h-4 w-4 text-gray-400" />
                           <span className="text-sm text-gray-600 dark:text-gray-300">
-                            {appointment.patientName || getPatientName(appointment.patientId)}
+                            {appointment.patientName || getPatientName(appointment.patientId) || "Patient not found"}
                           </span>
                         </div>
                       {serviceInfo && (
@@ -2304,7 +2313,20 @@ Medical License: [License Number]
                   </div>
                   <div className="mt-2">
                     <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                      {selectedAppointment.patientName || getPatientName(selectedAppointment.patientId)}
+                      {(() => {
+                        const patientName = selectedAppointment.patientName || getPatientName(selectedAppointment.patientId);
+                        // Find patient to get email
+                        const patient = patientsData?.find((p: any) => 
+                          p.id === selectedAppointment.patientId || 
+                          p.id === Number(selectedAppointment.patientId) || 
+                          String(p.id) === String(selectedAppointment.patientId) ||
+                          p.userId === selectedAppointment.patientId ||
+                          p.userId === Number(selectedAppointment.patientId) ||
+                          String(p.userId) === String(selectedAppointment.patientId)
+                        );
+                        const patientEmail = patient?.email || "";
+                        return patientEmail ? `${patientName} (${patientEmail})` : patientName;
+                      })()}
                     </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Service: {selectedAppointment.service || selectedAppointment.appointmentType || "N/A"}
@@ -2316,9 +2338,15 @@ Medical License: [License Number]
                   <div className="mt-2">
                     <p className="text-xs text-gray-500 dark:text-gray-400">Provider</p>
                       <p className="text-sm text-gray-800 dark:text-gray-100">
-                        {selectedAppointment.providerName ||
-                          getProviderName(selectedAppointment.providerId) ||
-                          "Unknown Provider"}
+                        {(() => {
+                          const providerName = selectedAppointment.providerName ||
+                            getProviderName(selectedAppointment.providerId) ||
+                            "Unknown Provider";
+                          // Find provider to get email
+                          const provider = usersData?.find((u: any) => u.id === selectedAppointment.providerId);
+                          const providerEmail = provider?.email || "";
+                          return providerEmail ? `${providerName} (${providerEmail})` : providerName;
+                        })()}
                       </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {selectedAppointment.providerSpecialty || selectedAppointment.specialty || "General"}
@@ -2327,9 +2355,19 @@ Medical License: [License Number]
                       Created By: {(() => {
                         const creator = getCreatedByUser(selectedAppointment.createdBy);
                         if (creator) {
-                          return `${creator.name} (${creator.role})`;
+                          // Find creator to get email
+                          const creatorUser = usersData?.find((u: any) => u.id === selectedAppointment.createdBy);
+                          const creatorEmail = creatorUser?.email || "";
+                          return creatorEmail ? `${creator.name} (${creator.role}) (${creatorEmail})` : `${creator.name} (${creator.role})`;
                         }
-                        return selectedAppointment.createdByName || `${getPatientName(selectedAppointment.createdBy)} (patient)` || "N/A";
+                        // If created by patient, try to get patient email
+                        const createdByPatient = patientsData?.find((p: any) => 
+                          p.id === selectedAppointment.createdBy || 
+                          p.userId === selectedAppointment.createdBy
+                        );
+                        const createdByPatientEmail = createdByPatient?.email || "";
+                        const createdByName = selectedAppointment.createdByName || `${getPatientName(selectedAppointment.createdBy)} (patient)` || "N/A";
+                        return createdByPatientEmail ? `${createdByName} (${createdByPatientEmail})` : createdByName;
                       })()}
                     </p>
                   </div>
@@ -2389,7 +2427,38 @@ Medical License: [License Number]
                         className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                         onClick={() => {
                           const sub = getActiveSubdomain() || getTenantSubdomain() || "demo";
-                          setLocation(`/${sub}/billing?tab=invoices`);
+                          // Get patient ID - try multiple sources
+                          const patientId = (() => {
+                            // Try to find patient in patientsData
+                            const patient = patientsData?.find((p: any) => 
+                              p.id === selectedAppointment.patientId || 
+                              p.id === Number(selectedAppointment.patientId) || 
+                              String(p.id) === String(selectedAppointment.patientId) ||
+                              p.userId === selectedAppointment.patientId ||
+                              p.userId === Number(selectedAppointment.patientId) ||
+                              String(p.userId) === String(selectedAppointment.patientId)
+                            );
+                            return patient?.patientId || selectedAppointment.patientId || "";
+                          })();
+                          
+                          // Get service date from scheduledAt
+                          const serviceDate = selectedAppointment.scheduledAt 
+                            ? new Date(selectedAppointment.scheduledAt).toISOString().split('T')[0]
+                            : new Date().toISOString().split('T')[0];
+                          
+                          // Get appointment ID - use internal id (not appointmentId) as that's what the Select uses
+                          const appointmentId = selectedAppointment.id || selectedAppointment.appointmentId || "";
+                          
+                          // Build URL with parameters
+                          const params = new URLSearchParams({
+                            tab: 'invoices',
+                            createInvoice: 'true',
+                            patientId: String(patientId),
+                            appointmentId: String(appointmentId),
+                            serviceDate: serviceDate
+                          });
+                          
+                          setLocation(`/${sub}/billing?${params.toString()}`);
                           setShowAppointmentDetails(false);
                         }}
                       >

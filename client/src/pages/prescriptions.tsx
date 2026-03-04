@@ -1249,7 +1249,7 @@ export default function PrescriptionsPage() {
           ...prescription,
           patientName:
             patientNames[prescription.patientId] ||
-            `Patient ${prescription.patientId}`,
+            "Patient not found",
           providerName:
             providerNames[prescription.providerId] ||
             `Provider ${prescription.providerId}`,
@@ -6245,26 +6245,32 @@ export default function PrescriptionsPage() {
                       </div>
                     </div>
                     <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0">
-                      <div className="truncate" title={prescription.patientName || "Unknown Patient"}>
+                      <div className="truncate" title={(() => {
+                        const patient = patients.find((p: any) => p.id === prescription.patientId);
+                        const patientEmail = patient?.email || "";
+                        const displayName = prescription.patientName || "Unknown Patient";
+                        return patientEmail ? `${displayName}\n${patientEmail}` : displayName;
+                      })()}>
                       {prescription.patientName || "Unknown Patient"}
                       </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
                       <div className="truncate" title={(() => {
+                        // Use doctorId (from database) or providerId (if available) - NOT prescriptionCreatedBy
                         const providerInfo = allUsers?.find((p: any) => 
                           p.id === prescription.doctorId || 
-                          p.id === prescription.providerId ||
-                          p.id === prescription.prescriptionCreatedBy
+                          p.id === prescription.providerId
                         );
-                        return providerInfo 
-                          ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
-                          : "Unknown Provider";
+                        if (!providerInfo) return "Unknown Provider";
+                        const providerName = `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider";
+                        const providerEmail = providerInfo.email || "";
+                        return providerEmail ? `${providerName}\n${providerEmail}` : providerName;
                       })()}>
                       {(() => {
+                        // Use doctorId (from database) or providerId (if available) - NOT prescriptionCreatedBy
                         const providerInfo = allUsers?.find((p: any) => 
                           p.id === prescription.doctorId || 
-                          p.id === prescription.providerId ||
-                          p.id === prescription.prescriptionCreatedBy
+                          p.id === prescription.providerId
                         );
                         return providerInfo 
                           ? `${providerInfo.firstName || ""} ${providerInfo.lastName || ""}`.trim() || "Unknown Provider"
@@ -6356,14 +6362,25 @@ export default function PrescriptionsPage() {
                       )}
                     </div>
                     {user?.role !== "nurse" && user?.role !== "doctor" && (
-                      <div className="text-gray-600 dark:text-gray-400">
+                      <div className="text-gray-600 dark:text-gray-400 min-w-0">
+                        <div className="truncate" title={(() => {
+                          // Get creator name from prescriptionCreatedBy (user who created the prescription)
+                          if (!prescription.prescriptionCreatedBy) return "N/A";
+                          const creatorInfo = allUsers?.find((u: any) => u.id === prescription.prescriptionCreatedBy);
+                          if (!creatorInfo) return "Unknown";
+                          const creatorName = `${creatorInfo.firstName || ""} ${creatorInfo.lastName || ""}`.trim() || "Unknown";
+                          const creatorEmail = creatorInfo.email || "";
+                          return creatorEmail ? `${creatorName}\n${creatorEmail}` : creatorName;
+                        })()}>
                         {(() => {
+                          // Get creator name from prescriptionCreatedBy (user who created the prescription)
                           if (!prescription.prescriptionCreatedBy) return "N/A";
                           const creatorInfo = allUsers?.find((u: any) => u.id === prescription.prescriptionCreatedBy);
                           return creatorInfo 
                             ? `${creatorInfo.firstName || ""} ${creatorInfo.lastName || ""}`.trim() || "Unknown"
                             : "Unknown";
                         })()}
+                        </div>
                       </div>
                     )}
                   </div>

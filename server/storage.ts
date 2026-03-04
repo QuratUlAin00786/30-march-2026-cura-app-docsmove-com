@@ -1427,6 +1427,11 @@ export class DatabaseStorage implements IStorage {
         .where(and(eq(labResults.patientId, id), eq(labResults.organizationId, organizationId)));
       console.log(`✅ Deleted lab results for patient ${id}`);
       
+      // Delete medical images/imaging
+      await db.delete(medicalImages)
+        .where(and(eq(medicalImages.patientId, id), eq(medicalImages.organizationId, organizationId)));
+      console.log(`✅ Deleted medical images for patient ${id}`);
+      
       // Delete the patient record
       const patientResult = await db.delete(patients)
         .where(and(eq(patients.id, id), eq(patients.organizationId, organizationId)));
