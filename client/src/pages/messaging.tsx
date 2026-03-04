@@ -4365,7 +4365,7 @@ export default function MessagingPage() {
                   </Select>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-none">
                     {newMessage.messageType === 'message'
-                      ? "Creates a conversation in the Conversations tab"
+                      ? "Creates a conversation"
                       : newMessage.messageType === 'email'
                         ? "Sends email only, no conversation created"
                         : newMessage.messageType === 'sms'

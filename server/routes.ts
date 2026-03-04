@@ -6170,8 +6170,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         if (patient) {
           const name = `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
           if (name) {
-            return {
-              ...apt,
+          return {
+            ...apt,
               patientName: name
             };
           }
@@ -6182,8 +6182,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         if (user) {
           const name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
           if (name) {
-            return {
-              ...apt,
+        return {
+          ...apt,
               patientName: name
             };
           }
@@ -9768,56 +9768,56 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           final_maxPatients: maxPatients
         });
 
-        // If creating a patient, check patient limits only
-        if (userData.role === 'patient') {
+      // If creating a patient, check patient limits only
+      if (userData.role === 'patient') {
           // Count existing patients (users with role='patient' and isActive=true)
-          const [patientCount] = await db.select({
-            count: sql<number>`count(*)::int`
-          })
-            .from(users)
-            .where(
-              and(
-                eq(users.organizationId, organizationId),
+        const [patientCount] = await db.select({
+          count: sql<number>`count(*)::int`
+        })
+          .from(users)
+          .where(
+            and(
+              eq(users.organizationId, organizationId),
                 eq(users.role, 'patient'),
                 eq(users.isActive, true)
-              )
-            );
+            )
+          );
 
-          const currentPatientCount = patientCount?.count || 0;
+        const currentPatientCount = patientCount?.count || 0;
           const remainingPatients = maxPatients - currentPatientCount;
 
           // Only block when remaining slots = 0 (allow when > 0)
           if (remainingPatients <= 0) {
-            return res.status(403).json({
-              error: `Patient limit reached. Your subscription allows ${maxPatients} patients, and you currently have ${currentPatientCount} patients. Please upgrade your subscription to add more patients.`
-            });
-          }
-        } else {
-          // For non-patient roles, check non-patient user limits
+          return res.status(403).json({
+            error: `Patient limit reached. Your subscription allows ${maxPatients} patients, and you currently have ${currentPatientCount} patients. Please upgrade your subscription to add more patients.`
+          });
+        }
+      } else {
+        // For non-patient roles, check non-patient user limits
           // Exclude SaaS owners, inactive users, and patient role
-          const [nonPatientUserCount] = await db.select({
-            count: sql<number>`count(*)::int`
-          })
-            .from(users)
-            .where(
-              and(
-                eq(users.organizationId, organizationId),
+        const [nonPatientUserCount] = await db.select({
+          count: sql<number>`count(*)::int`
+        })
+          .from(users)
+          .where(
+            and(
+              eq(users.organizationId, organizationId),
                 ne(users.role, 'patient'),
                 eq(users.isSaaSOwner, false),
                 eq(users.isActive, true)
-              )
-            );
+            )
+          );
 
-          const currentNonPatientUserCount = nonPatientUserCount?.count || 0;
+        const currentNonPatientUserCount = nonPatientUserCount?.count || 0;
           const remainingUsers = maxUsers - currentNonPatientUserCount;
 
           // Only block when remaining slots = 0 (allow when > 0)
           if (remainingUsers <= 0) {
-            return res.status(403).json({
-              error: `User limit reached. Your subscription allows ${maxUsers} users, and you currently have ${currentNonPatientUserCount} users. Please upgrade your subscription to add more users.`
-            });
-          }
+          return res.status(403).json({
+            error: `User limit reached. Your subscription allows ${maxUsers} users, and you currently have ${currentNonPatientUserCount} users. Please upgrade your subscription to add more users.`
+          });
         }
+      }
       }
       // If no subscription found, allow creation (don't block)
 
@@ -10600,8 +10600,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       let stripeSubscription;
       try {
         stripeSubscription = await stripe.subscriptions.retrieve(
-          currentSubscription.stripeSubscriptionId
-        );
+        currentSubscription.stripeSubscriptionId
+      );
         console.log("[PREVIEW UPGRADE] Stripe subscription retrieved:", stripeSubscription.id);
       } catch (stripeRetrieveError: any) {
         console.error("[PREVIEW UPGRADE] Error retrieving Stripe subscription:", stripeRetrieveError);
@@ -10820,7 +10820,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       const { subscriptionId, newPackageId, billingCycle } = req.body;
-      
+
       if (!subscriptionId || !newPackageId || !billingCycle) {
         console.error("[UPGRADE] Missing required fields:", { subscriptionId, newPackageId, billingCycle });
         return res.status(400).json({ 
@@ -10864,8 +10864,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       let stripeSubscription;
       try {
         stripeSubscription = await stripe.subscriptions.retrieve(
-          currentSubscription.stripeSubscriptionId
-        );
+        currentSubscription.stripeSubscriptionId
+      );
         console.log("[UPGRADE] Stripe subscription retrieved:", stripeSubscription.id);
       } catch (stripeRetrieveError: any) {
         console.error("[UPGRADE] Error retrieving Stripe subscription:", stripeRetrieveError);
@@ -10992,10 +10992,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
         
         const [newPkg] = await db
-          .select()
-          .from(saasPackages)
-          .where(eq(saasPackages.id, newPackageId))
-          .limit(1);
+        .select()
+        .from(saasPackages)
+        .where(eq(saasPackages.id, newPackageId))
+        .limit(1);
         newPackage = newPkg || null;
 
         if (!newPackage) {
@@ -11038,17 +11038,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           currentPeriodEnd: currentPeriodEnd.toISOString(),
         });
 
-        await db
-          .update(saasSubscriptions)
-          .set({
-            packageId: newPackageId,
-            stripePriceId: newPriceId,
-            billingCycle: billingCycle,
+      await db
+        .update(saasSubscriptions)
+        .set({
+          packageId: newPackageId,
+          stripePriceId: newPriceId,
+          billingCycle: billingCycle,
             currentPeriodStart: currentPeriodStart,
             currentPeriodEnd: currentPeriodEnd,
-            updatedAt: new Date(),
-          })
-          .where(eq(saasSubscriptions.id, subscriptionId));
+          updatedAt: new Date(),
+        })
+        .where(eq(saasSubscriptions.id, subscriptionId));
         console.log("[UPGRADE] Database updated successfully");
       } catch (dbError: any) {
         console.error("[UPGRADE] Error updating database:", {
@@ -11064,29 +11064,29 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Log subscription history (non-blocking)
       try {
-        await logSubscriptionHistory({
-          organizationId,
-          subscriptionId,
-          action: "upgrade",
-          performedBy: req.user?.id,
-          performedByType: "org_admin",
-          oldPackageId: currentSubscription.packageId || undefined,
-          newPackageId: newPackageId,
-          oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
-          newBillingCycle: billingCycle as "monthly" | "annual",
-          oldStatus: currentSubscription.status || undefined,
-          newStatus: currentSubscription.status || undefined,
-          oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
-          newPrice: newPackage?.price ? Number(newPackage.price) : undefined,
-          details: {
+      await logSubscriptionHistory({
+        organizationId,
+        subscriptionId,
+        action: "upgrade",
+        performedBy: req.user?.id,
+        performedByType: "org_admin",
+        oldPackageId: currentSubscription.packageId || undefined,
+        newPackageId: newPackageId,
+        oldBillingCycle: currentSubscription.billingCycle as "monthly" | "annual" | undefined,
+        newBillingCycle: billingCycle as "monthly" | "annual",
+        oldStatus: currentSubscription.status || undefined,
+        newStatus: currentSubscription.status || undefined,
+        oldPrice: oldPackage?.price ? Number(oldPackage.price) : undefined,
+        newPrice: newPackage?.price ? Number(newPackage.price) : undefined,
+        details: {
             prorationAmount: updatedSubscription.latest_invoice && typeof updatedSubscription.latest_invoice === 'object' && 'amount_due' in updatedSubscription.latest_invoice
               ? (updatedSubscription.latest_invoice.amount_due as number) / 100
               : undefined,
-            stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
-          },
-          ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
-          userAgent: req.headers["user-agent"] || undefined,
-        });
+          stripeSubscriptionId: currentSubscription.stripeSubscriptionId || undefined,
+        },
+        ipAddress: req.ip || (req.headers["x-forwarded-for"] as string) || undefined,
+        userAgent: req.headers["user-agent"] || undefined,
+      });
         console.log("[UPGRADE] Subscription history logged");
       } catch (historyError: any) {
         // Log but don't fail - history logging is non-critical
@@ -15813,7 +15813,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
                 // Row data - use the displayName (parameter name without test type prefix)
                 const paramName = result.displayName || result.testName || result.name || '';
-                
+
                 // Handle Parameter column overflow - truncate if too long
                 // Use splitTextToSize to check if text fits, then truncate if needed
                 const maxParamWidth = colWidths[0] - 4; // Leave 2mm margin on each side
@@ -17716,7 +17716,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           // First, try to use email from frontend if provided (most reliable)
           let recipientEmail = (frontendRecipientEmail && frontendRecipientEmail.trim() !== '') ? frontendRecipientEmail.trim() : null;
           let recipientName = 'Recipient';
-          
+
           console.log(`📧 EMAIL LOOKUP - frontendRecipientEmail: "${frontendRecipientEmail}", using it: ${!!recipientEmail}`);
           
           // If frontend provided email, use it and just get the name for personalization
@@ -17728,109 +17728,110 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             console.log(`📧 EMAIL LOOKUP - recipientId: "${recipientId}", type: ${typeof recipientId}, recipientIdNum: ${recipientIdNum}`);
             
             if (recipientIdNum !== null && !isNaN(recipientIdNum)) {
-            // recipientId is a number (or string that can be converted to number) - treat as ID
-            console.log(`📧 Looking up recipient by ID: ${recipientIdNum}`);
-            // Try to get recipient from users table first
-            try {
-              const recipientUser = await storage.getUser(recipientIdNum, req.tenant!.id);
-              console.log(`📧 getUser result:`, recipientUser ? `Found user ${recipientUser.firstName} ${recipientUser.lastName}, email: ${recipientUser.email || 'NO EMAIL'}` : 'User not found');
-              if (recipientUser) {
-                if (recipientUser.email && recipientUser.email.trim() !== '') {
-                  recipientEmail = recipientUser.email.trim();
-                  recipientName = recipientUser.firstName && recipientUser.lastName
-                    ? `${recipientUser.firstName} ${recipientUser.lastName}`
-                    : recipientUser.firstName || recipientUser.email;
-                  console.log(`📧 Found user by ID: ${recipientName} (${recipientEmail})`);
-                } else {
-                  console.log(`📧 User found but no email address: ID ${recipientIdNum}`);
-                }
-              }
-            } catch (userError: any) {
-              console.log(`📧 Error looking up user by ID ${recipientIdNum}:`, userError?.message || userError);
-            }
-            
-            // If not found in users, try patients table
-            if (!recipientEmail) {
+              // recipientId is a number (or string that can be converted to number) - treat as ID
+              console.log(`📧 Looking up recipient by ID: ${recipientIdNum}`);
+              // Try to get recipient from users table first
               try {
-                const recipientPatient = await storage.getPatient(recipientIdNum, req.tenant!.id);
-                console.log(`📧 getPatient result:`, recipientPatient ? `Found patient ${recipientPatient.firstName} ${recipientPatient.lastName}, email: ${recipientPatient.email || 'NO EMAIL'}` : 'Patient not found');
-                if (recipientPatient) {
-                  if (recipientPatient.email && recipientPatient.email.trim() !== '') {
-                    recipientEmail = recipientPatient.email.trim();
-                    recipientName = `${recipientPatient.firstName} ${recipientPatient.lastName}`;
-                    console.log(`📧 Found patient by ID: ${recipientName} (${recipientEmail})`);
+                const recipientUser = await storage.getUser(recipientIdNum, req.tenant!.id);
+                console.log(`📧 getUser result:`, recipientUser ? `Found user ${recipientUser.firstName} ${recipientUser.lastName}, email: ${recipientUser.email || 'NO EMAIL'}` : 'User not found');
+                if (recipientUser) {
+                  if (recipientUser.email && recipientUser.email.trim() !== '') {
+                    recipientEmail = recipientUser.email.trim();
+                    recipientName = recipientUser.firstName && recipientUser.lastName
+                      ? `${recipientUser.firstName} ${recipientUser.lastName}`
+                      : recipientUser.firstName || recipientUser.email;
+                    console.log(`📧 Found user by ID: ${recipientName} (${recipientEmail})`);
                   } else {
-                    // Try to get email from linked user account if patient has userId
-                    if (recipientPatient.userId) {
-                      try {
-                        const linkedUser = await storage.getUser(recipientPatient.userId, req.tenant!.id);
-                        if (linkedUser && linkedUser.email && linkedUser.email.trim() !== '') {
-                          recipientEmail = linkedUser.email.trim();
-                          recipientName = `${recipientPatient.firstName} ${recipientPatient.lastName}`;
-                          console.log(`📧 Found patient email from linked user account: ${recipientName} (${recipientEmail})`);
+                    console.log(`📧 User found but no email address: ID ${recipientIdNum}`);
+                  }
+                }
+              } catch (userError: any) {
+                console.log(`📧 Error looking up user by ID ${recipientIdNum}:`, userError?.message || userError);
+              }
+              
+              // If not found in users, try patients table
+              if (!recipientEmail) {
+                try {
+                  const recipientPatient = await storage.getPatient(recipientIdNum, req.tenant!.id);
+                  console.log(`📧 getPatient result:`, recipientPatient ? `Found patient ${recipientPatient.firstName} ${recipientPatient.lastName}, email: ${recipientPatient.email || 'NO EMAIL'}` : 'Patient not found');
+                  if (recipientPatient) {
+                    if (recipientPatient.email && recipientPatient.email.trim() !== '') {
+                      recipientEmail = recipientPatient.email.trim();
+                      recipientName = `${recipientPatient.firstName} ${recipientPatient.lastName}`;
+                      console.log(`📧 Found patient by ID: ${recipientName} (${recipientEmail})`);
+                    } else {
+                      // Try to get email from linked user account if patient has userId
+                      if (recipientPatient.userId) {
+                        try {
+                          const linkedUser = await storage.getUser(recipientPatient.userId, req.tenant!.id);
+                          if (linkedUser && linkedUser.email && linkedUser.email.trim() !== '') {
+                            recipientEmail = linkedUser.email.trim();
+                            recipientName = `${recipientPatient.firstName} ${recipientPatient.lastName}`;
+                            console.log(`📧 Found patient email from linked user account: ${recipientName} (${recipientEmail})`);
+                          }
+                        } catch (linkError) {
+                          console.log(`📧 Error looking up linked user for patient:`, linkError);
                         }
-                      } catch (linkError) {
-                        console.log(`📧 Error looking up linked user for patient:`, linkError);
+                      }
+                      if (!recipientEmail) {
+                        console.log(`📧 Patient found but no email address: ID ${recipientIdNum}`);
                       }
                     }
-                    if (!recipientEmail) {
-                      console.log(`📧 Patient found but no email address: ID ${recipientIdNum}`);
-                    }
                   }
+                } catch (patientError: any) {
+                  console.log(`📧 Error looking up patient by ID ${recipientIdNum}:`, patientError?.message || patientError);
                 }
-              } catch (patientError: any) {
-                console.log(`📧 Error looking up patient by ID ${recipientIdNum}:`, patientError?.message || patientError);
               }
-            }
-          } else if (typeof recipientId === 'string') {
-            // RecipientId is a string that's not a number - treat as name and look up by name
-            console.log(`📧 Looking up recipient by name: "${recipientId}"`);
-            // Try users first
-            const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
-            const matchedUser = allUsers.find(user => {
-              const fullName = `${user.firstName} ${user.lastName}`.trim();
-              return fullName === recipientId ||
-                user.firstName === recipientId ||
-                user.email === recipientId;
-            });
-
-            if (matchedUser) {
-              if (matchedUser.email && matchedUser.email.trim() !== '') {
-                recipientEmail = matchedUser.email.trim();
-                recipientName = `${matchedUser.firstName} ${matchedUser.lastName}`;
-                console.log(`📧 Found user by name: ${recipientName} (${recipientEmail})`);
-              } else {
-                console.log(`📧 User found by name but no email: ${matchedUser.firstName} ${matchedUser.lastName}, ID: ${matchedUser.id}`);
-              }
-            } else {
-              // Try patients table
-              const allPatients = await storage.getPatientsByOrganization(req.tenant!.id);
-              const matchedPatient = allPatients.find(patient => {
-                const fullName = `${patient.firstName} ${patient.lastName}`.trim();
+            } else if (typeof recipientId === 'string') {
+              // RecipientId is a string that's not a number - treat as name and look up by name
+              console.log(`📧 Looking up recipient by name: "${recipientId}"`);
+              // Try users first
+              const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
+              const matchedUser = allUsers.find(user => {
+                const fullName = `${user.firstName} ${user.lastName}`.trim();
                 return fullName === recipientId ||
-                  patient.firstName === recipientId ||
-                  patient.email === recipientId;
+                  user.firstName === recipientId ||
+                  user.email === recipientId;
               });
 
-              if (matchedPatient) {
-                if (matchedPatient.email && matchedPatient.email.trim() !== '') {
-                  recipientEmail = matchedPatient.email.trim();
-                  recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
-                  console.log(`📧 Found patient by name: ${recipientName} (${recipientEmail})`);
-                } else if (matchedPatient.userId) {
-                  // Try linked user account
-                  try {
-                    const linkedUser = await storage.getUser(matchedPatient.userId, req.tenant!.id);
-                    if (linkedUser && linkedUser.email && linkedUser.email.trim() !== '') {
-                      recipientEmail = linkedUser.email.trim();
-                      recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
-                      console.log(`📧 Found patient email from linked user by name: ${recipientName} (${recipientEmail})`);
-                    }
-                  } catch (linkError) {
-                    console.log(`📧 Error looking up linked user for patient by name:`, linkError);
-                  }
+              if (matchedUser) {
+                if (matchedUser.email && matchedUser.email.trim() !== '') {
+                  recipientEmail = matchedUser.email.trim();
+                  recipientName = `${matchedUser.firstName} ${matchedUser.lastName}`;
+                  console.log(`📧 Found user by name: ${recipientName} (${recipientEmail})`);
                 } else {
-                  console.log(`📧 Patient found by name but no email: ${matchedPatient.firstName} ${matchedPatient.lastName}, ID: ${matchedPatient.id}`);
+                  console.log(`📧 User found by name but no email: ${matchedUser.firstName} ${matchedUser.lastName}, ID: ${matchedUser.id}`);
+                }
+              } else {
+                // Try patients table
+                const allPatients = await storage.getPatientsByOrganization(req.tenant!.id);
+                const matchedPatient = allPatients.find(patient => {
+                  const fullName = `${patient.firstName} ${patient.lastName}`.trim();
+                  return fullName === recipientId ||
+                    patient.firstName === recipientId ||
+                    patient.email === recipientId;
+                });
+
+                if (matchedPatient) {
+                  if (matchedPatient.email && matchedPatient.email.trim() !== '') {
+                    recipientEmail = matchedPatient.email.trim();
+                    recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
+                    console.log(`📧 Found patient by name: ${recipientName} (${recipientEmail})`);
+                  } else if (matchedPatient.userId) {
+                    // Try linked user account
+                    try {
+                      const linkedUser = await storage.getUser(matchedPatient.userId, req.tenant!.id);
+                      if (linkedUser && linkedUser.email && linkedUser.email.trim() !== '') {
+                        recipientEmail = linkedUser.email.trim();
+                        recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
+                        console.log(`📧 Found patient email from linked user by name: ${recipientName} (${recipientEmail})`);
+                      }
+                    } catch (linkError) {
+                      console.log(`📧 Error looking up linked user for patient by name:`, linkError);
+                    }
+                  } else {
+                    console.log(`📧 Patient found by name but no email: ${matchedPatient.firstName} ${matchedPatient.lastName}, ID: ${matchedPatient.id}`);
+                  }
                 }
               }
             }
@@ -17840,42 +17841,43 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           if (!recipientEmail) {
             const recipientIdNum = typeof recipientId === 'number' ? recipientId : (typeof recipientId === 'string' && !isNaN(Number(recipientId)) && recipientId.trim() !== '' ? Number(recipientId) : null);
             if (recipientIdNum !== null) {
-            console.log(`📧 Fallback: Searching all users and patients for ID ${recipientIdNum}`);
-            try {
-              const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
-              const matchedUser = allUsers.find(u => u.id === recipientIdNum);
-              if (matchedUser && matchedUser.email && matchedUser.email.trim() !== '') {
-                recipientEmail = matchedUser.email.trim();
-                recipientName = `${matchedUser.firstName} ${matchedUser.lastName}`;
-                console.log(`📧 Found user in fallback search: ${recipientName} (${recipientEmail})`);
-              } else {
-                const allPatients = await storage.getPatientsByOrganization(req.tenant!.id);
-                const matchedPatient = allPatients.find(p => p.id === recipientIdNum || p.userId === recipientIdNum);
-                if (matchedPatient) {
-                  if (matchedPatient.email && matchedPatient.email.trim() !== '') {
-                    recipientEmail = matchedPatient.email.trim();
-                    recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
-                    console.log(`📧 Found patient in fallback search: ${recipientName} (${recipientEmail})`);
-                  } else if (matchedPatient.userId) {
-                    // Try linked user account
-                    const linkedUser = allUsers.find(u => u.id === matchedPatient.userId);
-                    if (linkedUser && linkedUser.email && linkedUser.email.trim() !== '') {
-                      recipientEmail = linkedUser.email.trim();
+              console.log(`📧 Fallback: Searching all users and patients for ID ${recipientIdNum}`);
+              try {
+                const allUsers = await storage.getUsersByOrganization(req.tenant!.id);
+                const matchedUser = allUsers.find(u => u.id === recipientIdNum);
+                if (matchedUser && matchedUser.email && matchedUser.email.trim() !== '') {
+                  recipientEmail = matchedUser.email.trim();
+                  recipientName = `${matchedUser.firstName} ${matchedUser.lastName}`;
+                  console.log(`📧 Found user in fallback search: ${recipientName} (${recipientEmail})`);
+                } else {
+                  const allPatients = await storage.getPatientsByOrganization(req.tenant!.id);
+                  const matchedPatient = allPatients.find(p => p.id === recipientIdNum || p.userId === recipientIdNum);
+                  if (matchedPatient) {
+                    if (matchedPatient.email && matchedPatient.email.trim() !== '') {
+                      recipientEmail = matchedPatient.email.trim();
                       recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
-                      console.log(`📧 Found patient email from linked user in fallback: ${recipientName} (${recipientEmail})`);
+                      console.log(`📧 Found patient in fallback search: ${recipientName} (${recipientEmail})`);
+                    } else if (matchedPatient.userId) {
+                      // Try linked user account
+                      const linkedUser = allUsers.find(u => u.id === matchedPatient.userId);
+                      if (linkedUser && linkedUser.email && linkedUser.email.trim() !== '') {
+                        recipientEmail = linkedUser.email.trim();
+                        recipientName = `${matchedPatient.firstName} ${matchedPatient.lastName}`;
+                        console.log(`📧 Found patient email from linked user in fallback: ${recipientName} (${recipientEmail})`);
+                      }
                     }
                   }
                 }
+              } catch (fallbackError: any) {
+                console.error(`📧 Error in fallback search:`, fallbackError?.message || fallbackError);
               }
-            } catch (fallbackError: any) {
-              console.error(`📧 Error in fallback search:`, fallbackError?.message || fallbackError);
             }
           }
 
           console.log(`📧 EMAIL LOOKUP RESULT - recipientEmail: "${recipientEmail}", recipientName: "${recipientName}"`);
 
           if (!recipientEmail || recipientEmail.trim() === '') {
-            console.error('No email address found for recipient:', recipientId, 'recipientIdNum:', recipientIdNum);
+            console.error('No email address found for recipient:', recipientId);
             await storage.updateMessageDeliveryStatus(message.id, 'failed', undefined, 'No email address found for recipient');
             return res.status(400).json({
               error: 'Email sending failed: No email address found for recipient',
