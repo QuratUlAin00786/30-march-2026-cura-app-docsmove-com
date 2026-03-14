@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useQuery } from '@tanstack/react-query';
 import { saasApiRequest } from '@/lib/saasQueryClient';
+import { useCurrency } from '@/hooks/use-currency';
 import { 
   Users, 
   Building2, 
@@ -33,6 +34,7 @@ interface SaaSDashboardProps {
 }
 
 export default function SaaSDashboard({ onLogout }: SaaSDashboardProps) {
+  const { currencySymbol } = useCurrency();
   const [activeTab, setActiveTab] = useState('overview');
   const [activityPage, setActivityPage] = useState(1);
   const [activityLimit] = useState(5);
@@ -177,23 +179,23 @@ export default function SaaSDashboard({ onLogout }: SaaSDashboardProps) {
           <div className="w-full px-[200px] py-8">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 w-full">
               <TabsList className="grid w-full grid-cols-5 gap-4">
-                <TabsTrigger value="overview" className="flex items-center space-x-2">
+                <TabsTrigger value="overview" className="flex items-center justify-center space-x-2 px-6 py-2.5 min-w-[140px]">
                   <Activity className="h-4 w-4" />
                   <span>Overview</span>
                 </TabsTrigger>
-                <TabsTrigger value="customers" className="flex items-center space-x-2">
+                <TabsTrigger value="customers" className="flex items-center justify-center space-x-2 px-6 py-2.5 min-w-[140px]">
                   <Building2 className="h-4 w-4" />
                   <span>Organizations</span>
                 </TabsTrigger>
-                <TabsTrigger value="billing" className="flex items-center space-x-2">
+                <TabsTrigger value="billing" className="flex items-center justify-center space-x-2 px-6 py-2.5 min-w-[140px]">
                   <CreditCard className="h-4 w-4" />
                   <span>Billing</span>
                 </TabsTrigger>
-                <TabsTrigger value="packages" className="flex items-center space-x-2">
+                <TabsTrigger value="packages" className="flex items-center justify-center space-x-2 px-6 py-2.5 min-w-[140px]">
                   <Package className="h-4 w-4" />
                   <span>Packages</span>
                 </TabsTrigger>
-                <TabsTrigger value="settings" className="flex items-center space-x-2">
+                <TabsTrigger value="settings" className="flex items-center justify-center space-x-2 px-6 py-2.5 min-w-[140px]">
                   <Settings className="h-4 w-4" />
                   <span>Settings</span>
                 </TabsTrigger>
@@ -216,7 +218,7 @@ export default function SaaSDashboard({ onLogout }: SaaSDashboardProps) {
                   />
                   <StatCard
                     title="Monthly Revenue"
-                    value={`£${stats?.monthlyRevenue || 0}`}
+                    value={`${currencySymbol}${stats?.monthlyRevenue || 0}`}
                     icon={CreditCard}
                     trend={false}
                   />

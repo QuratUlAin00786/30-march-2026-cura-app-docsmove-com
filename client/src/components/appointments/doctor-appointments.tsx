@@ -341,9 +341,14 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   // Cancel appointment mutation
   const cancelAppointmentMutation = useMutation({
     mutationFn: async (appointmentId: number) => {
-      const response = await apiRequest('PUT', `/api/appointments/${appointmentId}`, {
+      // Use PATCH like admin does for canceling appointments
+      const response = await apiRequest('PATCH', `/api/appointments/${appointmentId}`, {
         status: 'cancelled'
       });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "Failed to cancel appointment" }));
+        throw new Error(errorData.error || errorData.message || "Failed to cancel appointment");
+      }
       return response.json();
     },
     onSuccess: () => {
@@ -352,9 +357,11 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
       setShowSuccessModal(true);
     },
     onError: (error: any) => {
+      console.error("Cancel appointment error:", error);
+      const errorMessage = error?.message || error?.error || "Failed to cancel appointment. Please check your permissions.";
       toast({
         title: "Error",
-        description: error.message || "Failed to cancel appointment",
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -464,6 +471,22 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   };
 
   const appointments = appointmentsData || [];
+  
+  // Debug logging for nurses
+  if (user?.role === 'nurse') {
+    console.log('👩‍⚕️ NURSE APPOINTMENTS DEBUG:', {
+      appointmentsDataLength: appointmentsData?.length || 0,
+      appointmentsLength: appointments.length,
+      appointments: appointments.map((apt: any) => ({
+        id: apt.id,
+        scheduledAt: apt.scheduledAt,
+        patientId: apt.patientId,
+        providerId: apt.providerId,
+        status: apt.status,
+        createdBy: apt.createdBy
+      }))
+    });
+  }
 
   // Doctor appointments are already filtered by backend based on logged-in user's role
   const doctorAppointments = React.useMemo(() => {
@@ -480,9 +503,15 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
       totalPatients: patientsData?.length || 0
     });
 
-    // Backend already filters by role (doctors see only their own appointments)
+    // For nurses, show all appointments (not just where they are provider)
+    // For doctors, backend already filters by role (doctors see only their own appointments)
     // Data is already scoped to correct organizationId by tenant middleware
-    // Return appointments as-is from backend
+    if (user?.role === 'nurse') {
+      // Nurses should see all appointments in the calendar view
+      console.log('✅ NURSE APPOINTMENTS: Showing', appointments.length, 'appointments for nurse ID', user.id);
+      return appointments;
+    }
+    
     console.log('✅ DOCTOR APPOINTMENTS: Showing', appointments.length, 'appointments for doctor ID', user.id, 'in organization', user.organizationId);
     
     return appointments;
@@ -545,10 +574,28 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   };
 
   const getAppointmentsForDate = (date: Date) => {
-    return doctorAppointments.filter((apt: any) => {
+    const filtered = doctorAppointments.filter((apt: any) => {
       const appointmentDate = new Date(apt.scheduledAt);
       return isSameDay(appointmentDate, date);
     });
+    
+    // Debug logging for nurses
+    if (user?.role === 'nurse') {
+      console.log('📅 NURSE CALENDAR: getAppointmentsForDate', {
+        date: format(date, 'yyyy-MM-dd'),
+        totalAppointments: doctorAppointments.length,
+        filteredCount: filtered.length,
+        appointments: filtered.map((apt: any) => ({
+          id: apt.id,
+          scheduledAt: apt.scheduledAt,
+          patientId: apt.patientId,
+          providerId: apt.providerId,
+          status: apt.status
+        }))
+      });
+    }
+    
+    return filtered;
   };
 
   // Categorize appointments into upcoming and past
@@ -1003,6 +1050,236 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
         </Card>
       )}
 
+      {/* Selected Date Appointments - Show when a date is selected in week view */}
+      {viewMode === "week" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2 text-gray-900 dark:text-gray-100">
+              <Calendar className="h-5 w-5" />
+              Appointments for {format(selectedDate, "EEEE, MMMM d, yyyy")}
+              <Badge variant="secondary" className="ml-2">
+                {getAppointmentsForDate(selectedDate).length} appointment{getAppointmentsForDate(selectedDate).length !== 1 ? 's' : ''}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {getAppointmentsForDate(selectedDate).map((appointment: any) => {
+                const doctor = usersData?.find((u: any) => u.id === appointment.providerId);
+                // Try multiple matching strategies to find the patient
+                const patient = patientsData?.find((p: any) => 
+                  p.userId === appointment.patientId || 
+                  p.id === appointment.patientId ||
+                  (p.patientId && p.patientId === appointment.patientId.toString()) ||
+                  p.id.toString() === appointment.patientId.toString()
+                );
+                const createdBy = usersData?.find((u: any) => u.id === appointment.createdBy);
+                const appointmentServiceInfo = getAppointmentServiceInfo(appointment);
+                const appointmentTypeBadge = getAppointmentTypeBadgeInfo(appointment);
+                
+                return (
+                  <Card 
+                    key={appointment.id} 
+                    className="border-l-4 bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700" 
+                    style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}
+                    data-testid={`selected-date-appointment-${appointment.id}`}
+                  >
+                    <CardContent className="p-4">
+                      {/* Header with Title and Actions */}
+                      <div className="flex items-start justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {appointment.title || (() => {
+                            // For nurse/doctor roles, always show "Appointment with [Role] [Name]" (logged-in user)
+                            if (isDoctorLike(user?.role || '')) {
+                              const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
+                              const loggedInUserName = `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+                              return `Appointment with ${loggedInUserName}`;
+                            }
+                            // For other roles, show patient name
+                            return `Appointment with ${patient ? `${patient.firstName} ${patient.lastName}` : 'Patient'}`;
+                          })()}
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          {appointment.status !== 'cancelled' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditAppointment(appointment)}
+                              className="h-8 w-8 p-0"
+                              data-testid={`button-edit-selected-appointment-${appointment.id}`}
+                            >
+                              <Edit className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                          {appointment.status !== 'cancelled' && isDoctorLike(user?.role || '') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => setAppointmentToCancel(appointment.id)}
+                              data-testid={`button-cancel-selected-${appointment.id}`}
+                            >
+                              Cancel Appointment
+                            </Button>
+                          )}
+                          <Badge 
+                            style={{ backgroundColor: statusColors[appointment.status as keyof typeof statusColors] }}
+                            className="text-white"
+                          >
+                            {appointment.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      {/* Two Column Grid Layout */}
+                      <div className="grid grid-cols-2 gap-6">
+                        {/* Left Column */}
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <Calendar className="h-4 w-4 text-gray-400" />
+                            <span>{format(new Date(appointment.scheduledAt), "EEEE, MMMM d, yyyy")}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <Clock className="h-4 w-4 text-gray-400" />
+                            <span className="font-semibold">{formatTime(appointment.scheduledAt)}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <User className="h-4 w-4 text-gray-400" />
+                            <span>{patient ? `${patient.firstName} ${patient.lastName}` : getPatientName(appointment.patientId)}</span>
+                          </div>
+                          {patient && (
+                            <>
+                              {patient.patientId && (
+                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                  <span>Patient ID: {patient.patientId}</span>
+                                </div>
+                              )}
+                              {patient.email && (
+                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                  <span>Email: {patient.email}</span>
+                                </div>
+                              )}
+                              {patient.contactNumber && (
+                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                  <span>Contact: {patient.contactNumber}</span>
+                                </div>
+                              )}
+                            </>
+                          )}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                              <FileText className="h-4 w-4 text-gray-400" />
+                              <span className="font-semibold">Appointment Type:</span>
+                              <span>{appointment.appointmentType || appointment.type || 'N/A'}</span>
+                            </div>
+                            {appointmentServiceInfo && (
+                              <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                <span
+                                  className="inline-flex h-2 w-2 rounded-full border border-gray-300"
+                                  style={{ backgroundColor: appointmentServiceInfo.color }}
+                                />
+                                <span>Service: {appointmentServiceInfo.name}</span>
+                              </div>
+                            )}
+                          </div>
+                          {user?.role !== 'nurse' && user?.role !== 'doctor' && (
+                            <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                              <MapPin className="h-4 w-4 text-gray-400" />
+                              <span>{appointment.location || 'N/A'}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right Column */}
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <Stethoscope className="h-4 w-4 text-gray-400" />
+                            <span className="font-semibold">Provider:</span>
+                            <span>{doctor ? (() => {
+                              // For nurse/doctor roles, show the logged-in user's role and name
+                              if (isDoctorLike(user?.role || '') && doctor.id === user?.id) {
+                                const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
+                                return `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+                              }
+                              // For other cases, show doctor's name with Dr. prefix
+                              return `Dr. ${doctor.firstName} ${doctor.lastName}`;
+                            })() : 'N/A'}</span>
+                          </div>
+                          {doctor && appointment.providerId && (
+                            <div className="pt-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const subdomain = getActiveSubdomain();
+                                  setLocation(`/${subdomain}/staff/${appointment.providerId}`);
+                                }}
+                                className="text-xs"
+                              >
+                                View Profile
+                              </Button>
+                            </div>
+                          )}
+                          {appointmentTypeBadge && (
+                            <div className="flex items-center gap-2">
+                              <Badge 
+                                style={{ backgroundColor: appointmentTypeBadge.color, color: "white" }}
+                              >
+                                {appointmentTypeBadge.label}
+                              </Badge>
+                            </div>
+                          )}
+                          {isDoctorLike(user?.role || '') && appointment.appointmentId && (
+                            <div className="flex items-center gap-2">
+                              <Badge 
+                                variant="outline" 
+                                className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-medium"
+                              >
+                                Appointment ID: {appointment.appointmentId}
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Booked By Info */}
+                      {createdBy && (
+                        <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                          <User className="h-3 w-3 inline mr-1" />
+                          Booked by: {getCreatedByName(createdBy.id)}
+                        </div>
+                      )}
+
+                      {/* Invoice ID and status (doctor/nurse only) */}
+                      <div className="mt-3">
+                        <AppointmentInvoiceInfo appointmentId={appointment.appointmentId ?? (appointment as any).appointment_id} />
+                      </div>
+
+                      {/* Description if available */}
+                      {appointment.description && (
+                        <div className="mt-3 pt-3 border-t">
+                          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Description:</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {appointment.description}
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              {getAppointmentsForDate(selectedDate).length === 0 && (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                  <p>No appointments scheduled for {format(selectedDate, "EEEE, MMMM d, yyyy")}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Today's Summary */}
       <Card>
         <CardHeader>
@@ -1050,7 +1327,16 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
           <CardContent>
             <div className="flex items-start justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {nextAppointment.title || `Appointment with ${nextAppointmentDoctor ? `${nextAppointmentDoctor.firstName} ${nextAppointmentDoctor.lastName}` : 'Doctor'}`}
+                {nextAppointment.title || (() => {
+                  // For nurse/doctor roles, always show "Appointment with [Role] [Name]" (logged-in user)
+                  if (isDoctorLike(user?.role || '')) {
+                    const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
+                    const loggedInUserName = `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+                    return `Appointment with ${loggedInUserName}`;
+                  }
+                  // For other roles, show doctor name
+                  return `Appointment with ${nextAppointmentDoctor ? `${nextAppointmentDoctor.firstName} ${nextAppointmentDoctor.lastName}` : 'Doctor'}`;
+                })()}
               </h3>
               <Badge 
                 style={{ backgroundColor: statusColors[nextAppointment.status as keyof typeof statusColors] }}
@@ -1178,7 +1464,16 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                     {/* Header with Title and Actions */}
                     <div className="flex items-start justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {appointment.title || `Appointment with ${doctor ? `${doctor.firstName} ${doctor.lastName}` : 'Doctor'}`}
+                        {appointment.title || (() => {
+                          // For nurse/doctor roles, always show "Appointment with [Role] [Name]" (logged-in user)
+                          if (isDoctorLike(user?.role || '')) {
+                            const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
+                            const loggedInUserName = `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+                            return `Appointment with ${loggedInUserName}`;
+                          }
+                          // For other roles, show doctor name
+                          return `Appointment with ${doctor ? `${doctor.firstName} ${doctor.lastName}` : 'Doctor'}`;
+                        })()}
                       </h3>
                       <div className="flex items-center gap-2">
                         {appointment.status !== 'cancelled' && (
@@ -1911,7 +2206,9 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
           <DialogHeader>
             <DialogTitle>Cancel Appointment</DialogTitle>
             <DialogDescription>
-              Are you sure you want to cancel this appointment? This action cannot be undone.
+              {user?.role === 'nurse' 
+                ? "Are you sure you want to cancel this appointment? The appointment will be marked as cancelled."
+                : "Are you sure you want to cancel this appointment? This action cannot be undone."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -1931,9 +2228,9 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                 }
               }}
               disabled={cancelAppointmentMutation.isPending}
-              data-testid="button-delete-appointment"
+              data-testid={user?.role === 'nurse' ? "button-cancel-appointment" : "button-delete-appointment"}
             >
-              Delete
+              {user?.role === 'nurse' ? 'Cancel Appointment' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

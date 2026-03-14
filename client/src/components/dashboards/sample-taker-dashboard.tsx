@@ -54,6 +54,7 @@ function getTenantSubdomain(): string {
 }
 
 export function SampleTakerDashboard() {
+  const { currencySymbol } = useCurrency();
   const { toast } = useToast();
   const [selectedRequest, setSelectedRequest] = useState<LabRequest | null>(null);
   const [showCollectionDialog, setShowCollectionDialog] = useState(false);
@@ -592,7 +593,7 @@ export function SampleTakerDashboard() {
                         {invoice.testType}
                       </td>
                       <td className="p-3 text-sm text-gray-900 dark:text-gray-100 font-medium">
-                        £{invoice.totalAmount}
+                        {currencySymbol}{invoice.totalAmount}
                       </td>
                       <td className="p-3">
                         <Badge variant="default" className="text-xs bg-green-600 dark:bg-green-700">
@@ -684,7 +685,7 @@ export function SampleTakerDashboard() {
                         {invoice.testType}
                       </td>
                       <td className="p-3 text-sm text-gray-900 dark:text-gray-100 font-medium">
-                        £{invoice.totalAmount}
+                        {currencySymbol}{invoice.totalAmount}
                       </td>
                       <td className="p-3">
                         <Badge variant="default" className="text-xs bg-green-600 dark:bg-green-700">

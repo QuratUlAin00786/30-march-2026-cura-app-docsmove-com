@@ -14,6 +14,8 @@ import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-
 import { loadStripe } from "@stripe/stripe-js";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { useTheme } from "@/hooks/use-theme";
+import { useCurrency } from "@/hooks/use-currency";
+import { CurrencyIcon } from "@/components/ui/currency-icon";
 
 // Load Stripe
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY || '');
@@ -672,6 +674,7 @@ function StripePaymentForm({ onSuccess, onCancel }: { onSuccess: (paymentIntentI
 }
 
 export default function LabResultsPage() {
+  const { currencySymbol } = useCurrency();
   const { user } = useAuth();
   const { theme } = useTheme();
   const { isDoctor, isAdmin, canCreate, canEdit, canDelete } = useRolePermissions();
@@ -3923,7 +3926,7 @@ Report generated from Cura EMR System`;
                                             data-testid={`button-manage-invoice-${result.id}`}
                                             title="Manage Invoice"
                                           >
-                                            <PoundSterling className="h-2.5 w-2.5 text-gray-600 dark:text-gray-400" />
+                                            <CurrencyIcon className="h-2.5 w-2.5 text-gray-600 dark:text-gray-400" />
                                           </Button>
                                           {(activeTab === "request" || activeTab === "generated") && (
                                             <Button
@@ -4420,9 +4423,9 @@ Report generated from Cura EMR System`;
                                   className="text-xs sm:text-sm px-2 sm:px-3"
                                   data-testid={`button-manage-invoice-card-${result.id}`}
                                 >
-                                  <PoundSterling className="h-2.5 w-2.5 sm:h-4 sm:w-4 mr-1" />
+                                  <CurrencyIcon className="h-2.5 w-2.5 sm:h-4 sm:w-4 mr-1" />
                                   <span className="hidden lg:inline">Invoice</span>
-                                  <span className="lg:hidden">£</span>
+                                  <span className="lg:hidden">{currencySymbol}</span>
                                 </Button>
                               )}
                               {user?.role !== 'patient' && (
@@ -5372,13 +5375,13 @@ Report generated from Cura EMR System`;
                       <p className="font-medium text-sm">{item.description}</p>
                       <p className="text-xs text-gray-600 dark:text-gray-400">Code: {item.code}</p>
                     </div>
-                    <p className="font-semibold text-sm">£{item.total.toFixed(2)}</p>
+                    <p className="font-semibold text-sm">{currencySymbol}{item.total.toFixed(2)}</p>
                   </div>
                 ))}
               </div>
               <div className="flex justify-between items-center pt-2 border-t-2">
                 <p className="text-sm font-bold">Total Amount:</p>
-                <p className="text-lg font-bold text-medical-blue">£{invoiceData.totalAmount.toFixed(2)}</p>
+                <p className="text-lg font-bold text-medical-blue">{currencySymbol}{invoiceData.totalAmount.toFixed(2)}</p>
               </div>
             </div>
 
@@ -5708,7 +5711,7 @@ Report generated from Cura EMR System`;
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Amount due:</span>
-                <span className="font-semibold text-medical-blue">£{paymentResult?.amount?.toFixed(2)}</span>
+                <span className="font-semibold text-medical-blue">{currencySymbol}{paymentResult?.amount?.toFixed(2)}</span>
               </div>
             </div>
 

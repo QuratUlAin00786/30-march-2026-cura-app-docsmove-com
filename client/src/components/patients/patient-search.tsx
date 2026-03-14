@@ -97,7 +97,7 @@ export function PatientSearch({ onSearch, onClear }: PatientSearchProps) {
           </SelectContent>
         </Select>
 
-        <Button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-white border-0">
+        <Button onClick={handleSearch} variant="default">
           Search
         </Button>
         
@@ -259,7 +259,7 @@ export function PatientSearch({ onSearch, onClear }: PatientSearchProps) {
           </div>
 
           <div className="flex gap-4">
-            <Button onClick={handleSearch} size="sm" className="bg-medical-blue hover:bg-blue-700">
+            <Button onClick={handleSearch} size="sm" variant="default">
               Apply Filters
             </Button>
             <Button 

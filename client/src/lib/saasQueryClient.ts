@@ -39,6 +39,11 @@ export async function saasApiRequest(
   
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  } else {
+    // Log warning if token is missing for protected endpoints
+    if (!url.includes('/login')) {
+      console.warn('⚠️ SaaS API Request: No token found in localStorage for:', url);
+    }
   }
 
   // Build the correct URL for both dev and production environments
@@ -50,10 +55,21 @@ export async function saasApiRequest(
     originalUrl: url,
     finalUrl: apiUrl,
     location: window.location.href,
-    hostname: window.location.hostname
+    hostname: window.location.hostname,
+    hasToken: !!token
   });
 
   try {
+    // Log request details including headers (without exposing full token)
+    console.log('📤 SaaS API Request Details:', {
+      method,
+      url: apiUrl,
+      hasAuthHeader: !!headers['Authorization'],
+      authHeaderPreview: headers['Authorization'] ? `${headers['Authorization'].substring(0, 20)}...` : 'none',
+      hasContentType: !!headers['Content-Type'],
+      bodySize: data ? JSON.stringify(data).length : 0
+    });
+    
     const res = await fetch(apiUrl, {
       method,
       headers,

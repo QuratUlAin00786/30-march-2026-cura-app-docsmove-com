@@ -193,8 +193,19 @@ export function GlobalIncomingCallBar() {
 
   useEffect(() => {
     const closeIncomingCallIfMatch = (data: { roomId?: string }) => {
-      if (incomingCall && data.roomId === incomingCall.roomId) {
-        console.log('[GlobalIncomingCall] Auto-decline and close Incoming Audio/Video Call - caller ended or declined');
+      if (!incomingCall || !data.roomId) return;
+      
+      // More tolerant room ID matching - handles cases where room IDs might differ slightly
+      const roomIdMatches = 
+        data.roomId === incomingCall.roomId ||
+        (data.roomId.includes && data.roomId.includes(incomingCall.roomId)) ||
+        (incomingCall.roomId.includes && incomingCall.roomId.includes(data.roomId));
+      
+      if (roomIdMatches) {
+        console.log('[GlobalIncomingCall] Auto-decline and close Incoming Audio/Video Call - caller ended or declined', {
+          dataRoomId: data.roomId,
+          incomingCallRoomId: incomingCall.roomId,
+        });
         if (incomingCall.isVideo) stopCameraForIncomingVideoCall();
         stopRingtone();
         clearIncomingCall();
@@ -207,7 +218,14 @@ export function GlobalIncomingCallBar() {
       // If we have an incoming call for this room (caller cancelled from "Call in Progress"), close popup
       closeIncomingCallIfMatch(data);
       
-      if (activeVideoCall && data.roomId === activeVideoCall.roomName) {
+      // More tolerant room ID matching for active calls
+      const videoCallMatches = activeVideoCall && data.roomId && (
+        data.roomId === activeVideoCall.roomName ||
+        (data.roomId.includes && data.roomId.includes(activeVideoCall.roomName)) ||
+        (activeVideoCall.roomName.includes && activeVideoCall.roomName.includes(data.roomId))
+      );
+      
+      if (videoCallMatches) {
         console.log('[GlobalIncomingCall] Closing video call - caller ended');
         stopCallTimer();
         setActiveVideoCall(null);
@@ -217,7 +235,13 @@ export function GlobalIncomingCallBar() {
         });
       }
       
-      if (activeAudioCall && data.roomId === activeAudioCall.roomName) {
+      const audioCallMatches = activeAudioCall && data.roomId && (
+        data.roomId === activeAudioCall.roomName ||
+        (data.roomId.includes && data.roomId.includes(activeAudioCall.roomName)) ||
+        (activeAudioCall.roomName.includes && activeAudioCall.roomName.includes(data.roomId))
+      );
+      
+      if (audioCallMatches) {
         console.log('[GlobalIncomingCall] Closing audio call - caller ended');
         stopCallTimer();
         setActiveAudioCall(null);
@@ -348,6 +372,7 @@ export function GlobalIncomingCallBar() {
               <LiveKitVideoCall
                 roomName={activeVideoCall.roomName}
                 participantName={user ? `${user.firstName} ${user.lastName}` : 'User'}
+                participantRole={user?.role}
                 token={activeVideoCall.token}
                 serverUrl={activeVideoCall.serverUrl}
                 onDisconnect={handleEndVideoCall}
@@ -372,6 +397,7 @@ export function GlobalIncomingCallBar() {
               <LiveKitAudioCall
                 roomName={activeAudioCall.roomName}
                 participantName={user ? `${user.firstName} ${user.lastName}` : 'User'}
+                participantRole={user?.role}
                 token={activeAudioCall.token}
                 serverUrl={activeAudioCall.serverUrl}
                 onDisconnect={handleEndAudioCall}

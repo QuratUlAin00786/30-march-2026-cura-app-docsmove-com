@@ -82,6 +82,21 @@ export default function ShiftsPage() {
   // Compute isDoctor before any hooks that reference it
   const isDoctor = isDoctorLike(user?.role);
 
+  // Helper function to get role-based prefix for staff name display
+  const getRolePrefix = (role: string): string => {
+    if (!role) return "";
+    const roleLower = role.toLowerCase();
+    // Check for nurse first before isDoctorLike to ensure correct prefix
+    if (roleLower === "nurse") {
+      return "Nurse.";
+    } else if (isDoctorLike(role)) {
+      return "Dr.";
+    } else {
+      // Fallback: capitalize role name
+      return role.charAt(0).toUpperCase() + role.slice(1).replace(/_/g, " ") + ".";
+    }
+  };
+
   const slotFromTime = (time: string): number => parseInt(time.replace(":", ""));
 
   const extractSlotRange = (shift: { startTime: string; endTime: string }) => {
@@ -886,7 +901,7 @@ export default function ShiftsPage() {
           // Get staff name for modal display
           const staffMember = staff.find((s: any) => s.id === parseInt(selectedStaffId));
           const staffName = staffMember 
-            ? `${isDoctorLike(staffMember.role) ? 'Dr.' : ''} ${staffMember.firstName} ${staffMember.lastName}`
+            ? `${getRolePrefix(staffMember.role)} ${staffMember.firstName} ${staffMember.lastName}`
             : 'Unknown Staff';
 
           // Track the update
@@ -1211,9 +1226,31 @@ export default function ShiftsPage() {
                   {selectedStaffId
                     ? (() => {
                         const staff = filteredStaff.find((m: any) => m.id.toString() === selectedStaffId);
-                        return staff ? `${isDoctorLike(staff.role) ? 'Dr.' : ''} ${staff.firstName} ${staff.lastName}` : "Choose a staff member...";
+                        if (!staff) return "Choose a staff member...";
+
+                        // Use the selected role to determine the prefix instead of the staff's stored role
+                        let prefix = "";
+                        if (selectedRole) {
+                          const roleLower = selectedRole.toLowerCase();
+                          // Check for nurse first before isDoctorLike to ensure correct prefix
+                          if (roleLower === "nurse") {
+                            prefix = "Nurse.";
+                          } else if (isDoctorLike(selectedRole)) {
+                            prefix = "Dr.";
+                          } else {
+                            // Fallback: capitalize role name
+                            prefix =
+                              selectedRole.charAt(0).toUpperCase() +
+                              selectedRole.slice(1).replace(/_/g, " ") +
+                              ".";
+                          }
+                        }
+
+                        return `${prefix ? prefix + " " : ""}${staff.firstName} ${staff.lastName}`;
                       })()
-                    : !selectedRole ? "Select a role first" : "Choose a staff member..."}
+                    : !selectedRole
+                    ? "Select a role first"
+                    : "Choose a staff member..."}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
@@ -1240,7 +1277,25 @@ export default function ShiftsPage() {
                                 selectedStaffId === member.id.toString() ? "opacity-100" : "opacity-0"
                               )}
                             />
-                            {isDoctorLike(member.role) ? 'Dr.' : ''} {member.firstName} {member.lastName}
+                            {(() => {
+                              // Use the currently selected role to determine the prefix
+                              let prefix = "";
+                              if (selectedRole) {
+                                const roleLower = selectedRole.toLowerCase();
+                                // Check for nurse first before isDoctorLike to ensure correct prefix
+                                if (roleLower === "nurse") {
+                                  prefix = "Nurse.";
+                                } else if (isDoctorLike(selectedRole)) {
+                                  prefix = "Dr.";
+                                } else {
+                                  prefix =
+                                    selectedRole.charAt(0).toUpperCase() +
+                                    selectedRole.slice(1).replace(/_/g, " ") +
+                                    ".";
+                                }
+                              }
+                              return `${prefix ? prefix + " " : ""}${member.firstName} ${member.lastName}`;
+                            })()}
                           </CommandItem>
                         ))}
                       </CommandGroup>
@@ -1499,7 +1554,7 @@ export default function ShiftsPage() {
                   .map((shift: any) => {
                     const staffMember = staff.find((s: any) => s.id === shift.staffId);
                     const staffName = staffMember 
-                      ? `${isDoctorLike(staffMember.role) ? 'Dr.' : ''} ${staffMember.firstName} ${staffMember.lastName}`
+                      ? `${getRolePrefix(staffMember.role)} ${staffMember.firstName} ${staffMember.lastName}`
                       : 'Unknown Staff';
                     
                     return (
@@ -1563,7 +1618,7 @@ export default function ShiftsPage() {
                     <div className="flex items-center gap-3">
                       <Users className="h-5 w-5 text-orange-600" />
                       <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                        {isDoctorLike(member.role) ? 'Dr.' : ''} {member.firstName} {member.lastName}
+                        {getRolePrefix(member.role)} {member.firstName} {member.lastName}
                       </h3>
                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                         {member.role.replace('_', ' ').toUpperCase()}
@@ -1584,7 +1639,7 @@ export default function ShiftsPage() {
                 {defaultShiftsForRole.map((defaultShift: any) => {
                   const staffMember = staff.find((s: any) => s.id === defaultShift.userId);
                   const staffName = staffMember 
-                    ? `${isDoctorLike(staffMember.role) ? 'Dr.' : ''} ${staffMember.firstName} ${staffMember.lastName}`
+                    ? `${getRolePrefix(staffMember.role)} ${staffMember.firstName} ${staffMember.lastName}`
                     : 'Unknown Staff';
                   
                   return (
@@ -1683,7 +1738,7 @@ export default function ShiftsPage() {
                     {/* Doctor Info */}
                     <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
                       <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-300">
-                        {isDoctorLike(selectedDoctor.role) ? 'Dr.' : ''} {selectedDoctor.firstName} {selectedDoctor.lastName}
+                        {getRolePrefix(selectedDoctor.role)} {selectedDoctor.firstName} {selectedDoctor.lastName}
                       </h3>
                       <p className="text-blue-700 dark:text-blue-400">{selectedDoctor.email}</p>
                       <p className="text-blue-600 dark:text-blue-400 capitalize">{selectedDoctor.role}</p>
@@ -2054,7 +2109,7 @@ export default function ShiftsPage() {
                 {conflictingShifts.map((shift: any) => {
                   const staffMember = staff.find((s: any) => s.id === shift.staffId);
                   const staffName = staffMember 
-                    ? `${isDoctorLike(staffMember.role) ? 'Dr.' : ''} ${staffMember.firstName} ${staffMember.lastName}`
+                    ? `${getRolePrefix(staffMember.role)} ${staffMember.firstName} ${staffMember.lastName}`
                     : 'Unknown Staff';
 
                   return (

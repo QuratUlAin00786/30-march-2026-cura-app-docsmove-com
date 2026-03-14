@@ -966,6 +966,54 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     },
   });
   
+  // Fetch shifts for logged-in user (nurse/doctor) to check if they have shifts
+  const { data: loggedInUserShifts = [] } = useQuery({
+    queryKey: ["/api/shifts/staff", user?.id, "loggedInUser"],
+    staleTime: 30000,
+    enabled: !!user && isDoctorLike(user?.role), // Only fetch for nurse/doctor roles
+    retry: false,
+    queryFn: async () => {
+      try {
+        if (!user?.id) return [];
+        const response = await apiRequest('GET', `/api/shifts?staffId=${user.id}`);
+        if (!response.ok) {
+          console.warn('[USER_SHIFTS] Failed to fetch user shifts:', response.status);
+          return [];
+        }
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.warn('[USER_SHIFTS] Error fetching user shifts:', error);
+        return [];
+      }
+    },
+  });
+
+  // Check if logged-in user has shifts (custom or default)
+  const loggedInUserHasShifts = useMemo(() => {
+    if (!user || !isDoctorLike(user?.role)) return true; // Not a nurse/doctor, don't show warning
+    
+    // Check for custom shifts
+    const hasCustomShifts = loggedInUserShifts && loggedInUserShifts.length > 0;
+    
+    // Check for default shifts
+    const hasDefaultShifts = defaultShiftsData && defaultShiftsData.some((shift: any) => 
+      shift.userId === user.id || shift.userId?.toString() === user.id?.toString()
+    );
+    
+    console.log('[SHIFT_CHECK] User shift status:', {
+      userId: user.id,
+      userEmail: user.email,
+      userName: `${user.firstName} ${user.lastName}`,
+      hasCustomShifts,
+      hasDefaultShifts,
+      customShiftsCount: loggedInUserShifts?.length || 0,
+      defaultShiftsCount: defaultShiftsData?.filter((s: any) => s.userId === user.id).length || 0
+    });
+    
+    return hasCustomShifts || hasDefaultShifts;
+  }, [user, loggedInUserShifts, defaultShiftsData]);
+  
   // Query for filtered appointments
   const { data: allAppointments = [] } = useQuery<any[]>({
     queryKey: ["/api/appointments"],
@@ -1809,13 +1857,94 @@ const getAppointmentTypeLabel = (appointment: any): string => {
   }, [selectedDoctor, selectedDate]);
   
   // Check for patientId in URL params to auto-book appointment
+  // Use window.location.search directly to detect query parameter changes even when route doesn't change
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const patientId = urlParams.get('patientId');
-    if (patientId) {
-      setBookingForm(prev => ({ ...prev, patientId }));
+    
+    if (isDoctorLike(user?.role)) {
+      console.log('🔍 URL PATIENT ID CHECK:', {
+        urlPatientId: patientId,
+        currentBookingFormPatientId: bookingForm.patientId,
+        windowLocationSearch: window.location.search,
+        location: location
+      });
     }
-  }, [location]);
+    
+    if (patientId) {
+      // Always update bookingForm.patientId when URL parameter changes
+      // This ensures the correct patient is displayed when clicking different "Book" buttons
+      setBookingForm(prev => {
+        // Always update to ensure we have the latest patientId from URL
+        // Convert to string for consistency
+        const patientIdStr = String(patientId);
+        if (prev.patientId !== patientIdStr) {
+          if (isDoctorLike(user?.role)) {
+            console.log('✅ UPDATING bookingForm.patientId:', {
+              old: prev.patientId,
+              new: patientIdStr,
+              oldType: typeof prev.patientId,
+              newType: typeof patientIdStr
+            });
+          }
+          return { ...prev, patientId: patientIdStr };
+        }
+        return prev;
+      });
+      
+      // Auto-open the modal when patientId is in URL (for doctor/nurse roles)
+      if (isDoctorLike(user?.role) && !showNewAppointmentModal) {
+        console.log('✅ AUTO-OPENING modal for patientId:', patientId);
+        setShowNewAppointmentModal(true);
+      }
+    } else {
+      // Clear patientId from bookingForm if it's removed from URL
+      setBookingForm(prev => {
+        if (prev.patientId) {
+          if (isDoctorLike(user?.role)) {
+            console.log('🧹 CLEARING bookingForm.patientId (no URL param)');
+          }
+          return { ...prev, patientId: '' };
+        }
+        return prev;
+      });
+    }
+  }, [location, user?.role, showNewAppointmentModal]);
+
+  // Also sync bookingForm.patientId when modal opens to ensure latest URL parameter is used
+  useEffect(() => {
+    if (showNewAppointmentModal) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const patientId = urlParams.get('patientId');
+      if (patientId) {
+        // Always update to ensure we have the latest patientId from URL when modal opens
+        // Convert to string for consistency
+        const patientIdStr = String(patientId);
+        setBookingForm(prev => {
+          if (prev.patientId !== patientIdStr) {
+            if (isDoctorLike(user?.role)) {
+              console.log('✅ MODAL OPEN: Syncing patientId from URL:', {
+                old: prev.patientId,
+                new: patientIdStr,
+                patientsLoaded: !patientsLoading && patients.length > 0
+              });
+            }
+            return { ...prev, patientId: patientIdStr };
+          }
+          return prev;
+        });
+      } else if (isDoctorLike(user?.role)) {
+        // If modal opens without patientId (e.g., from "Schedule Patient" button), clear any existing patientId
+        setBookingForm(prev => {
+          if (prev.patientId) {
+            console.log('🧹 MODAL OPEN: Clearing patientId (no URL param, opened from Schedule Patient)');
+            return { ...prev, patientId: '' };
+          }
+          return prev;
+        });
+      }
+    }
+  }, [showNewAppointmentModal, location, user?.role, patientsLoading, patients.length]);
 
   // Auto-detect doctor when modal opens if user is a doctor
   useEffect(() => {
@@ -2703,7 +2832,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                 <div className="flex items-center gap-2 mb-3">
                   <h4 className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
                     <Users className="h-4 w-4 text-gray-900 dark:text-white" />
-                    {isDoctorLike(user?.role) ? "Available Patient" : "Available Staff"}
+                    {user?.role === "nurse" ? "Patients Info" : user?.role === "doctor" ? "Patient Info" : isDoctorLike(user?.role) ? "Available Patient" : "Available Staff"}
                   </h4>
                   <Button
                     variant="ghost"
@@ -2930,7 +3059,32 @@ const getAppointmentTypeLabel = (appointment: any): string => {
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                    Schedule New Appointment
+                    {(() => {
+                      // For patient role, show "Book Appointment with [Role] [Name]"
+                      if (user?.role === 'patient' && selectedProviderId) {
+                        const provider = filteredUsers.find((u: any) => u.id.toString() === selectedProviderId) ||
+                          usersData?.find((u: any) => u.id.toString() === selectedProviderId);
+                        
+                        if (provider) {
+                          // Remove any existing "Dr." or "Nurse" prefix to avoid duplication
+                          const cleanFirstName = (provider.firstName || '').replace(/^(Dr\.|Nurse)\s*/i, '');
+                          const cleanLastName = (provider.lastName || '').replace(/^(Dr\.|Nurse)\s*/i, '');
+                          const fullName = `${cleanFirstName} ${cleanLastName}`.trim();
+                          
+                          // Determine role prefix - check role case-insensitively
+                          // Also check selectedRole as fallback if provider.role is not set
+                          const providerRole = (provider.role || selectedRole || '').toLowerCase();
+                          const rolePrefix = providerRole === 'nurse' ? 'Nurse' : providerRole === 'doctor' ? 'Dr.' : '';
+                          
+                          if (rolePrefix) {
+                            return `Book Appointment with ${rolePrefix} ${fullName}`;
+                          }
+                          return `Book Appointment with ${fullName}`;
+                        }
+                      }
+                      // For other roles, show default title
+                      return "Schedule New Appointment";
+                    })()}
                   </h2>
                   <Button
                     variant="ghost"
@@ -2959,6 +3113,32 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
+                
+                {/* Shift Warning Card - Show if logged-in nurse/doctor doesn't have shifts */}
+                {isDoctorLike(user?.role) && !loggedInUserHasShifts && (
+                  <Card className="mb-6 border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                            Please create shifts from Shift Management
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            const subdomain = getTenantSubdomain();
+                            setLocation(`/${subdomain}/shifts`);
+                            setShowNewAppointmentModal(false);
+                          }}
+                          className="ml-4 bg-yellow-600 hover:bg-yellow-700 text-white"
+                        >
+                          Create Shifts
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
                 
                 {/* For patient role - New UI Layout */}
                 {user?.role === 'patient' ? (
@@ -3113,6 +3293,11 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                             Patient Information
                           </Label>
                           {(() => {
+                            // Don't show patient info if patients are still loading
+                            if (patientsLoading && !bookingForm.patientId) {
+                              return null;
+                            }
+                            
                             const selectedPatient = user?.role === 'patient' 
                               ? patients.find((patient: any) => patient.email === user.email) || {
                                   id: user.id,
@@ -3126,9 +3311,105 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   nhsNumber: null,
                                   address: {}
                                 }
-                              : patients.find((patient: any) => 
-                                  (patient.patientId || patient.id.toString()) === bookingForm.patientId
-                                );
+                              : (() => {
+                                  // Wait for patients to load if still loading
+                                  if (patientsLoading) {
+                                    if (isDoctorLike(user?.role) && bookingForm.patientId) {
+                                      console.log('⏳ PATIENT LOOKUP: Waiting for patients to load...', {
+                                        bookingFormPatientId: bookingForm.patientId
+                                      });
+                                    }
+                                    return null;
+                                  }
+                                  
+                                  // Don't try to find patient if no patientId is set or patients array is empty
+                                  if (!bookingForm.patientId || !patients || patients.length === 0) {
+                                    if (isDoctorLike(user?.role) && bookingForm.patientId) {
+                                      console.log('⚠️ PATIENT LOOKUP: Patients array not ready', {
+                                        bookingFormPatientId: bookingForm.patientId,
+                                        patientsLength: patients?.length || 0,
+                                        patientsLoading
+                                      });
+                                    }
+                                    return null;
+                                  }
+                                  
+                                  // Try multiple matching strategies to find the patient
+                                  const patientIdStr = bookingForm.patientId?.toString() || '';
+                                  const patientIdNum = bookingForm.patientId ? Number(bookingForm.patientId) : null;
+                                  
+                                  // Debug logging for nurse/doctor roles
+                                  if (isDoctorLike(user?.role)) {
+                                    console.log('🔍 PATIENT LOOKUP: Searching for patient', {
+                                      bookingFormPatientId: bookingForm.patientId,
+                                      patientIdStr,
+                                      patientIdNum,
+                                      totalPatients: patients?.length || 0,
+                                      patientsLoading,
+                                      allPatientIds: patients?.map((p: any) => ({
+                                        id: p.id,
+                                        patientId: p.patientId,
+                                        name: `${p.firstName} ${p.lastName}`
+                                      }))
+                                    });
+                                  }
+                                  
+                                  const found = patients.find((patient: any) => {
+                                    // Match by database ID (most reliable) - try both string and number comparison
+                                    const patientIdMatches = 
+                                      patient.id?.toString() === patientIdStr || 
+                                      patient.id === patientIdNum ||
+                                      String(patient.id) === String(bookingForm.patientId);
+                                    
+                                    if (patientIdMatches) {
+                                      if (isDoctorLike(user?.role)) {
+                                        console.log('✅ PATIENT LOOKUP: Found by patient.id', {
+                                          searchedId: bookingForm.patientId,
+                                          patientId: patient.id,
+                                          patientPatientId: patient.patientId,
+                                          name: `${patient.firstName} ${patient.lastName}`
+                                        });
+                                      }
+                                      return true;
+                                    }
+                                    
+                                    // Match by patientId field (formatted ID like "P000003")
+                                    const patientPatientIdMatches = 
+                                      patient.patientId?.toString() === patientIdStr || 
+                                      patient.patientId === bookingForm.patientId ||
+                                      String(patient.patientId) === String(bookingForm.patientId);
+                                    
+                                    if (patientPatientIdMatches) {
+                                      if (isDoctorLike(user?.role)) {
+                                        console.log('✅ PATIENT LOOKUP: Found by patient.patientId', {
+                                          searchedId: bookingForm.patientId,
+                                          patientId: patient.id,
+                                          patientPatientId: patient.patientId,
+                                          name: `${patient.firstName} ${patient.lastName}`
+                                        });
+                                      }
+                                      return true;
+                                    }
+                                    
+                                    return false;
+                                  });
+                                  
+                                  if (!found && isDoctorLike(user?.role) && bookingForm.patientId) {
+                                    console.log('❌ PATIENT LOOKUP: Patient not found', {
+                                      searchedId: bookingForm.patientId,
+                                      searchedIdType: typeof bookingForm.patientId,
+                                      availableIds: patients?.map((p: any) => ({
+                                        id: p.id,
+                                        idType: typeof p.id,
+                                        patientId: p.patientId,
+                                        patientIdType: typeof p.patientId,
+                                        name: `${p.firstName} ${p.lastName}`
+                                      }))
+                                    });
+                                  }
+                                  
+                                  return found || null;
+                                })();
                             
                             if (!selectedPatient) return null;
                             
@@ -3284,7 +3565,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   <CommandList>
                                     <CommandEmpty>No treatments found.</CommandEmpty>
                                     <CommandGroup>
-                                    {patientTreatmentsCatalog.map((treatment: any) => (
+                                    {(isDoctorLike(user?.role) ? doctorTreatmentsCatalog : patientTreatmentsCatalog).map((treatment: any) => (
                                         <CommandItem
                                           key={treatment.id}
                                           value={treatment.id.toString()}
@@ -3328,7 +3609,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                         )}
                         {doctorAppointmentType === "consultation" && (
                           <>
-                            <Label className="text-sm font-medium text-gray-900 dark:text-white">Select Consultation</Label>
+                            <Label className="text-sm font-medium text-gray-900 dark:text-white">Appointment Type</Label>
                             <Popover open={openDoctorConsultationCombo} onOpenChange={setOpenDoctorConsultationCombo}>
                               <PopoverTrigger asChild>
                                 <Button
@@ -3338,17 +3619,29 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   className="w-full justify-between mt-1"
                                   data-testid="select-patient-consultation"
                                 >
-                                  {doctorAppointmentSelectedConsultation ? doctorAppointmentSelectedConsultation.serviceName : "Select a consultation"}
+                                  {doctorAppointmentSelectedConsultation ? doctorAppointmentSelectedConsultation.serviceName : "Select an appointment type"}
                                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                 </Button>
                               </PopoverTrigger>
                               <PopoverContent className="w-full p-0" align="start">
                                 <Command>
-                                  <CommandInput placeholder="Search consultation..." />
+                                  <CommandInput placeholder="Search appointment type..." />
                                   <CommandList>
-                                    <CommandEmpty>No consultations found.</CommandEmpty>
+                                    <CommandEmpty>
+                                      {(() => {
+                                        // Show logged-in user's name instead of patient name
+                                        if (user && isDoctorLike(user?.role)) {
+                                          const rolePrefix = user.role === 'nurse' ? 'Nurse.' : user.role === 'doctor' ? 'Dr.' : '';
+                                          const userName = rolePrefix 
+                                            ? `${rolePrefix} ${user.firstName} ${user.lastName}`.trim()
+                                            : `${user.firstName} ${user.lastName}`.trim();
+                                          return `No consultations available for ${userName}`;
+                                        }
+                                        return "No consultations found.";
+                                      })()}
+                                    </CommandEmpty>
                                     <CommandGroup>
-                                    {patientConsultationsCatalog.map((service: any) => (
+                                    {(isDoctorLike(user?.role) ? doctorConsultationsCatalog : patientConsultationsCatalog).map((service: any) => (
                                         <CommandItem
                                           key={service.id}
                                           value={service.id.toString()}
@@ -3530,9 +3823,20 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                               >
                                 {bookingForm.patientId 
                                   ? (() => {
+                                      // Try multiple matching strategies to find the patient
+                                      const patientIdStr = bookingForm.patientId?.toString() || '';
+                                      const patientIdNum = bookingForm.patientId ? Number(bookingForm.patientId) : null;
+                                      
                                       const selectedPatient = patients.find((patient: any) => {
-                                        const pId = patient.patientId || patient.id.toString();
-                                        return pId === bookingForm.patientId;
+                                        // Match by database ID (most reliable)
+                                        if (patient.id?.toString() === patientIdStr || patient.id === patientIdNum) {
+                                          return true;
+                                        }
+                                        // Match by patientId field (formatted ID like "P000003")
+                                        if (patient.patientId?.toString() === patientIdStr || patient.patientId === bookingForm.patientId) {
+                                          return true;
+                                        }
+                                        return false;
                                       });
                                       
                                       if (!selectedPatient) {
@@ -3598,9 +3902,16 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           </Label>
                           {bookingForm.patientId ? (
                             (() => {
-                              const selectedPatient = patients.find((patient: any) => 
-                                (patient.patientId || patient.id.toString()) === bookingForm.patientId
-                              );
+                              const selectedPatient = patients.find((patient: any) => {
+                                // Try multiple matching strategies to find the patient
+                                const patientIdStr = bookingForm.patientId?.toString() || '';
+                                return (
+                                  patient.id?.toString() === patientIdStr ||
+                                  patient.patientId?.toString() === patientIdStr ||
+                                  patient.id?.toString() === bookingForm.patientId ||
+                                  patient.patientId === bookingForm.patientId
+                                );
+                              });
                               
                               if (!selectedPatient) return null;
                               
@@ -3710,27 +4021,33 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           </Select>
                         </div>
 
-                        {/* Doctor Details */}
+                        {/* Doctor/Nurse Details */}
                         <div>
                           <Label className="text-sm font-medium text-gray-900 dark:text-white mb-2 block">
-                            Doctor Details
+                            {isDoctorLike(user?.role) 
+                              ? (user?.role === 'nurse' ? 'Nurse Information' : 'Doctor Information')
+                              : 'Doctor Details'}
                           </Label>
                           <Card className="mt-2">
                             <CardContent className="p-4">
                               <div className="flex items-start gap-4">
-                                {/* Doctor Avatar */}
+                                {/* Doctor/Nurse Avatar */}
                                 <div className="flex-shrink-0">
                                   <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
                                     {`${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase()}
                                   </div>
                                 </div>
                                 
-                                {/* Doctor Details */}
+                                {/* Doctor/Nurse Details */}
                                 <div className="flex-1 space-y-3">
                                   {/* Name and Department */}
                                   <div>
                                     <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
-                                      Dr. {user?.firstName || ""} {user?.lastName || ""}
+                                      {isDoctorLike(user?.role)
+                                        ? (user?.role === 'nurse'
+                                            ? `Nurse ${user?.firstName || ""} ${user?.lastName || ""}`
+                                            : `Dr. ${user?.firstName || ""} ${user?.lastName || ""}`)
+                                        : `Dr. ${user?.firstName || ""} ${user?.lastName || ""}`}
                                     </h3>
                                     {displayRoleLabel && (
                                       <p className="text-sm text-gray-600 dark:text-gray-400 capitalize">
@@ -3760,6 +4077,14 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                       <div className="flex items-center gap-2">
                                         <Mail className="h-4 w-4 text-gray-500" />
                                         <span className="text-gray-700 dark:text-gray-300">{user?.email}</span>
+                                      </div>
+                                    )}
+                                    
+                                    {isDoctorLike(user?.role) && user?.id && (
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs text-blue-600 dark:text-blue-400">
+                                          {user?.role === 'nurse' ? 'Nurse' : 'Doctor'} ID: {String(user.id).padStart(6, '0')}
+                                        </span>
                                       </div>
                                     )}
                                   </div>
@@ -3896,7 +4221,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                         )}
                         {doctorAppointmentType === "consultation" && (
                           <>
-                            <Label className="text-sm font-medium text-gray-900 dark:text-white">Select Consultation</Label>
+                            <Label className="text-sm font-medium text-gray-900 dark:text-white">Appointment Type</Label>
                             <Popover open={openDoctorConsultationCombo} onOpenChange={setOpenDoctorConsultationCombo}>
                               <PopoverTrigger asChild>
                                 <Button
@@ -3906,15 +4231,27 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   className="w-full justify-between mt-1"
                                   data-testid="select-doctor-consultation"
                                 >
-                                  {doctorAppointmentSelectedConsultation ? doctorAppointmentSelectedConsultation.serviceName : "Select a consultation"}
+                                  {doctorAppointmentSelectedConsultation ? doctorAppointmentSelectedConsultation.serviceName : "Select an appointment type"}
                                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                 </Button>
                               </PopoverTrigger>
                               <PopoverContent className="w-full p-0" align="start">
                                 <Command>
-                                  <CommandInput placeholder="Search consultation..." />
+                                  <CommandInput placeholder="Search appointment type..." />
                                   <CommandList>
-                                    <CommandEmpty>No consultations found.</CommandEmpty>
+                                    <CommandEmpty>
+                                      {(() => {
+                                        // Show logged-in user's name instead of patient name
+                                        if (user && isDoctorLike(user?.role)) {
+                                          const rolePrefix = user.role === 'nurse' ? 'Nurse.' : user.role === 'doctor' ? 'Dr.' : '';
+                                          const userName = rolePrefix 
+                                            ? `${rolePrefix} ${user.firstName} ${user.lastName}`.trim()
+                                            : `${user.firstName} ${user.lastName}`.trim();
+                                          return `No consultations available for ${userName}`;
+                                        }
+                                        return "No consultations found.";
+                                      })()}
+                                    </CommandEmpty>
                                     <CommandGroup>
                                       {doctorConsultationsCatalog.map((service: any) => (
                                         <CommandItem
@@ -4290,9 +4627,16 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                             Patient Information
                           </Label>
                           {(() => {
-                            const selectedPatient = patients.find((patient: any) => 
-                              (patient.patientId || patient.id.toString()) === bookingForm.patientId
-                            );
+                            const selectedPatient = patients.find((patient: any) => {
+                              // Try multiple matching strategies to find the patient
+                              const patientIdStr = bookingForm.patientId?.toString() || '';
+                              return (
+                                patient.id?.toString() === patientIdStr ||
+                                patient.patientId?.toString() === patientIdStr ||
+                                patient.id?.toString() === bookingForm.patientId ||
+                                patient.patientId === bookingForm.patientId
+                              );
+                            });
                             
                             if (!selectedPatient) return null;
                             
@@ -4908,12 +5252,17 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                         <p className="text-sm text-gray-500 mb-1">Provider</p>
                         <p className="font-medium">
                           {(() => {
-                            const provider = filteredUsers.find((u: any) => u.id === pendingAppointmentData.providerId);
+                            // Try usersData first (more comprehensive), then filteredUsers, then user
+                            const provider = usersData?.find((u: any) => u.id === pendingAppointmentData.providerId) ||
+                              filteredUsers.find((u: any) => u.id === pendingAppointmentData.providerId) ||
+                              (user && pendingAppointmentData.providerId === user.id ? user : null);
+                            
                             if (provider) {
-                              return `${provider.firstName} ${provider.lastName}`;
-                            }
-                            if (user && pendingAppointmentData.providerId === user.id) {
-                              return `${user.firstName} ${user.lastName}`;
+                              // Add role prefix: "Nurse." for nurse, "Dr." for doctor
+                              const rolePrefix = provider.role?.toLowerCase() === 'nurse' ? 'Nurse.' : provider.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+                              return rolePrefix 
+                                ? `${rolePrefix} ${provider.firstName} ${provider.lastName}`.trim()
+                                : `${provider.firstName} ${provider.lastName}`.trim();
                             }
                             return 'N/A';
                           })()}
@@ -4962,12 +5311,40 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           </div>
                         </div>
                       )}
-                      {pendingAppointmentData.title && (
                         <div className="col-span-2">
                           <p className="text-sm text-gray-500 mb-1">Title</p>
-                          <p className="font-medium">{pendingAppointmentData.title}</p>
+                        <p className="font-medium">
+                          {(() => {
+                            // Get provider name - try usersData first (more comprehensive), then filteredUsers, then user
+                            const provider = usersData?.find((u: any) => u.id === pendingAppointmentData.providerId) ||
+                              filteredUsers.find((u: any) => u.id === pendingAppointmentData.providerId) ||
+                              (user && pendingAppointmentData.providerId === user.id ? user : null);
+                            
+                            let providerName = 'Provider';
+                            if (provider) {
+                              const rolePrefix = provider.role === 'nurse' ? 'Nurse' : provider.role === 'doctor' ? 'Dr.' : '';
+                              providerName = rolePrefix 
+                                ? `${rolePrefix} ${provider.firstName} ${provider.lastName}`.trim()
+                                : `${provider.firstName} ${provider.lastName}`.trim();
+                            }
+                            
+                            // Get creator name (logged-in user)
+                            let creatorName = '';
+                            if (user) {
+                              const creatorRolePrefix = user.role === 'nurse' ? 'Nurse' : user.role === 'doctor' ? 'Dr.' : '';
+                              creatorName = creatorRolePrefix
+                                ? `${creatorRolePrefix} ${user.firstName} ${user.lastName}`.trim()
+                                : `${user.firstName} ${user.lastName}`.trim();
+                            }
+                            
+                            // Format title: "Appointment with [Provider Name] - Created by [Creator Name]"
+                            if (creatorName) {
+                              return `Appointment with ${providerName} - Created by ${creatorName}`;
+                            }
+                            return `Appointment with ${providerName}`;
+                          })()}
+                        </p>
                         </div>
-                      )}
                       {pendingAppointmentData.description && (
                         <div className="col-span-2">
                           <p className="text-sm text-gray-500 mb-1">Description</p>

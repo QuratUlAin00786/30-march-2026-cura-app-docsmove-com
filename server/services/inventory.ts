@@ -3,6 +3,7 @@ import {
   inventoryCategories, 
   inventoryItems, 
   inventorySuppliers,
+  inventoryWarehouses,
   inventoryItemsName,
   inventoryPurchaseOrders,
   inventoryPurchaseOrderItems,
@@ -22,6 +23,7 @@ import {
   type InsertInventoryCategory,
   type InsertInventoryItem,
   type InsertInventorySupplier,
+  type InsertInventoryWarehouse,
   type InsertInventoryItemsName,
   type InsertInventoryPurchaseOrder,
   type InsertInventoryPurchaseOrderItem,
@@ -47,6 +49,19 @@ import { emailService } from "../services/email";
  * Handles all inventory operations including stock management, purchase orders, sales, and alerts
  */
 export class InventoryService {
+  
+  // Helper function to format current local time as a string for PostgreSQL
+  private formatLocalTimeString(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+  }
   
   // ====== CATEGORY MANAGEMENT ======
   
@@ -201,11 +216,89 @@ export class InventoryService {
   }
 
   async createItem(itemData: InsertInventoryItem) {
-    const [item] = await db
-      .insert(inventoryItems)
-      .values(itemData)
-      .returning();
+    // Format current local time as a string for PostgreSQL
+    // This ensures the database stores the exact local time, not UTC
+    const now = new Date();
     
+    // Format as YYYY-MM-DD HH:MM:SS.mmm (local time)
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+    const localTimeString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+    
+    // Log the time for debugging
+    console.log(`[INVENTORY] Creating item - Local time string: ${localTimeString}`);
+    console.log(`[INVENTORY] Creating item - System time (Local): ${now.toString()}`);
+    
+    // Use raw SQL to insert with formatted local time string
+    // This ensures PostgreSQL stores it as local time, not UTC
+    const result = await db.execute(sql`
+      INSERT INTO inventory_items (
+        organization_id, category_id, name, description, sku, barcode,
+        generic_name, brand_name, manufacturer, unit_of_measurement, pack_size,
+        purchase_price, sale_price, mrp, tax_rate,
+        current_stock, minimum_stock, maximum_stock, reorder_point,
+        expiry_tracking, batch_tracking, prescription_required,
+        storage_conditions, side_effects, contraindications, dosage_instructions,
+        is_active, is_discontinued,
+        created_at, updated_at
+      ) VALUES (
+        ${itemData.organizationId}, ${itemData.categoryId}, ${itemData.name},
+        ${itemData.description || null}, ${itemData.sku}, ${itemData.barcode || null},
+        ${itemData.genericName || null}, ${itemData.brandName || null}, ${itemData.manufacturer || null},
+        ${itemData.unitOfMeasurement || 'pieces'}, ${itemData.packSize || 1},
+        ${itemData.purchasePrice}, ${itemData.salePrice}, ${itemData.mrp || null}, ${itemData.taxRate || '0.00'},
+        ${itemData.currentStock || 0}, ${itemData.minimumStock || 10}, ${itemData.maximumStock || 1000}, ${itemData.reorderPoint || 20},
+        ${itemData.expiryTracking || false}, ${itemData.batchTracking || false}, ${itemData.prescriptionRequired || false},
+        ${itemData.storageConditions || null}, ${itemData.sideEffects || null}, ${itemData.contraindications || null}, ${itemData.dosageInstructions || null},
+        ${itemData.isActive !== undefined ? itemData.isActive : true}, ${itemData.isDiscontinued || false},
+        ${localTimeString}::timestamp, ${localTimeString}::timestamp
+      ) RETURNING *
+    `);
+    
+    const rawRow = result.rows[0] as any;
+    
+    // Map snake_case to camelCase to match the expected return type
+    const item = {
+      id: rawRow.id,
+      organizationId: rawRow.organization_id,
+      categoryId: rawRow.category_id,
+      name: rawRow.name,
+      description: rawRow.description,
+      sku: rawRow.sku,
+      barcode: rawRow.barcode,
+      genericName: rawRow.generic_name,
+      brandName: rawRow.brand_name,
+      manufacturer: rawRow.manufacturer,
+      unitOfMeasurement: rawRow.unit_of_measurement,
+      packSize: rawRow.pack_size,
+      purchasePrice: rawRow.purchase_price,
+      salePrice: rawRow.sale_price,
+      mrp: rawRow.mrp,
+      taxRate: rawRow.tax_rate,
+      currentStock: rawRow.current_stock,
+      minimumStock: rawRow.minimum_stock,
+      maximumStock: rawRow.maximum_stock,
+      reorderPoint: rawRow.reorder_point,
+      expiryTracking: rawRow.expiry_tracking,
+      batchTracking: rawRow.batch_tracking,
+      prescriptionRequired: rawRow.prescription_required,
+      storageConditions: rawRow.storage_conditions,
+      sideEffects: rawRow.side_effects,
+      contraindications: rawRow.contraindications,
+      dosageInstructions: rawRow.dosage_instructions,
+      isActive: rawRow.is_active,
+      isDiscontinued: rawRow.is_discontinued,
+      createdAt: new Date(rawRow.created_at),
+      updatedAt: new Date(rawRow.updated_at),
+    };
+    
+    // Log what was returned from database
+    console.log(`[INVENTORY] Database returned createdAt: ${rawRow.created_at}`);
     console.log(`[INVENTORY] Created item: ${item.name} (SKU: ${item.sku}) for organization ${itemData.organizationId}`);
     
     // Check if stock is low and create alert
@@ -328,9 +421,18 @@ export class InventoryService {
   }
 
   async createItemName(itemNameData: InsertInventoryItemsName & { organizationId: number }) {
+    // Explicitly set createdAt and updatedAt to current system time
+    // JavaScript Date objects are stored as UTC internally
+    // PostgreSQL timestamp columns will store this as UTC
+    const now = new Date();
+    
     const [itemName] = await db
       .insert(inventoryItemsName)
-      .values(itemNameData)
+      .values({
+        ...itemNameData,
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning();
     
     console.log(`[INVENTORY] Created item name: ${itemName.name} for organization ${itemNameData.organizationId}`);
@@ -453,6 +555,24 @@ export class InventoryService {
     }));
 
     return ordersWithItems;
+  }
+
+  async updatePurchaseOrder(id: number, organizationId: number, updates: Partial<InsertInventoryPurchaseOrder>) {
+    const [updatedOrder] = await db
+      .update(inventoryPurchaseOrders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(
+        eq(inventoryPurchaseOrders.id, id),
+        eq(inventoryPurchaseOrders.organizationId, organizationId)
+      ))
+      .returning();
+    
+    if (!updatedOrder) {
+      throw new Error('Purchase order not found');
+    }
+    
+    console.log(`[INVENTORY] Updated purchase order ${updatedOrder.poNumber} for organization ${organizationId}`);
+    return updatedOrder;
   }
 
   async getPurchaseOrderItems(purchaseOrderId: number, organizationId: number) {
@@ -678,6 +798,9 @@ Cura Healthcare Team</p>
       const previousStock = item.currentStock;
       const newStock = previousStock + quantity;
 
+      // Format current local time as a string for PostgreSQL
+      const localTimeString = this.formatLocalTimeString();
+
       // Update item stock
       await tx
         .update(inventoryItems)
@@ -687,20 +810,16 @@ Cura Healthcare Team</p>
         })
         .where(eq(inventoryItems.id, itemId));
 
-      // Record stock movement
-      await tx
-        .insert(inventoryStockMovements)
-        .values({
-          organizationId,
-          itemId,
-          movementType,
-          quantity,
-          previousStock,
-          newStock,
-          unitCost: item.purchasePrice,
-          notes,
-          createdBy: userId || 1
-        });
+      // Record stock movement with local time
+      await tx.execute(sql`
+        INSERT INTO inventory_stock_movements (
+          organization_id, item_id, movement_type, quantity,
+          previous_stock, new_stock, unit_cost, notes, created_by, created_at
+        ) VALUES (
+          ${organizationId}, ${itemId}, ${movementType}, ${quantity},
+          ${previousStock}, ${newStock}, ${item.purchasePrice || null}, ${notes || null}, ${userId || 1}, ${localTimeString}::timestamp
+        )
+      `);
 
       // Check for low stock alert
       if (newStock <= item.minimumStock) {
@@ -1526,23 +1645,18 @@ Cura Healthcare Team</p>
         const poItem = purchaseOrderItemsMap.get(item.itemId);
         const unitCost = poItem?.unitPrice || item.unitPrice || 0;
         
-        // Create stock movement for receipt
-        const [movement] = await tx
-          .insert(inventoryStockMovements)
-          .values({
-            organizationId: receiptData.organizationId,
-            itemId: item.itemId,
-            movementType: 'purchase',
-            quantity: item.quantityReceived,
-            previousStock: 0, // Will be updated
-            newStock: 0, // Will be updated
-            unitCost: unitCost > 0 ? String(unitCost) : null,
-            referenceType: 'purchase_order',
-            referenceId: receiptData.purchaseOrderId,
-            notes: receiptData.notes,
-            createdBy: 1, // TODO: Get from user context
-          })
-          .returning();
+        // Create stock movement for receipt with local time
+        const localTimeString = this.formatLocalTimeString();
+        const movementResult = await tx.execute(sql`
+          INSERT INTO inventory_stock_movements (
+            organization_id, item_id, movement_type, quantity,
+            previous_stock, new_stock, unit_cost, reference_type, reference_id, notes, created_by, created_at
+          ) VALUES (
+            ${receiptData.organizationId}, ${item.itemId}, 'purchase', ${item.quantityReceived},
+            0, 0, ${unitCost > 0 ? String(unitCost) : null}, 'purchase_order', ${receiptData.purchaseOrderId}, ${receiptData.notes || null}, 1, ${localTimeString}::timestamp
+          ) RETURNING *
+        `);
+        const movement = movementResult.rows[0];
 
         // Update item stock
         await this.updateStock(
@@ -1731,9 +1845,12 @@ Cura Healthcare Team</p>
         id: inventoryBatches.id,
         itemId: inventoryBatches.itemId,
         itemName: inventoryItems.name,
+        itemSku: inventoryItems.sku,
         batchNumber: inventoryBatches.batchNumber,
         quantityAvailable: inventoryBatches.remainingQuantity,
-        location: sql<string>`'Pharmacy'`.as('location'), // Default location
+        warehouseId: inventoryBatches.warehouseId,
+        warehouseName: inventoryWarehouses.warehouseName,
+        warehouseLocation: inventoryWarehouses.location,
         expiryDate: inventoryBatches.expiryDate,
         manufactureDate: inventoryBatches.manufactureDate,
         supplierId: inventoryBatches.supplierId,
@@ -1747,10 +1864,180 @@ Cura Healthcare Team</p>
       .from(inventoryBatches)
       .leftJoin(inventoryItems, eq(inventoryBatches.itemId, inventoryItems.id))
       .leftJoin(inventorySuppliers, eq(inventoryBatches.supplierId, inventorySuppliers.id))
+      .leftJoin(inventoryWarehouses, eq(inventoryBatches.warehouseId, inventoryWarehouses.id))
       .where(eq(inventoryBatches.organizationId, organizationId))
       .orderBy(desc(inventoryBatches.createdAt));
 
-    return batches;
+    // Format location field with warehouse name and location
+    return batches.map(batch => ({
+      ...batch,
+      location: batch.warehouseName 
+        ? (batch.warehouseLocation ? `${batch.warehouseName} - ${batch.warehouseLocation}` : batch.warehouseName)
+        : 'Not Assigned'
+    }));
+  }
+
+  async updateBatch(batchId: number, organizationId: number, updates: {
+    batchNumber?: string;
+    remainingQuantity?: number;
+    expiryDate?: Date | null;
+    manufactureDate?: Date | null;
+    purchasePrice?: string;
+    receivedDate?: Date;
+    supplierId?: number | null;
+    warehouseId?: number | null;
+    status?: string;
+  }) {
+    return await db.transaction(async (tx) => {
+      // First, get the batch to find its itemId
+      const [batch] = await tx
+        .select({
+          id: inventoryBatches.id,
+          itemId: inventoryBatches.itemId,
+        })
+        .from(inventoryBatches)
+        .where(and(
+          eq(inventoryBatches.id, batchId),
+          eq(inventoryBatches.organizationId, organizationId)
+        ));
+
+      if (!batch) {
+        throw new Error("Batch not found or access denied");
+      }
+
+      const updateData: any = {};
+      
+      if (updates.batchNumber !== undefined) updateData.batchNumber = updates.batchNumber;
+      if (updates.remainingQuantity !== undefined) {
+        updateData.remainingQuantity = updates.remainingQuantity;
+        // Also update the quantity if remainingQuantity is being updated
+        updateData.quantity = updates.remainingQuantity;
+      }
+      if (updates.expiryDate !== undefined) {
+        updateData.expiryDate = updates.expiryDate;
+        // Update isExpired flag based on expiry date
+        updateData.isExpired = updates.expiryDate ? new Date(updates.expiryDate) < new Date() : false;
+      }
+      if (updates.manufactureDate !== undefined) updateData.manufactureDate = updates.manufactureDate;
+      if (updates.purchasePrice !== undefined) updateData.purchasePrice = updates.purchasePrice;
+      if (updates.receivedDate !== undefined) updateData.receivedDate = updates.receivedDate;
+      if (updates.supplierId !== undefined) updateData.supplierId = updates.supplierId;
+      if (updates.warehouseId !== undefined) updateData.warehouseId = updates.warehouseId;
+      if (updates.status !== undefined) updateData.status = updates.status;
+
+      updateData.updatedAt = new Date();
+
+      const [updated] = await tx
+        .update(inventoryBatches)
+        .set(updateData)
+        .where(and(
+          eq(inventoryBatches.id, batchId),
+          eq(inventoryBatches.organizationId, organizationId)
+        ))
+        .returning();
+
+      if (!updated) {
+        throw new Error("Batch not found or access denied");
+      }
+
+      // If remainingQuantity was updated, update the item's current_stock to the exact value
+      // Set current_stock to the edited batch's remainingQuantity (not sum of all batches)
+      if (updates.remainingQuantity !== undefined) {
+        // Update the item's current_stock to match the edited batch's remainingQuantity exactly
+        await tx
+          .update(inventoryItems)
+          .set({
+            currentStock: updates.remainingQuantity,
+            updatedAt: new Date()
+          })
+          .where(and(
+            eq(inventoryItems.id, batch.itemId),
+            eq(inventoryItems.organizationId, organizationId)
+          ));
+
+        console.log(`[INVENTORY] Updated item ${batch.itemId} current_stock to ${updates.remainingQuantity} (from batch ${batchId})`);
+      }
+
+      return updated;
+    });
+  }
+
+  async deleteBatch(batchId: number, organizationId: number) {
+    const [deleted] = await db
+      .delete(inventoryBatches)
+      .where(and(
+        eq(inventoryBatches.id, batchId),
+        eq(inventoryBatches.organizationId, organizationId)
+      ))
+      .returning();
+
+    if (!deleted) {
+      throw new Error("Batch not found or access denied");
+    }
+
+    return deleted;
+  }
+
+  async createBatch(organizationId: number, batchData: {
+    itemId: number;
+    batchNumber?: string;
+    quantity: number;
+    expiryDate?: Date | null;
+    manufactureDate?: Date | null;
+    purchasePrice: string;
+    receivedDate: Date;
+    supplierId?: number | null;
+    warehouseId?: number | null;
+    purchaseOrderId?: number | null;
+  }) {
+    // Validate item exists and belongs to organization
+    const [item] = await db
+      .select()
+      .from(inventoryItems)
+      .where(and(
+        eq(inventoryItems.id, batchData.itemId),
+        eq(inventoryItems.organizationId, organizationId)
+      ));
+
+    if (!item) {
+      throw new Error("Item not found or access denied");
+    }
+
+    // Calculate isExpired based on expiryDate
+    const isExpired = batchData.expiryDate ? new Date(batchData.expiryDate) < new Date() : false;
+
+    try {
+      const [newBatch] = await db
+        .insert(inventoryBatches)
+        .values({
+          organizationId,
+          itemId: batchData.itemId,
+          batchNumber: batchData.batchNumber || `BATCH-${Date.now()}`,
+          quantity: batchData.quantity,
+          remainingQuantity: batchData.quantity,
+          expiryDate: batchData.expiryDate || null,
+          manufactureDate: batchData.manufactureDate || null,
+          purchasePrice: batchData.purchasePrice,
+          receivedDate: batchData.receivedDate,
+          supplierId: batchData.supplierId || null,
+          warehouseId: batchData.warehouseId || null,
+          purchaseOrderId: batchData.purchaseOrderId || null,
+          status: 'active',
+          isExpired,
+        })
+        .returning();
+
+      console.log("[createBatch] Batch created successfully:", newBatch?.id);
+
+      // Note: Do not update item's currentStock when creating a batch
+      // The currentStock in inventory_items table should remain unchanged
+      // Batch stock is tracked separately in inventory_batches table
+
+      return newBatch;
+    } catch (dbError: any) {
+      console.error("[createBatch] Database error:", dbError);
+      throw new Error(`Failed to create batch: ${dbError.message || dbError}`);
+    }
   }
 
   // ====== PHARMACY SALES MODULE ======
@@ -2012,22 +2299,17 @@ Cura Healthcare Team</p>
             })
             .where(eq(inventoryItems.id, item.itemId));
 
-          // Create stock movement record
-          await tx
-            .insert(inventoryStockMovements)
-            .values({
-              organizationId: saleData.organizationId,
-              itemId: item.itemId,
-              batchId: allocation.batchId,
-              movementType: 'sale',
-              quantity: -allocation.quantity,
-              previousStock: itemDetails.currentStock,
-              newStock: itemDetails.currentStock - allocation.quantity,
-              unitCost: allocation.costPrice,
-              referenceType: 'sale',
-              notes: `Sale ${saleNumber}`,
-              createdBy: saleData.soldBy
-            });
+          // Create stock movement record with local time
+          const localTimeString = this.formatLocalTimeString();
+          await tx.execute(sql`
+            INSERT INTO inventory_stock_movements (
+              organization_id, item_id, batch_id, movement_type, quantity,
+              previous_stock, new_stock, unit_cost, reference_type, notes, created_by, created_at
+            ) VALUES (
+              ${saleData.organizationId}, ${item.itemId}, ${allocation.batchId}, 'sale', ${-allocation.quantity},
+              ${itemDetails.currentStock}, ${itemDetails.currentStock - allocation.quantity}, ${allocation.costPrice || null}, 'sale', ${`Sale ${saleNumber}`}, ${saleData.soldBy}, ${localTimeString}::timestamp
+            )
+          `);
         }
       }
 
@@ -2273,22 +2555,17 @@ Cura Healthcare Team</p>
           })
           .where(eq(inventoryItems.id, item.itemId));
 
-        // Create reversal stock movement
-        await tx
-          .insert(inventoryStockMovements)
-          .values({
-            organizationId,
-            itemId: item.itemId,
-            batchId: item.batchId,
-            movementType: 'adjustment',
-            quantity: item.quantity,
-            previousStock: 0,
-            newStock: 0,
-            referenceType: 'sale_void',
-            referenceId: saleId,
-            notes: `Void sale ${sale.saleNumber}: ${voidReason}`,
-            createdBy: voidedBy
-          });
+        // Create reversal stock movement with local time
+        const localTimeString = this.formatLocalTimeString();
+        await tx.execute(sql`
+          INSERT INTO inventory_stock_movements (
+            organization_id, item_id, batch_id, movement_type, quantity,
+            previous_stock, new_stock, reference_type, reference_id, notes, created_by, created_at
+          ) VALUES (
+            ${organizationId}, ${item.itemId}, ${item.batchId}, 'adjustment', ${item.quantity},
+            0, 0, 'sale_void', ${saleId}, ${`Void sale ${sale.saleNumber}: ${voidReason}`}, ${voidedBy}, ${localTimeString}::timestamp
+          )
+        `);
       }
 
       // Update sale status
@@ -2906,6 +3183,34 @@ Cura Healthcare Team</p>
     }
 
     return await query;
+  }
+
+  // ====== WAREHOUSE MANAGEMENT ======
+
+  async getWarehouses(organizationId: number) {
+    return await db
+      .select()
+      .from(inventoryWarehouses)
+      .where(eq(inventoryWarehouses.organizationId, organizationId))
+      .orderBy(inventoryWarehouses.warehouseName);
+  }
+
+  async createWarehouse(warehouseData: InsertInventoryWarehouse) {
+    // Ensure location is null if empty string
+    const warehouseValues = {
+      ...warehouseData,
+      location: warehouseData.location && warehouseData.location.trim() !== "" ? warehouseData.location.trim() : null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    
+    const [warehouse] = await db
+      .insert(inventoryWarehouses)
+      .values(warehouseValues)
+      .returning();
+    
+    console.log(`[INVENTORY] Created warehouse: ${warehouse.warehouseName} for organization ${warehouseData.organizationId}`);
+    return warehouse;
   }
 }
 

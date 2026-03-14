@@ -37,6 +37,8 @@ export const SocketEvents = {
   DISCONNECT: "disconnect",
   ADD_USER: "add_user", // Backend: events.ADD_USER
   ONLINE_USERS_UPDATE: "online_users_update", // Backend: events.ONLINE_USERS_UPDATE
+  CURRENCY_UPDATED: "currency-updated", // Currency update event
+  ORGANIZATION_CURRENCY_UPDATED: "organization-currency-updated", // Global currency update event
 } as const;
 
 export interface OnlineUsersUpdate {
@@ -46,6 +48,7 @@ export interface OnlineUsersUpdate {
 export interface AddUserData {
   userId: string;
   deviceId?: string | null;
+  organizationId?: number | null;
 }
 
 class SocketManager {
@@ -62,8 +65,13 @@ class SocketManager {
   private currentDeviceId: string | null = null;
 
   // Backend configuration
-  private readonly SOCKET_URL = "https://mk1.averox.com";
+  // Use current window location for local development, or environment variable for production
+  // In Vite, use import.meta.env instead of process.env
+  private readonly SOCKET_URL = 
+    import.meta.env.VITE_SOCKET_URL || 
+    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:1100');
   private readonly API_KEY =
+    import.meta.env.VITE_SOCKET_API_KEY ||
     "3a7520ec8dd5de7bf74e2f791b14167773cd747cf8f4f452f3f473251a1c803d";
 
   private constructor() {
@@ -126,16 +134,18 @@ class SocketManager {
     this.socket.on(SocketEvents.CONNECT, () => {
       console.log(
         "[SocketManager] ✅ Connected to Socket.IO server:",
-        this.socket?.id
+        this.socket?.id,
+        "URL:",
+        this.SOCKET_URL
       );
       this.isConnecting = false;
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
 
-      // Register user if userId is provided
-      if (this.currentUserId) {
-        this.addUser(this.currentUserId, this.currentDeviceId);
-      }
+      // Note: User registration with organizationId should be done separately
+      // via addUser() call from SocketProvider after tenant is available
+      // This ensures organizationId is included for room-based updates
+      // We don't auto-register here to avoid missing organizationId
     });
 
     // Handle disconnection
@@ -185,12 +195,26 @@ class SocketManager {
       // Emit to internal event system so hooks can listen
       this.emit("incoming_call", callData);
     });
+
+    // Handle currency update events (room-based)
+    this.socket.on(SocketEvents.CURRENCY_UPDATED, (data: any) => {
+      console.log("[SocketManager] 💱 Currency update received (room):", data);
+      // Emit to internal event system so hooks can listen
+      this.emit(SocketEvents.CURRENCY_UPDATED, data);
+    });
+
+    // Handle global organization currency update events
+    this.socket.on(SocketEvents.ORGANIZATION_CURRENCY_UPDATED, (data: any) => {
+      console.log("[SocketManager] 💱 Organization currency update received (global):", data);
+      // Emit to internal event system so hooks can listen
+      this.emit(SocketEvents.ORGANIZATION_CURRENCY_UPDATED, data);
+    });
   }
 
   /**
    * Add user to online users list
    */
-  addUser(userId: string, deviceId?: string | null): void {
+  addUser(userId: string, deviceId?: string | null, organizationId?: number | null): void {
     if (!this.socket?.connected) {
       console.warn("[SocketManager] Cannot add user: not connected");
       return;
@@ -202,6 +226,7 @@ class SocketManager {
     const addUserData: AddUserData = {
       userId,
       ...(deviceId && { deviceId }),
+      ...(organizationId && { organizationId }),
     };
 
     console.log("[SocketManager] 👤 Adding user:", addUserData);
@@ -277,15 +302,44 @@ class SocketManager {
     }
     this.listeners.get(event)!.add(callback);
 
-    // Also listen on socket if connected
-    if (this.socket) {
+    console.log(`[SocketManager] ✅ Registered listener for event "${event}"`, {
+      event,
+      totalListeners: this.listeners.get(event)!.size,
+      socketConnected: this.socket?.connected,
+      allRegisteredEvents: Array.from(this.listeners.keys()),
+      callbackType: typeof callback,
+      callbackName: callback.name || 'anonymous'
+    });
+
+    // Also listen on socket if connected (for direct socket events)
+    // But note: setupEventHandlers() already sets up listeners that emit to internal system
+    // So we don't need to add duplicate socket listeners for events handled by setupEventHandlers
+    // The internal emit() will call all registered callbacks
+    if (this.socket && !this.isEventHandledBySetupHandlers(event)) {
+      console.log(`[SocketManager] Also adding direct socket listener for "${event}" (not handled by setupEventHandlers)`);
       this.socket.on(event, callback as any);
+    } else if (this.isEventHandledBySetupHandlers(event)) {
+      console.log(`[SocketManager] Event "${event}" is handled by setupEventHandlers, using internal emit() only`);
     }
 
     // Return unsubscribe function
     return () => {
+      console.log(`[SocketManager] Unsubscribing from event "${event}"`);
       this.off(event, callback);
     };
+  }
+  
+  /**
+   * Check if an event is already handled by setupEventHandlers
+   */
+  private isEventHandledBySetupHandlers(event: string): boolean {
+    // These events are handled by setupEventHandlers and will emit to internal system
+    return [
+      SocketEvents.CURRENCY_UPDATED,
+      SocketEvents.ORGANIZATION_CURRENCY_UPDATED,
+      SocketEvents.ONLINE_USERS_UPDATE,
+      "incoming_call"
+    ].includes(event);
   }
 
   /**
@@ -307,16 +361,33 @@ class SocketManager {
    */
   private emit(event: string, data: any): void {
     const eventListeners = this.listeners.get(event);
-    if (eventListeners) {
-      eventListeners.forEach((callback) => {
+    const listenerCount = eventListeners ? eventListeners.size : 0;
+    console.log(`[SocketManager] Emitting event "${event}" to ${listenerCount} listeners`, {
+      event,
+      listenerCount,
+      hasListeners: !!eventListeners,
+      allRegisteredEvents: Array.from(this.listeners.keys()),
+      data: data ? { type: data.type, organizationId: data.organizationId } : null
+    });
+    
+    if (eventListeners && eventListeners.size > 0) {
+      console.log(`[SocketManager] Calling ${listenerCount} callback(s) for event "${event}"`);
+      eventListeners.forEach((callback, index) => {
         try {
+          console.log(`[SocketManager] Calling callback ${index + 1}/${listenerCount} for "${event}"`);
           callback(data);
         } catch (error) {
           console.error(
-            `[SocketManager] Error in event listener for ${event}:`,
+            `[SocketManager] Error in event listener ${index + 1} for ${event}:`,
             error
           );
         }
+      });
+    } else {
+      console.warn(`[SocketManager] ⚠️ No listeners registered for event "${event}"`, {
+        event,
+        allRegisteredEvents: Array.from(this.listeners.keys()),
+        totalListeners: this.listeners.size
       });
     }
   }

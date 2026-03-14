@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, CreditCard, DollarSterling, PoundSterling, AlertTriangle, TrendingUp, Plus, Filter, Download, Eye, Edit, Trash2, FileText, Printer, Share, X } from "lucide-react";
+import { useCurrency } from "@/hooks/use-currency";
 import { queryClient, saasApiRequest } from "@/lib/saasQueryClient";
 import { useToast } from "@/hooks/use-toast";
 import InvoiceTemplate from "./InvoiceTemplate";
@@ -151,6 +152,7 @@ interface BillingStats {
 }
 
 export default function SaaSBilling() {
+  const { currencySymbol } = useCurrency();
   const [dateRange, setDateRange] = useState("30");
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
@@ -1833,7 +1835,9 @@ const getReminderEntries = (metadata?: any) => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <PoundSterling className="h-4 w-4 text-muted-foreground" />
+                <span className="h-4 w-4 text-muted-foreground flex items-center justify-center text-sm font-bold">
+                  {currencySymbol}
+                </span>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">

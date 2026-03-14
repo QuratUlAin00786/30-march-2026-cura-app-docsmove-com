@@ -5,6 +5,7 @@ import {
   buildSocketUserIdentifier,
 } from "@/lib/socket-manager";
 import { useAuth } from "@/hooks/use-auth";
+import { useTenant } from "@/hooks/use-tenant";
 
 interface SocketProviderProps {
   children: ReactNode;
@@ -16,6 +17,7 @@ interface SocketProviderProps {
  */
 export function SocketProvider({ children }: SocketProviderProps) {
   const { user, isAuthenticated } = useAuth();
+  const { tenant } = useTenant();
 
   useEffect(() => {
     // Only connect if user is authenticated
@@ -37,10 +39,40 @@ export function SocketProvider({ children }: SocketProviderProps) {
     console.log(
       "[SocketProvider] Initializing Socket.IO connection for user:",
       userIdentifier,
+      "Organization:",
+      tenant?.id,
     );
 
     // Connect to Socket.IO server
     socketManager.connect(userIdentifier, deviceId);
+
+    // Register user with organization ID when tenant is available
+    // Use a small delay to ensure connection is established first
+    const registerUser = () => {
+      if (tenant?.id && socketManager.isConnected()) {
+        console.log("[SocketProvider] Registering user with organization:", tenant.id);
+        socketManager.addUser(userIdentifier, deviceId, tenant.id);
+      } else if (tenant?.id) {
+        // If not connected yet, wait a bit and try again
+        setTimeout(registerUser, 500);
+      }
+    };
+    
+    // Try to register immediately if already connected, otherwise wait for connection
+    if (socketManager.isConnected()) {
+      registerUser();
+    } else {
+      // Wait for connection, then register
+      const checkConnection = setInterval(() => {
+        if (socketManager.isConnected()) {
+          clearInterval(checkConnection);
+          registerUser();
+        }
+      }, 100);
+      
+      // Clear interval after 5 seconds to avoid infinite checking
+      setTimeout(() => clearInterval(checkConnection), 5000);
+    }
 
     // Set up global event listeners
     const unsubscribeOnlineUsers = socketManager.on(
@@ -67,6 +99,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
     user?.email,
     user?.role,
     isAuthenticated,
+    tenant?.id, // Re-register when tenant changes
   ]);
 
   // Handle user logout

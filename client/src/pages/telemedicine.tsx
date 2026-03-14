@@ -652,11 +652,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
             setLiveKitAudioCall(null);
             currentAudioCallRef.current = null;
             callStartTimeRef.current = null;
-            setCallStatusModal({
-              open: true,
-              title: "Not Answering",
-              description: "The recipient did not answer the call",
-            });
+            // Don't show call status modal - close window automatically
           }
         }
       }, 30000);
@@ -688,7 +684,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
     }
   };
 
-  const handleLiveKitVideoCallEnd = () => {
+  const handleLiveKitVideoCallEnd = (disconnectedParticipant?: { name: string; role?: string }) => {
     // Stop call timer
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
@@ -722,14 +718,26 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
     }
     
     setLiveKitVideoCall(null);
-    setCallStatusModal({
-      open: true,
-      title: "Call Ended",
-      description: "Video call has been terminated",
-    });
+    
+    // Format disconnect message with participant name if available
+    let description = "Video call has been terminated";
+    if (disconnectedParticipant && disconnectedParticipant.name) {
+      const rolePrefix = disconnectedParticipant.role?.toLowerCase() === 'nurse' ? 'Nurse.' : disconnectedParticipant.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+      const displayName = rolePrefix ? `${rolePrefix} ${disconnectedParticipant.name}` : disconnectedParticipant.name;
+      description = `Disconnected ${displayName} have left the call`;
+    }
+    
+    // Use setTimeout to ensure modal shows after main dialog closes
+    setTimeout(() => {
+      setCallStatusModal({
+        open: true,
+        title: "Call Ended",
+        description: description,
+      });
+    }, 100);
   };
 
-  const handleLiveKitAudioCallEnd = () => {
+  const handleLiveKitAudioCallEnd = (disconnectedParticipant?: { name: string; role?: string }) => {
     // Stop call timer
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
@@ -773,11 +781,23 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
     currentAudioCallRef.current = null;
     callStartTimeRef.current = null;
     callAcceptedRef.current = false;
-    setCallStatusModal({
-      open: true,
-      title: "Call Ended",
-      description: "Audio call has been terminated",
-    });
+    
+    // Format disconnect message with participant name if available
+    let description = "Audio call has been terminated";
+    if (disconnectedParticipant && disconnectedParticipant.name) {
+      const rolePrefix = disconnectedParticipant.role?.toLowerCase() === 'nurse' ? 'Nurse.' : disconnectedParticipant.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+      const displayName = rolePrefix ? `${rolePrefix} ${disconnectedParticipant.name}` : disconnectedParticipant.name;
+      description = `Disconnected ${displayName} have left the call`;
+    }
+    
+    // Use setTimeout to ensure modal shows after main dialog closes
+    setTimeout(() => {
+      setCallStatusModal({
+        open: true,
+        title: "Call Ended",
+        description: description,
+      });
+    }, 100);
   };
 
   // Cleanup on unmount
@@ -807,12 +827,27 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
           callTimerRef.current = null;
         }
         setCallDuration(0);
+        
+        // Get participant info for disconnect message
+        const patient = liveKitVideoCall.patient;
+        let description = "Video call has been terminated";
+        if (patient) {
+          const rolePrefix = patient.role?.toLowerCase() === 'nurse' ? 'Nurse.' : patient.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+          const displayName = rolePrefix ? `${rolePrefix} ${patient.firstName || ''} ${patient.lastName || ''}`.trim() : `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
+          if (displayName) {
+            description = `Disconnected ${displayName} have left the call`;
+          }
+        }
+        
         setLiveKitVideoCall(null);
-        setCallStatusModal({
-          open: true,
-          title: "Call Ended",
-          description: "The other participant ended the call",
-        });
+        // Use setTimeout to ensure modal shows after main dialog closes
+        setTimeout(() => {
+          setCallStatusModal({
+            open: true,
+            title: "Call Ended",
+            description: description,
+          });
+        }, 100);
       }
       
       // Check if this is for our current audio call
@@ -829,15 +864,30 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
           callTimeoutRef.current = null;
         }
         setCallDuration(0);
+        
+        // Get participant info for disconnect message
+        const patient = liveKitAudioCall.patient;
+        let description = "Audio call has been terminated";
+        if (patient) {
+          const rolePrefix = patient.role?.toLowerCase() === 'nurse' ? 'Nurse.' : patient.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+          const displayName = rolePrefix ? `${rolePrefix} ${patient.firstName || ''} ${patient.lastName || ''}`.trim() : `${patient.firstName || ''} ${patient.lastName || ''}`.trim();
+          if (displayName) {
+            description = `Disconnected ${displayName} have left the call`;
+          }
+        }
+        
         setLiveKitAudioCall(null);
         currentAudioCallRef.current = null;
         callStartTimeRef.current = null;
         callAcceptedRef.current = false;
-        setCallStatusModal({
-          open: true,
-          title: "Call Ended",
-          description: "The other participant ended the call",
-        });
+        // Use setTimeout to ensure modal shows after main dialog closes
+        setTimeout(() => {
+          setCallStatusModal({
+            open: true,
+            title: "Call Ended",
+            description: description,
+          });
+        }, 100);
       }
     });
 
@@ -888,11 +938,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
         
         // Setting to null will unmount LiveKitVideoCall which cleans up camera/tracks
         setLiveKitVideoCall(null);
-        setCallStatusModal({
-          open: true,
-          title: "Call Declined",
-          description: "The recipient declined the call",
-        });
+        // Don't show call status modal - close window automatically
       }
       
       // Check if this is for our current audio call
@@ -913,11 +959,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
         currentAudioCallRef.current = null;
         callStartTimeRef.current = null;
         callAcceptedRef.current = false;
-        setCallStatusModal({
-          open: true,
-          title: "Call Declined",
-          description: "The recipient declined the call",
-        });
+        // Don't show call status modal - close window automatically
       }
     });
 
@@ -1242,6 +1284,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
                 participantName={
                   user ? `${user.firstName} ${user.lastName}` : "Provider"
                 }
+                participantRole={user?.role}
                 token={liveKitVideoCall.token}
                 serverUrl={liveKitVideoCall.serverUrl}
                 onDisconnect={handleLiveKitVideoCallEnd}
@@ -1275,6 +1318,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
                 participantName={
                   user ? `${user.firstName} ${user.lastName}` : "Provider"
                 }
+                participantRole={user?.role}
                 token={liveKitAudioCall.token}
                 serverUrl={liveKitAudioCall.serverUrl}
                 onDisconnect={handleLiveKitAudioCallEnd}
@@ -1293,7 +1337,14 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{callStatusModal.title}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              {callStatusModal.description?.includes("Audio") ? (
+                <Phone className="h-5 w-5" />
+              ) : callStatusModal.description?.includes("Video") ? (
+                <Video className="h-5 w-5" />
+              ) : null}
+              {callStatusModal.title}
+            </DialogTitle>
           </DialogHeader>
           <div className="py-4">
             <p className="text-gray-700 dark:text-gray-300">{callStatusModal.description}</p>
@@ -1703,33 +1754,33 @@ export default function Telemedicine() {
   consultationsRef.current = Array.isArray(consultations) ? consultations : [];
   currentCallRef.current = currentCall;
 
-  // Auto-connect: run check every 10 seconds so we don't miss the scheduled minute
-  useEffect(() => {
-    function checkAndAutoConnect() {
-      const list = consultationsRef.current;
-      if (!list.length) return;
-      if (currentCallRef.current) return; // already in a call
-      if (autoStartInProgressRef.current) return; // start already triggered
-      const now = Date.now();
-      const windowMs = 2 * 60 * 1000; // auto-connect if scheduled time was 0–2 minutes ago
-      for (const c of list) {
-        if (c.status !== "scheduled" || !c.scheduledTime) continue;
-        const scheduled = new Date(c.scheduledTime).getTime();
-        const diff = now - scheduled;
-        if (diff >= 0 && diff < windowMs && !autoStartedConsultationIdsRef.current.has(c.id)) {
-          autoStartedConsultationIdsRef.current.add(c.id);
-          autoStartInProgressRef.current = true;
-          pendingAutoStartRef.current = c;
-          // Don't show toast here - let the mutation's onSuccess handler show it
-          startConsultationMutation.mutate(c.id);
-          return;
-        }
-      }
-    }
-    checkAndAutoConnect();
-    const t = setInterval(checkAndAutoConnect, 10 * 1000);
-    return () => clearInterval(t);
-  }, [consultations]);
+  // Auto-connect: DISABLED - do not auto-open video consultation popup
+  // useEffect(() => {
+  //   function checkAndAutoConnect() {
+  //     const list = consultationsRef.current;
+  //     if (!list.length) return;
+  //     if (currentCallRef.current) return; // already in a call
+  //     if (autoStartInProgressRef.current) return; // start already triggered
+  //     const now = Date.now();
+  //     const windowMs = 2 * 60 * 1000; // auto-connect if scheduled time was 0–2 minutes ago
+  //     for (const c of list) {
+  //       if (c.status !== "scheduled" || !c.scheduledTime) continue;
+  //       const scheduled = new Date(c.scheduledTime).getTime();
+  //       const diff = now - scheduled;
+  //       if (diff >= 0 && diff < windowMs && !autoStartedConsultationIdsRef.current.has(c.id)) {
+  //         autoStartedConsultationIdsRef.current.add(c.id);
+  //         autoStartInProgressRef.current = true;
+  //         pendingAutoStartRef.current = c;
+  //         // Don't show toast here - let the mutation's onSuccess handler show it
+  //         startConsultationMutation.mutate(c.id);
+  //         return;
+  //       }
+  //     }
+  //   }
+  //   checkAndAutoConnect();
+  //   const t = setInterval(checkAndAutoConnect, 10 * 1000);
+  //   return () => clearInterval(t);
+  // }, [consultations]);
 
   // Poll consultations so list and ref stay fresh
   useEffect(() => {

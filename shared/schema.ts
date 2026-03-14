@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, varchar, decimal, real, date, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, varchar, char, decimal, real, date, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -178,6 +178,10 @@ export const organizations = pgTable("organizations", {
   email: text("email").notNull(),
   region: varchar("region", { length: 10 }).notNull().default("UK"), // UK, EU, ME, SA, US
   brandName: text("brand_name").notNull(),
+  country_code: char("country_code", { length: 2 }), // ISO 3166-1 alpha-2 country code (e.g., "AE", "GB", "US")
+  currency_code: char("currency_code", { length: 3 }), // ISO 4217 currency code (e.g., "AED", "GBP", "USD")
+  currency_symbol: varchar("currency_symbol", { length: 10 }), // Currency symbol (e.g., "د.إ", "£", "$")
+  language_code: char("language_code", { length: 5 }), // Locale code (e.g., "ar-AE", "en-GB", "en-US")
   settings: jsonb("settings").$type<{
     theme?: { primaryColor?: string; logoUrl?: string };
     compliance?: { gdprEnabled?: boolean; dataResidency?: string };
@@ -1524,6 +1528,9 @@ export const inventoryItemsName = pgTable("inventory_items_name", {
   organizationId: integer("organization_id").notNull(),
   name: text("name").notNull(),
   description: text("description"),
+  brandName: text("brand_name"),
+  manufacturer: text("manufacturer"),
+  unitOfMeasurement: varchar("unit_of_measurement", { length: 20 }).default("pieces"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1562,6 +1569,16 @@ export const inventoryPurchaseOrderItems = pgTable("inventory_purchase_order_ite
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const inventoryWarehouses = pgTable("inventory_warehouses", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  warehouseName: varchar("warehouse_name", { length: 200 }).notNull(),
+  location: text("location"),
+  status: varchar("status", { length: 20 }).notNull().default("active"), // active, inactive
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const inventoryBatches = pgTable("inventory_batches", {
   id: serial("id").primaryKey(),
   organizationId: integer("organization_id").notNull(),
@@ -1573,6 +1590,8 @@ export const inventoryBatches = pgTable("inventory_batches", {
   remainingQuantity: integer("remaining_quantity").notNull().default(0),
   purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }).notNull(),
   supplierId: integer("supplier_id"),
+  warehouseId: integer("warehouse_id"),
+  purchaseOrderId: integer("purchase_order_id"), // Link to purchase order
   receivedDate: timestamp("received_date").defaultNow().notNull(),
   status: varchar("status", { length: 20 }).notNull().default("active"),
   isExpired: boolean("is_expired").notNull().default(false),
@@ -2961,6 +2980,12 @@ export const insertInventoryPurchaseOrderItemSchema = createInsertSchema(invento
   createdAt: true,
 });
 
+export const insertInventoryWarehouseSchema = createInsertSchema(inventoryWarehouses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertInventoryBatchSchema = createInsertSchema(inventoryBatches).omit({
   id: true,
   createdAt: true,
@@ -3272,6 +3297,9 @@ export type InsertInventoryItemsName = z.infer<typeof insertInventoryItemsNameSc
 
 export type InventorySupplier = typeof inventorySuppliers.$inferSelect;
 export type InsertInventorySupplier = z.infer<typeof insertInventorySupplierSchema>;
+
+export type InventoryWarehouse = typeof inventoryWarehouses.$inferSelect;
+export type InsertInventoryWarehouse = z.infer<typeof insertInventoryWarehouseSchema>;
 
 export type InventoryPurchaseOrder = typeof inventoryPurchaseOrders.$inferSelect;
 export type InsertInventoryPurchaseOrder = z.infer<typeof insertInventoryPurchaseOrderSchema>;

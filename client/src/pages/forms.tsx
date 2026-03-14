@@ -55,6 +55,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
+import { useCurrency } from "@/hooks/use-currency";
 import { Toaster } from "@/components/ui/toaster";
 import { isDoctorLike } from "@/lib/role-utils";
 import { Header } from "@/components/layout/header";
@@ -866,6 +867,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
 }
 
 export default function Forms() {
+  const { currencySymbol } = useCurrency();
   const { user } = useAuth();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -5044,7 +5046,7 @@ Coverage Details: [Insurance Coverage]`;
               <p>Form: [Tablet/Capsule/Liquid/Injection]</p>
               <p>Manufacturer: [Manufacturer Name]</p>
               <p>NDC Number: [NDC Number]</p>
-              <p>Price: £[Price]</p>
+              <p>Price: {currencySymbol}[Price]</p>
               <p>Instructions: [Dosage Instructions]</p>
             </div>
           `;
@@ -5058,7 +5060,7 @@ Coverage Details: [Insurance Coverage]`;
               <p>Manufacturer: [Manufacturer]</p>
               <p>Category: [Device Category]</p>
               <p>FDA Approval: [FDA Status]</p>
-              <p>Price: £[Device Price]</p>
+              <p>Price: {currencySymbol}[Device Price]</p>
               <p>Warranty: [Warranty Period]</p>
             </div>
           `;
@@ -5070,8 +5072,8 @@ Coverage Details: [Insurance Coverage]`;
               <p>Supply Type: [Supply Type]</p>
               <p>Brand: [Brand Name]</p>
               <p>Quantity: [Quantity/Package Size]</p>
-              <p>Unit Price: £[Unit Price]</p>
-              <p>Total Price: £[Total Price]</p>
+              <p>Unit Price: {currencySymbol}[Unit Price]</p>
+              <p>Total Price: {currencySymbol}[Total Price]</p>
               <p>Sterility: [Sterile/Non-sterile]</p>
               <p>Expiration: [Expiration Date]</p>
             </div>
@@ -5085,7 +5087,7 @@ Coverage Details: [Insurance Coverage]`;
               <p>Test Code: [CPT/Lab Code]</p>
               <p>Test Type: [Blood/Urine/Culture/Imaging]</p>
               <p>Processing Time: [Turnaround Time]</p>
-              <p>Price: £[Test Price]</p>
+              <p>Price: {currencySymbol}[Test Price]</p>
               <p>Requirements: [Fasting/Special Instructions]</p>
             </div>
           `;
@@ -5098,7 +5100,7 @@ Coverage Details: [Insurance Coverage]`;
               <p>Services Included: [Included Services]</p>
               <p>Duration: [Treatment Duration]</p>
               <p>Provider: [Healthcare Provider]</p>
-              <p>Package Price: £[Package Price]</p>
+              <p>Package Price: {currencySymbol}[Package Price]</p>
               <p>Coverage: [Insurance Coverage]</p>
               <p>Follow-up: [Follow-up Included]</p>
             </div>

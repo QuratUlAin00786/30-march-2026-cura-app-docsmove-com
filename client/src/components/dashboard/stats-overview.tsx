@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Users, Calendar, Brain, DollarSign } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
+import { useCurrency } from "@/hooks/use-currency";
 import type { DashboardStats } from "@/types";
 
 function getTenantSubdomain(): string {
@@ -49,6 +50,7 @@ const statCards = [
 ];
 
 export function StatsOverview() {
+  const { currencySymbol } = useCurrency();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<any>(null);
@@ -129,9 +131,12 @@ export function StatsOverview() {
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       {statCards.map((card) => {
         const value = stats?.[card.key] ?? 0;
-        const formattedValue = card.prefix 
-          ? `${card.prefix}${value.toLocaleString()}`
-          : value.toLocaleString();
+        // For Total Revenue, use currency symbol from organization
+        const formattedValue = card.title === "Total Revenue"
+          ? `${currencySymbol}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : card.prefix 
+            ? `${card.prefix}${value.toLocaleString()}`
+            : value.toLocaleString();
 
 
 

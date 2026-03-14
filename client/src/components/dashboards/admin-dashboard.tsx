@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import AppointmentCalendar from "../calendar/appointment-calendar";
 import { AiInsightsPanel } from "../dashboard/ai-insights-panel";
 import { useAuth } from "@/hooks/use-auth";
+import { useCurrency } from "@/hooks/use-currency";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -125,6 +126,7 @@ function RecentPatientsList() {
 
 export function AdminDashboard() {
   const [, setLocation] = useLocation();
+  const { currencySymbol } = useCurrency();
   const { user } = useAuth();
   const rolesQuery = useQuery({
     queryKey: ["/api/roles"],
@@ -507,7 +509,7 @@ export function AdminDashboard() {
     {
       title: "Total Revenue",
       // Only show "--" on initial load when no data exists yet, keep previous value during refetch
-      value: isLoading && !stats ? "--" : `£${(stats?.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: isLoading && !stats ? "--" : `${currencySymbol}${(stats?.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       description: isLoading && !stats ? "Loading..." : "Total revenue received",
       icon: CreditCard,
       href: `/${subdomain}/billing`,
@@ -636,7 +638,7 @@ export function AdminDashboard() {
                         <div className="flex justify-between">
                           <span className="text-gray-600 dark:text-gray-400">Monthly:</span>
                           <span className="font-medium text-gray-900 dark:text-gray-100">
-                            £{subscription.monthlyPrice}
+                            {currencySymbol}{subscription.monthlyPrice}
                           </span>
                         </div>
                       )}

@@ -324,9 +324,13 @@ export default function SymptomCheckerPage() {
                               data-testid="button-select-patient"
                             >
                               {selectedPatientId
-                                ? patients.find((patient: any) => patient.id === selectedPatientId)
-                                    ? `${patients.find((patient: any) => patient.id === selectedPatientId)?.firstName} ${patients.find((patient: any) => patient.id === selectedPatientId)?.lastName}`
-                                    : "Select patient..."
+                                ? (() => {
+                                    const selectedPatient = patients.find((patient: any) => patient.id === selectedPatientId);
+                                    if (!selectedPatient) return "Select patient...";
+                                    return selectedPatient.email
+                                      ? `${selectedPatient.firstName} ${selectedPatient.lastName} (${selectedPatient.email})`
+                                      : `${selectedPatient.firstName} ${selectedPatient.lastName}`;
+                                  })()
                                 : "Select patient..."}
                               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                             </Button>
@@ -340,7 +344,7 @@ export default function SymptomCheckerPage() {
                                   {patients.map((patient: any) => (
                                     <CommandItem
                                       key={patient.id}
-                                      value={`${patient.firstName} ${patient.lastName} ${patient.patientNumber || ''}`}
+                                      value={`${patient.id}-${patient.firstName}-${patient.lastName}-${patient.email || ''}-${patient.patientNumber || ''}`}
                                       onSelect={() => {
                                         setSelectedPatientId(patient.id);
                                         setPatientSearchOpen(false);
@@ -353,12 +357,17 @@ export default function SymptomCheckerPage() {
                                           selectedPatientId === patient.id ? "opacity-100" : "opacity-0"
                                         )}
                                       />
-                                      {patient.firstName} {patient.lastName}
-                                      {patient.patientNumber && (
-                                        <span className="ml-2 text-xs text-gray-500">
-                                          ({patient.patientNumber})
-                                        </span>
-                                      )}
+                                      <div className="flex flex-col">
+                                        <span>{patient.firstName} {patient.lastName}</span>
+                                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                          {patient.email && (
+                                            <span>{patient.email}</span>
+                                          )}
+                                          {patient.patientNumber && (
+                                            <span>({patient.patientNumber})</span>
+                                          )}
+                                        </div>
+                                      </div>
                                     </CommandItem>
                                   ))}
                                 </CommandGroup>

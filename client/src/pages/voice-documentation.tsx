@@ -624,6 +624,15 @@ export default function VoiceDocumentation() {
       type: string;
       description: string;
     }) => {
+      console.log("Uploading photo with data:", {
+        patientId: data.patientId,
+        type: data.type,
+        description: data.description,
+        fileName: data.photo.name,
+        fileSize: data.photo.size,
+        fileType: data.photo.type,
+      });
+
       const formData = new FormData();
       formData.append("photo", data.photo);
       formData.append("patientId", data.patientId);
@@ -631,23 +640,73 @@ export default function VoiceDocumentation() {
       formData.append("description", data.description);
 
       const token = localStorage.getItem("auth_token");
-      const response = await fetch("/api/voice-documentation/photos", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Tenant-Subdomain": getActiveSubdomain(),
-        },
-        body: formData,
-      });
-      if (!response.ok) throw new Error("Failed to upload photo");
-      return response.json();
+      if (!token) {
+        throw new Error("Authentication token not found. Please log in again.");
+      }
+
+      try {
+        const response = await fetch("/api/voice-documentation/photos", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Tenant-Subdomain": getActiveSubdomain(),
+          },
+          body: formData,
+        });
+
+        console.log("Upload response status:", response.status, response.statusText);
+
+        if (!response.ok) {
+          let errorMessage = "Failed to upload photo";
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+            console.error("Upload error response:", errorData);
+          } catch (parseError) {
+            const errorText = await response.text();
+            console.error("Upload error text:", errorText);
+            errorMessage = errorText || `Server returned ${response.status}: ${response.statusText}`;
+          }
+          throw new Error(errorMessage);
+        }
+
+        const result = await response.json();
+        console.log("Upload successful:", result);
+        return result;
+      } catch (fetchError) {
+        console.error("Fetch error:", fetchError);
+        if (fetchError instanceof Error) {
+          throw fetchError;
+        }
+        throw new Error("Network error. Please check your connection and try again.");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["/api/voice-documentation/photos"],
       });
-      setSuccessMessage("Photo uploaded and analyzed");
+      // Reset form and stop camera after successful save
+      setCapturedPhoto(null);
+      setSelectedPhotoPatient("");
+      setSelectedPhotoType("");
+      setPhotoDescription("");
+      stopCamera("error-cleanup");
+      // Switch to Clinical Photos tab to show the saved photo
+      setActiveTab("photos");
+      setSuccessMessage("Your clinical photo has been saved to the Clinical Photos tab.");
       setShowSuccessModal(true);
+    },
+    onError: (error: Error) => {
+      console.error("Failed to save photo:", error);
+      console.error("Error details:", {
+        message: error.message,
+        stack: error.stack,
+      });
+      toast({
+        title: "Failed to save photo",
+        description: error.message || "Please check your connection and try again",
+        variant: "destructive",
+      });
     },
   });
 
@@ -1403,28 +1462,88 @@ export default function VoiceDocumentation() {
   };
 
   const savePhoto = async () => {
-    if (
-      !capturedPhoto ||
-      !selectedPhotoPatient ||
-      !selectedPhotoType ||
-      !photoDescription
-    ) {
+    // Validation
+    if (!capturedPhoto) {
       toast({
-        title: "Missing information",
-        description: "Please fill in all fields before saving",
+        title: "Missing photo",
+        description: "Please capture or upload a photo first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!selectedPhotoPatient) {
+      toast({
+        title: "Missing patient",
+        description: "Please select a patient",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!selectedPhotoType) {
+      toast({
+        title: "Missing photo type",
+        description: "Please select a photo type",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!photoDescription || !photoDescription.trim()) {
+      toast({
+        title: "Missing description",
+        description: "Please enter a description",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      // Convert data URL to blob
-      const response = await fetch(capturedPhoto);
-      const blob = await response.blob();
+      let file: File;
+      
+      // Check if capturedPhoto is a data URL or a File object
+      if (capturedPhoto instanceof File) {
+        file = capturedPhoto;
+      } else if (capturedPhoto.startsWith('data:')) {
+        // Convert data URL to blob WITHOUT fetch() (fetch(data:) is blocked by CSP connect-src in production)
+        const commaIndex = capturedPhoto.indexOf(",");
+        if (commaIndex === -1) {
+          throw new Error("Invalid photo data URL");
+        }
 
-      // Create a file from the blob
-      const file = new File([blob], `clinical_photo_${Date.now()}.jpg`, {
-        type: "image/jpeg",
+        const header = capturedPhoto.slice(0, commaIndex);
+        const base64Data = capturedPhoto.slice(commaIndex + 1);
+
+        // Determine mime type from data URL or default to jpeg
+        const mimeMatch = header.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+        const extension = mimeType.split("/")[1] || "jpg";
+
+        // Base64 -> bytes -> Blob
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: mimeType });
+        
+        // Create a file from the blob
+        file = new File([blob], `clinical_photo_${Date.now()}.${extension}`, {
+          type: mimeType,
+        });
+      } else {
+        throw new Error("Invalid photo format");
+      }
+
+      console.log("Saving photo with data:", {
+        patientId: selectedPhotoPatient,
+        type: selectedPhotoType,
+        description: photoDescription.trim(),
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
       });
 
       // Upload using the existing mutation
@@ -1432,26 +1551,13 @@ export default function VoiceDocumentation() {
         photo: file,
         patientId: selectedPhotoPatient,
         type: selectedPhotoType,
-        description: photoDescription,
+        description: photoDescription.trim(),
       });
-
-      // Reset form and stop camera after successful save
-      setCapturedPhoto(null);
-      setSelectedPhotoPatient("");
-      setSelectedPhotoType("");
-      setPhotoDescription("");
-      stopCamera("error-cleanup");
-
-      // Switch to Clinical Photos tab to show the saved photo
-      setActiveTab("photos");
-
-      // Show success message
-      setSuccessMessage("Your clinical photo has been saved to the Clinical Photos tab.");
-      setShowSuccessModal(true);
     } catch (error) {
+      console.error("Error in savePhoto:", error);
       toast({
         title: "Failed to save photo",
-        description: "Please try again",
+        description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
     }
@@ -1790,24 +1896,17 @@ export default function VoiceDocumentation() {
                           </div>
                         ) : patients && patients.length > 0 ? (
                           (() => {
-                            // Deduplicate patients by unique name combination
-                            const uniquePatients = patients.filter(
-                              (patient: any, index: number, array: any[]) =>
-                                array.findIndex(
-                                  (p: any) =>
-                                    `${p.firstName} ${p.lastName}` ===
-                                    `${patient.firstName} ${patient.lastName}`,
-                                ) === index,
-                            );
-
-                            // Filter patients based on search term
-                            const filteredPatients = uniquePatients.filter(
+                            // Filter patients based on search term (name, email, or patientId)
+                            const filteredPatients = patients.filter(
                               (patient: any) => {
                                 const fullName =
                                   `${patient.firstName} ${patient.lastName}`.toLowerCase();
-                                return fullName.includes(
-                                  patientSearchTerm.toLowerCase(),
-                                );
+                                const email = (patient.email || "").toLowerCase();
+                                const patientId = (patient.patientId || "").toLowerCase();
+                                const searchTerm = patientSearchTerm.toLowerCase();
+                                return fullName.includes(searchTerm) ||
+                                  email.includes(searchTerm) ||
+                                  patientId.includes(searchTerm);
                               },
                             );
 
@@ -1822,12 +1921,27 @@ export default function VoiceDocumentation() {
                                       patient.id.toString(),
                                     );
                                     setPatientSearchTerm(
-                                      `${patient.firstName} ${patient.lastName}`,
+                                      patient.email
+                                        ? `${patient.firstName} ${patient.lastName} (${patient.email})`
+                                        : `${patient.firstName} ${patient.lastName}`,
                                     );
                                     setShowPatientDropdown(false);
+                                    // Validate description when patient is selected
+                                    if (!photoDescription || !photoDescription.trim()) {
+                                      toast({
+                                        title: "Description required",
+                                        description: "Please enter a description for the photo",
+                                        variant: "destructive",
+                                      });
+                                    }
                                   }}
                                 >
-                                  {patient.firstName} {patient.lastName}
+                                  <div className="flex flex-col">
+                                    <span>{patient.firstName} {patient.lastName}</span>
+                                    {patient.email && (
+                                      <span className="text-xs text-gray-500 dark:text-gray-400">{patient.email}</span>
+                                    )}
+                                  </div>
                                 </div>
                               ))
                             ) : (
@@ -1882,10 +1996,19 @@ export default function VoiceDocumentation() {
                               <div
                                 key={type.value}
                                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setSelectedPhotoType(type.value);
                                   setPhotoTypeSearchTerm(type.label);
                                   setShowPhotoTypeDropdown(false);
+                                  // Validate description when photo type is selected
+                                  if (!photoDescription || !photoDescription.trim()) {
+                                    toast({
+                                      title: "Description required",
+                                      description: "Please enter a description for the photo",
+                                      variant: "destructive",
+                                    });
+                                  }
                                 }}
                               >
                                 {type.label}
@@ -2029,9 +2152,11 @@ export default function VoiceDocumentation() {
                           className="flex-1"
                           onClick={savePhoto}
                           disabled={
+                            !capturedPhoto ||
                             !selectedPhotoPatient ||
                             !selectedPhotoType ||
-                            !photoDescription
+                            !photoDescription ||
+                            !photoDescription.trim()
                           }
                           data-testid="button-save-photo"
                         >

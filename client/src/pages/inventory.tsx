@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -33,6 +33,8 @@ import {
   Trash2,
   Loader2,
   Printer,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import {
   Card,
@@ -64,10 +66,21 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -79,9 +92,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
+import { useCurrency } from "@/hooks/use-currency";
 import { format } from "date-fns";
 import { Header } from "@/components/layout/header";
 import AddItemDialog from "@/components/inventory/add-item-dialog";
+import AddItemNameDialog from "@/components/inventory/add-item-name-dialog";
 import StockAdjustmentDialog from "@/components/inventory/stock-adjustment-dialog";
 import PurchaseOrderDialog from "../components/inventory/purchase-order-dialog";
 import GoodsReceiptDialog from "../components/inventory/goods-receipt-dialog";
@@ -105,6 +120,7 @@ interface InventoryItem {
   salePrice: string;
   mrp?: string;
   currentStock: number;
+  batchStock?: number; // Sum of all batch remainingQuantity values
   minimumStock: number;
   reorderPoint: number; // Reorder Level (To prevent stockouts)
   prescriptionRequired: boolean;
@@ -121,6 +137,7 @@ interface StockEntry {
   id: number;
   itemId: number; // Link to Item Master
   itemName: string;
+  itemSku?: string; // Item SKU
   batchNumber: string; // Batch Number (For traceability)
   quantityAvailable: number; // Current stock
   location: string; // Location/Department (Pharmacy/Ward)
@@ -128,6 +145,8 @@ interface StockEntry {
   manufactureDate?: string;
   supplierId?: number;
   supplierName?: string;
+  warehouseId?: number;
+  warehouseName?: string;
   purchasePrice: string;
   receivedDate: string;
   isExpired: boolean;
@@ -276,7 +295,18 @@ interface LowStockItem {
   categoryName?: string;
 }
 
+interface InventoryItemName {
+  id: number;
+  name: string;
+  description?: string;
+  brandName?: string;
+  manufacturer?: string;
+  unitOfMeasurement?: string;
+  isActive: boolean;
+}
+
 export default function Inventory() {
+  const { currencySymbol, currencyCode } = useCurrency();
   const { canCreate, canEdit, canDelete, getUserRole, isAdmin, isDoctor, isNurse } = useRolePermissions();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<
@@ -284,6 +314,11 @@ export default function Inventory() {
   >();
   const [showLowStock, setShowLowStock] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showExistingItemsDialog, setShowExistingItemsDialog] = useState(false);
+  const [itemToEdit, setItemToEdit] = useState<InventoryItem | null>(null);
+  const [itemNameToEdit, setItemNameToEdit] = useState<InventoryItemName | null>(null);
+  const [showAddItemNameDialog, setShowAddItemNameDialog] = useState(false);
   const [showStockDialog, setShowStockDialog] = useState(false);
   const [showPODialog, setShowPODialog] = useState(false);
   const [showReceiptDialog, setShowReceiptDialog] = useState(false);
@@ -306,6 +341,68 @@ export default function Inventory() {
   const [showDeleteGoodsReceiptModal, setShowDeleteGoodsReceiptModal] = useState(false);
   const [goodsReceiptToDelete, setGoodsReceiptToDelete] = useState<number | null>(null);
   const [showDeleteGoodsReceiptSuccess, setShowDeleteGoodsReceiptSuccess] = useState(false);
+  const [showAlertsSection, setShowAlertsSection] = useState(false);
+  
+  // Batch edit/delete/create state
+  const [showCreateBatchDialog, setShowCreateBatchDialog] = useState(false);
+  const [showEditBatchDialog, setShowEditBatchDialog] = useState(false);
+  const [showCreateWarehouseDialog, setShowCreateWarehouseDialog] = useState(false);
+  const [warehouseForm, setWarehouseForm] = useState({
+    warehouseName: "",
+    location: "",
+    status: "active" as "active" | "inactive",
+  });
+  const [showEditPOStatusDialog, setShowEditPOStatusDialog] = useState(false);
+  const [selectedPOForStatusEdit, setSelectedPOForStatusEdit] = useState<PurchaseOrder | null>(null);
+  const [poStatusForm, setPOStatusForm] = useState({ status: "pending" });
+  const [selectedBatch, setSelectedBatch] = useState<StockEntry | null>(null);
+  const [showDeleteBatchModal, setShowDeleteBatchModal] = useState(false);
+  const [batchToDelete, setBatchToDelete] = useState<StockEntry | null>(null);
+  const [createBatchForm, setCreateBatchForm] = useState({
+    itemId: "",
+    batchNumber: "",
+    quantity: "",
+    expiryDate: "",
+    manufactureDate: "",
+    purchasePrice: "",
+    receivedDate: new Date().toISOString().split('T')[0],
+    supplierId: "none",
+    purchaseOrderId: "none",
+    warehouseId: "",
+  });
+  const [createBatchErrors, setCreateBatchErrors] = useState<{
+    itemId?: string;
+    quantity?: string;
+    purchasePrice?: string;
+    receivedDate?: string;
+    warehouseId?: string;
+  }>({});
+  const [editBatchForm, setEditBatchForm] = useState({
+    batchNumber: "",
+    remainingQuantity: "",
+    expiryDate: "",
+    manufactureDate: "",
+    purchasePrice: "",
+    receivedDate: "",
+    supplierId: "",
+    warehouseId: "",
+  });
+
+  // Populate edit form when batch is selected
+  useEffect(() => {
+    if (selectedBatch) {
+      setEditBatchForm({
+        batchNumber: selectedBatch.batchNumber || "",
+        remainingQuantity: String(selectedBatch.quantityAvailable || 0),
+        expiryDate: selectedBatch.expiryDate ? new Date(selectedBatch.expiryDate).toISOString().split('T')[0] : "",
+        manufactureDate: selectedBatch.manufactureDate ? new Date(selectedBatch.manufactureDate).toISOString().split('T')[0] : "",
+        purchasePrice: selectedBatch.purchasePrice || "",
+        receivedDate: selectedBatch.receivedDate ? new Date(selectedBatch.receivedDate).toISOString().split('T')[0] : "",
+        supplierId: selectedBatch.supplierId ? String(selectedBatch.supplierId) : "none",
+        warehouseId: selectedBatch.warehouseId ? String(selectedBatch.warehouseId) : "none",
+      });
+    }
+  }, [selectedBatch]);
   
   // PDF Viewer state
   const [showPdfViewer, setShowPdfViewer] = useState(false);
@@ -330,6 +427,20 @@ export default function Inventory() {
     retry: 3,
   });
 
+  // Item Names Data (for Existing Items dialog)
+  const {
+    data: itemNames = [],
+    isLoading: itemNamesLoading,
+  } = useQuery<InventoryItemName[]>({
+    queryKey: ["/api/inventory/item-names"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/inventory/item-names");
+      return response.json();
+    },
+    enabled: showExistingItemsDialog, // Only fetch when dialog is open
+    retry: 3,
+  });
+
   // 2. Stock/Inventory Data
   const { data: stockEntries = [], isLoading: stockLoading } = useQuery<
     StockEntry[]
@@ -339,6 +450,53 @@ export default function Inventory() {
       const response = await apiRequest("GET", "/api/inventory/batches");
       return response.json();
     },
+    retry: 3,
+  });
+
+  // Generate unique batch number
+  const generateUniqueBatchNumber = useCallback(() => {
+    const existingBatchNumbers = new Set(stockEntries.map((entry: StockEntry) => entry.batchNumber));
+    let batchNumber = `BATCH-${Date.now()}`;
+    let counter = 1;
+    
+    // Ensure uniqueness by adding a counter if needed
+    while (existingBatchNumbers.has(batchNumber)) {
+      batchNumber = `BATCH-${Date.now()}-${counter}`;
+      counter++;
+    }
+    
+    return batchNumber;
+  }, [stockEntries]);
+
+  // Auto-generate batch number when create dialog opens
+  useEffect(() => {
+    if (showCreateBatchDialog) {
+      const uniqueBatchNumber = generateUniqueBatchNumber();
+      setCreateBatchForm(prev => ({
+        ...prev,
+        batchNumber: uniqueBatchNumber,
+      }));
+    }
+  }, [showCreateBatchDialog, generateUniqueBatchNumber]);
+
+  // Suppliers Data (for batch edit)
+  const { data: suppliers = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/suppliers"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/inventory/suppliers");
+      return response.json();
+    },
+    enabled: showEditBatchDialog, // Only fetch when edit dialog is open
+  });
+
+  // Stock Movements History Data
+  const { data: stockMovements = [], isLoading: movementsLoading } = useQuery<any[]>({
+    queryKey: ["/api/inventory/reports/stock-movements"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/inventory/reports/stock-movements?limit=200");
+      return response.json();
+    },
+    enabled: activeTab === "history", // Only fetch when History tab is active
     retry: 3,
   });
 
@@ -354,6 +512,17 @@ export default function Inventory() {
       );
       return response.json();
     },
+    retry: 3,
+  });
+
+  // Warehouses Data
+  const { data: warehouses = [], isLoading: warehousesLoading } = useQuery<any[]>({
+    queryKey: ["/api/inventory/warehouses"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/inventory/warehouses");
+      return response.json();
+    },
+    enabled: activeTab === "stock-inventory" || showCreateBatchDialog || showEditBatchDialog,
     retry: 3,
   });
 
@@ -654,6 +823,160 @@ export default function Inventory() {
     },
   });
 
+  // Create warehouse mutation
+  const createWarehouseMutation = useMutation({
+    mutationFn: async (warehouseData: { warehouseName: string; location?: string; status: string }) => {
+      const response = await apiRequest("POST", "/api/inventory/warehouses", warehouseData);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "Failed to create warehouse" }));
+        throw new Error(errorData.error || errorData.message || "Failed to create warehouse");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/batches"] });
+      setShowCreateWarehouseDialog(false);
+      setWarehouseForm({ warehouseName: "", location: "", status: "active" });
+      toast({
+        title: "Success",
+        description: "Warehouse created successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create warehouse",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Create batch mutation
+  const createBatchMutation = useMutation({
+    mutationFn: async (batchData: any) => {
+      console.log("[createBatchMutation] Sending batch data:", batchData);
+      const response = await apiRequest(
+        "POST",
+        "/api/inventory/batches",
+        batchData
+      );
+      console.log("[createBatchMutation] Response status:", response.status, response.statusText);
+      console.log("[createBatchMutation] Response ok:", response.ok);
+      
+      if (!response.ok) {
+        // Try to get error message from response
+        let errorMessage = "Failed to create batch";
+        try {
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } else {
+            // If it's HTML, it's likely a 404 or server error page
+            const text = await response.text();
+            console.error("[createBatchMutation] Non-JSON error response:", text.substring(0, 200));
+            if (response.status === 404) {
+              errorMessage = "Endpoint not found. Please check if the server route is registered.";
+            } else {
+              errorMessage = `Server error (${response.status}): ${response.statusText}`;
+            }
+          }
+        } catch (parseError) {
+          console.error("[createBatchMutation] Error parsing error response:", parseError);
+          errorMessage = `Server error (${response.status}): ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const result = await response.json();
+      console.log("[createBatchMutation] Batch created successfully:", result);
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/batches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      toast({
+        title: "Success",
+        description: "Batch created successfully",
+      });
+      setShowCreateBatchDialog(false);
+      setCreateBatchForm({
+        itemId: "",
+        batchNumber: "",
+        quantity: "",
+        expiryDate: "",
+        manufactureDate: "",
+        purchasePrice: "",
+        receivedDate: new Date().toISOString().split('T')[0],
+        supplierId: "none",
+      });
+    },
+    onError: (error: any) => {
+      console.error("Error creating batch:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create batch",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update batch mutation
+  const updateBatchMutation = useMutation({
+    mutationFn: async ({ batchId, updates }: { batchId: number; updates: any }) => {
+      const response = await apiRequest(
+        "PATCH",
+        `/api/inventory/batches/${batchId}`,
+        updates
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/batches"] });
+      toast({
+        title: "Success",
+        description: "Batch updated successfully",
+      });
+      setShowEditBatchDialog(false);
+      setSelectedBatch(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update batch",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Delete batch mutation
+  const deleteBatchMutation = useMutation({
+    mutationFn: async (batchId: number) => {
+      const response = await apiRequest(
+        "DELETE",
+        `/api/inventory/batches/${batchId}`
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/batches"] });
+      toast({
+        title: "Success",
+        description: "Batch deleted successfully",
+      });
+      setShowDeleteBatchModal(false);
+      setBatchToDelete(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete batch",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Delete item function with confirmation modal
   const deleteItem = (item: InventoryItem) => {
     console.log("Delete item clicked for:", item.name, "ID:", item.id);
@@ -735,10 +1058,10 @@ export default function Inventory() {
       `Status,${reportData.item.isActive}`,
       "",
       "PRICING INFORMATION",
-      `Purchase Price (£),${reportData.pricing.purchasePrice}`,
-      `Sale Price (£),${reportData.pricing.salePrice}`,
-      `MRP (£),${reportData.pricing.mrp}`,
-      `Total Stock Value (£),${reportData.pricing.stockValue}`,
+      `Purchase Price (${currencyCode || "GBP"}),${reportData.pricing.purchasePrice}`,
+      `Sale Price (${currencyCode || "GBP"}),${reportData.pricing.salePrice}`,
+      `MRP (${currencyCode || "GBP"}),${reportData.pricing.mrp}`,
+      `Total Stock Value (${currencyCode || "GBP"}),${reportData.pricing.stockValue}`,
       "",
       "INVENTORY MANAGEMENT",
       `Current Stock,${reportData.inventory.currentStock}`,
@@ -859,6 +1182,38 @@ export default function Inventory() {
     });
   };
 
+  // Update purchase order status mutation
+  const updatePOStatusMutation = useMutation({
+    mutationFn: async ({ purchaseOrderId, status }: { purchaseOrderId: number; status: string }) => {
+      const response = await apiRequest(
+        "PATCH",
+        `/api/inventory/purchase-orders/${purchaseOrderId}`,
+        { status }
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "Failed to update purchase order status" }));
+        throw new Error(errorData.error || errorData.message || "Failed to update purchase order status");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/purchase-orders"] });
+      setShowEditPOStatusDialog(false);
+      setSelectedPOForStatusEdit(null);
+      toast({
+        title: "Success",
+        description: "Purchase order status updated successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update purchase order status",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Delete purchase order mutation
   const deletePurchaseOrderMutation = useMutation({
     mutationFn: async (purchaseOrderId: number) => {
@@ -884,20 +1239,29 @@ export default function Inventory() {
   });
 
   const getStatusBadge = (status: string) => {
-    const variants: Record<
-      string,
-      "default" | "secondary" | "destructive" | "outline"
-    > = {
-      pending: "outline",
-      sent: "secondary",
-      received: "default",
-      cancelled: "destructive",
-      ordered: "secondary",
-      delivered: "default",
+    const statusConfig: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; className?: string }> = {
+      pending: { variant: "outline", className: "bg-gray-50 text-gray-700 border-gray-200" },
+      sent: { variant: "secondary", className: "bg-blue-100 text-blue-700 border-blue-200" },
+      received: { variant: "default", className: "bg-blue-500 text-white border-blue-600" },
+      completed: { variant: "default", className: "bg-blue-500 text-white border-blue-600" },
+      cancelled: { variant: "destructive", className: "bg-red-100 text-red-700 border-red-200" },
+      ordered: { variant: "secondary", className: "bg-blue-100 text-blue-700 border-blue-200" },
+      delivered: { variant: "default", className: "bg-blue-500 text-white border-blue-600" },
+      active: { variant: "default", className: "bg-blue-500 text-white border-blue-600" },
+      inactive: { variant: "outline", className: "bg-gray-50 text-gray-700 border-gray-200" },
+      "low_stock": { variant: "destructive", className: "bg-orange-100 text-orange-700 border-orange-200" },
+      "in_stock": { variant: "default", className: "bg-blue-500 text-white border-blue-600" },
+      "out_of_stock": { variant: "destructive", className: "bg-red-100 text-red-700 border-red-200" },
     };
+    
+    const config = statusConfig[status.toLowerCase()] || { variant: "outline" as const, className: "bg-gray-50 text-gray-700 border-gray-200" };
+    
     return (
-      <Badge variant={variants[status] || "outline"}>
-        {status.toUpperCase()}
+      <Badge 
+        variant={config.variant} 
+        className={`${config.className || ""} font-medium px-2.5 py-0.5 rounded-full border`}
+      >
+        {status.replace("_", " ").split(" ").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")}
       </Badge>
     );
   };
@@ -918,8 +1282,95 @@ export default function Inventory() {
     );
   };
 
+  // Helper function to format date (display time as stored, without timezone conversion)
+  const formatUTC = (dateInput: string | Date, formatStr: string) => {
+    if (!dateInput) return "";
+    
+    try {
+      // Convert to string if it's a Date object
+      let dateString: string;
+      if (dateInput instanceof Date) {
+        // If it's already a Date object, convert to ISO string
+        dateString = dateInput.toISOString();
+      } else {
+        dateString = String(dateInput).trim();
+      }
+      
+      if (!dateString) return "";
+      
+      // Check if the date string has explicit timezone info
+      const hasTimezone = dateString.includes('Z') || dateString.match(/[+-]\d{2}:?\d{2}$/);
+      
+      let date: Date;
+      
+      if (hasTimezone) {
+        // Has timezone info (e.g., "2026-03-14T10:41:34Z") - parse as UTC
+        date = new Date(dateString);
+      } else {
+        // No timezone info - treat as UTC
+        // PostgreSQL returns timestamps without timezone, which should be treated as UTC
+        // Normalize the string format: convert space to 'T' and add 'Z'
+        let utcString = dateString;
+        
+        // Handle different formats:
+        // "2026-03-14 10:41:34" -> "2026-03-14T10:41:34Z"
+        // "2026-03-14 10:41:34.123" -> "2026-03-14T10:41:34.123Z"
+        // "2026-03-14T10:41:34" -> "2026-03-14T10:41:34Z"
+        if (utcString.includes(' ')) {
+          // Replace first space with 'T', keep the rest (including milliseconds if present)
+          utcString = utcString.replace(' ', 'T');
+        }
+        
+        // Add 'Z' if not already present and no timezone offset
+        if (!utcString.endsWith('Z') && !utcString.match(/[+-]\d{2}:?\d{2}$/)) {
+          utcString = utcString + 'Z';
+        }
+        
+        date = new Date(utcString);
+      }
+      
+      // Validate date
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid date input:', dateInput);
+        return "";
+      }
+      
+      // Always use UTC components since we've normalized to UTC
+      const year = date.getUTCFullYear();
+      const month = date.getUTCMonth();
+      const day = date.getUTCDate();
+      const hours = date.getUTCHours();
+      const minutes = date.getUTCMinutes();
+      const seconds = date.getUTCSeconds();
+      
+      // Format manually
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const monthName = monthNames[month];
+      const dayStr = day.toString().padStart(2, "0");
+      const hoursStr = hours.toString().padStart(2, "0");
+      const minutesStr = minutes.toString().padStart(2, "0");
+      const secondsStr = seconds.toString().padStart(2, "0");
+      
+      // Handle different format strings
+      if (formatStr === "MMM dd, yyyy") {
+        return `${monthName} ${dayStr}, ${year}`;
+      } else if (formatStr === "HH:mm:ss") {
+        return `${hoursStr}:${minutesStr}:${secondsStr}`;
+      } else if (formatStr === "MMM dd, HH:mm") {
+        return `${monthName} ${dayStr}, ${hoursStr}:${minutesStr}`;
+      }
+      
+      // Fallback to date-fns format
+      return format(date, formatStr);
+    } catch (error) {
+      console.warn('Error formatting date:', dateInput, error);
+      return "";
+    }
+  };
+
   // Filter items based on search and filters
   const filteredItems = items.filter((item) => {
+    // Show all items including those with 0 stock
     // Search filter
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
@@ -961,6 +1412,12 @@ export default function Inventory() {
     }
 
     return true;
+  })
+  .sort((a, b) => {
+    // Sort by createdAt descending (newest first)
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return dateB - dateA; // Descending order
   });
 
   // Filter stock entries
@@ -982,11 +1439,26 @@ export default function Inventory() {
       <Header title="Comprehensive Inventory Management" subtitle="Complete healthcare inventory system with Item Master, Stock Tracking, Purchase Orders, Goods Receipt & Alerts" />
       
       <div className="w-full px-3 sm:px-4 lg:px-5 py-4">
-        <div className="flex flex-wrap justify-end gap-2 sm:gap-3 mb-4">
+        <div className="flex flex-wrap justify-between items-center gap-2 sm:gap-3 mb-4">
+          {/* Alert Icon with Badge */}
+          {alerts.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => setShowAlertsSection(!showAlertsSection)}
+              className="relative"
+            >
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              Alerts
+              <span className="ml-2 bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5">
+                {alerts.length}
+              </span>
+            </Button>
+          )}
+          <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
               {canCreate('inventory') && (
                 <Button onClick={() => setShowAddDialog(true)}>
                   <Plus className="h-4 w-4 mr-2" />
-                  Add Item
+                  Add Item Price
                 </Button>
               )}
               {canCreate('inventory') && (
@@ -1004,10 +1476,11 @@ export default function Inventory() {
                   Goods Receipt
                 </Button>
               )}
+          </div>
         </div>
 
         {/* Critical Alerts Banner */}
-        {alerts.length > 0 && (
+        {alerts.length > 0 && showAlertsSection && (
           <div className="mb-6">
             <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950 dark:border-orange-800">
               <CardHeader>
@@ -1031,7 +1504,7 @@ export default function Inventory() {
                         </span>
                       </div>
                       <span className="text-xs text-gray-500">
-                        {format(new Date(alert.createdAt), "MMM dd, HH:mm")}
+                        {formatUTC(alert.createdAt, "MMM dd, HH:mm")}
                       </span>
                     </div>
                   ))}
@@ -1055,7 +1528,7 @@ export default function Inventory() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                £
+                {currencySymbol}
                 {inventoryValue?.totalValue
                   ? parseFloat(inventoryValue.totalValue).toFixed(2)
                   : "0.00"}
@@ -1131,7 +1604,7 @@ export default function Inventory() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger
               value="item-master"
               className="flex items-center space-x-2"
@@ -1178,22 +1651,41 @@ export default function Inventory() {
               <AlertTriangle className="h-4 w-4" />
               <span>Alerts</span>
             </TabsTrigger>
+            <TabsTrigger value="history" className="flex items-center space-x-2">
+              <Clock className="h-4 w-4" />
+              <span>History</span>
+            </TabsTrigger>
           </TabsList>
 
           {/* 1. Item Master Tab */}
           <TabsContent value="item-master" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Package className="h-5 w-5 mr-2" />
-                  Item Master - Complete Item Database
-                </CardTitle>
-                <CardDescription>
-                  Manage item details including ID, Name & Category, Unit of
-                  Measurement, Expiry Date, and Reorder Level
-                </CardDescription>
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="border-b border-gray-200 bg-gray-50/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg font-semibold flex items-center">
+                      <Package className="h-5 w-5 mr-2" />
+                      Item Master
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      Complete item database management
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => {
+                        setShowExistingItemsDialog(true);
+                      }}
+                      variant="outline"
+                      className="h-9"
+                    >
+                      <Package className="h-4 w-4 mr-2" />
+                      Create New Items
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-6">
                 {/* Search and Filters */}
                 <div className="flex flex-col sm:flex-row gap-4 mb-6">
                   <div className="relative flex-1">
@@ -1246,104 +1738,130 @@ export default function Inventory() {
                 </div>
 
                 {/* Items Table */}
-                <div className="rounded-md border">
+                <div className="rounded-md border border-gray-200 bg-white overflow-hidden">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Item ID</TableHead>
-                        <TableHead>Item Name & Category</TableHead>
-                        <TableHead>Unit of Measurement</TableHead>
-                        <TableHead>Current Stock</TableHead>
-                        <TableHead>Reorder Level</TableHead>
-                        <TableHead>Expiry Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
+                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-200">
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Item ID</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Item Datetime</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">SKU/barcode</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Item Name & Category</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Unit of Measurement</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Current Stock</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Reorder Level</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-base">Status</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-right text-base">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {itemsLoading ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center py-8">
+                          <TableCell colSpan={9} className="text-center py-12">
                             <div className="flex items-center justify-center">
-                              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                              Loading items...
+                              <RefreshCw className="h-4 w-4 animate-spin mr-2 text-gray-400" />
+                              <span className="text-gray-500">Loading items...</span>
                             </div>
                           </TableCell>
                         </TableRow>
                       ) : filteredItems.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={8}
-                            className="text-center py-8 text-gray-500"
+                            colSpan={9}
+                            className="text-center py-12 text-gray-500"
                           >
                             No items found matching your criteria
                           </TableCell>
                         </TableRow>
                       ) : (
                         filteredItems.map((item, index) => (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">
+                          <TableRow key={item.id} className="hover:bg-gray-50/30 border-b border-gray-100 transition-colors">
+                            <TableCell className="font-medium text-gray-900 py-3 px-4 text-base">
                               #{index + 1}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="font-mono text-sm text-gray-700 py-3 px-4 text-base">
+                              {item.createdAt ? (
+                                <>
+                                  {formatUTC(item.createdAt, "MMM dd, yyyy")}
+                                  <br />
+                                  <span className="text-gray-500 text-xs">
+                                    {formatUTC(item.createdAt, "HH:mm:ss")}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-gray-700 py-3 px-4 text-base">
+                              <div className="font-medium">{item.sku}</div>
+                              {item.barcode && (
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  {item.barcode}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-3 px-4 text-base">
                               <div>
-                                <div className="font-medium">{item.name}</div>
-                                <div className="text-sm text-gray-500">
+                                <div className="font-medium text-gray-900">{item.name}</div>
+                                <div className="text-sm text-gray-600 mt-0.5">
                                   {item.categoryName || "Uncategorized"}
                                 </div>
-                                <div className="text-xs text-gray-400">
-                                  SKU: {item.sku}
-                                </div>
                               </div>
                             </TableCell>
-                            <TableCell>{item.unitOfMeasurement}</TableCell>
-                            <TableCell>
-                              <div
-                                className={`font-medium ${item.isLowStock ? "text-orange-600" : ""}`}
-                              >
-                                {item.currentStock}
-                                {item.isLowStock && (
-                                  <AlertTriangle className="h-3 w-3 inline ml-1 text-orange-500" />
-                                )}
-                              </div>
+                            <TableCell className="text-gray-700 py-3 px-4 text-base">{item.unitOfMeasurement}</TableCell>
+                            <TableCell className="py-3 px-4 text-base">
+                              {/* Display currentStock from inventory_items table */}
+                              {(() => {
+                                const stockValue = item.currentStock || 0;
+                                
+                                if (stockValue === 0) {
+                                  return (
+                                    <Badge 
+                                      variant="destructive" 
+                                      className="bg-red-100 text-red-700 border-red-200 font-medium px-2.5 py-0.5 rounded-full border"
+                                    >
+                                      Out of Stock (0)
+                                    </Badge>
+                                  );
+                                }
+                                
+                                return (
+                                  <div
+                                    className={`font-semibold ${item.isLowStock ? "text-orange-600" : "text-gray-900"}`}
+                                  >
+                                    {stockValue}
+                                    {item.isLowStock && (
+                                      <AlertTriangle className="h-3 w-3 inline ml-1 text-orange-500" />
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </TableCell>
-                            <TableCell>{item.reorderPoint}</TableCell>
-                            <TableCell>
-                              {item.expiryDate ? (
-                                <span
-                                  className={
-                                    new Date(item.expiryDate) < new Date()
-                                      ? "text-red-600"
-                                      : ""
-                                  }
-                                >
-                                  {format(
-                                    new Date(item.expiryDate),
-                                    "MMM dd, yyyy",
-                                  )}
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">No expiry</span>
-                              )}
+                            <TableCell className="text-gray-700 py-3 px-4 text-base">{item.reorderPoint}</TableCell>
+                            <TableCell className="py-3 px-4 text-base">
+                              {getStatusBadge(item.isLowStock ? "low_stock" : "in_stock")}
                             </TableCell>
-                            <TableCell>
-                              {item.isLowStock ? (
-                                <Badge variant="destructive">Low Stock</Badge>
-                              ) : (
-                                <Badge variant="default">In Stock</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
+                            <TableCell className="py-3 px-4 text-right text-base">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button
                                     variant="ghost"
-                                    className="h-8 w-8 p-0"
+                                    className="h-8 w-8 p-0 hover:bg-gray-100"
                                   >
-                                    <MoreVertical className="h-4 w-4" />
+                                    <MoreVertical className="h-4 w-4 text-gray-600" />
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
+                                  {(canEdit('inventory') || isAdmin() || isDoctor() || isNurse()) && (
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setItemToEdit(item);
+                                        setShowEditDialog(true);
+                                      }}
+                                    >
+                                      <Edit className="mr-2 h-4 w-4" />
+                                      Edit Item
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem
                                     onClick={() => {
                                       setSelectedItem(item);
@@ -1353,6 +1871,17 @@ export default function Inventory() {
                                     <Eye className="mr-2 h-4 w-4" />
                                     View Details
                                   </DropdownMenuItem>
+                                  {canEdit('inventory') && (
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setSelectedItem(item);
+                                        setShowStockDialog(true);
+                                      }}
+                                    >
+                                      <Edit className="mr-2 h-4 w-4" />
+                                      Adjust Stock
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem
                                     onClick={() => generateItemReport(item)}
                                   >
@@ -1397,16 +1926,62 @@ export default function Inventory() {
 
           {/* 2. Stock/Inventory Tab */}
           <TabsContent value="stock-inventory" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Archive className="h-5 w-5 mr-2" />
-                  Stock/Inventory Table - Batch & Location Tracking
-                </CardTitle>
-                <CardDescription>
-                  Track stock by batch number, location/department, expiry dates
-                  for complete traceability
-                </CardDescription>
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="border-b border-gray-200 bg-gray-50/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center">
+                      <Archive className="h-5 w-5 mr-2" />
+                      Stock/Inventory Table - Batch & Location Tracking
+                    </CardTitle>
+                    <CardDescription>
+                      Track stock by batch number, location/department, expiry dates
+                      for complete traceability
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    {canCreate('inventory') && (
+                      <Button
+                        onClick={() => {
+                          setCreateBatchForm({
+                            itemId: "",
+                            batchNumber: "",
+                            quantity: "",
+                            expiryDate: "",
+                            manufactureDate: "",
+                            purchasePrice: "",
+                            receivedDate: new Date().toISOString().split('T')[0],
+                            supplierId: "none",
+                            purchaseOrderId: "none",
+                            warehouseId: "",
+                          });
+                          setShowCreateBatchDialog(true);
+                        }}
+                        className="ml-4"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create Batch
+                      </Button>
+                    )}
+                    {isAdmin() && (
+                      <Button
+                        onClick={() => {
+                          setWarehouseForm({
+                            warehouseName: "",
+                            location: "",
+                            status: "active",
+                          });
+                          setShowCreateWarehouseDialog(true);
+                        }}
+                        variant="outline"
+                        className="ml-2"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create Warehouses
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {/* Stock Search */}
@@ -1423,61 +1998,69 @@ export default function Inventory() {
                 </div>
 
                 {/* Stock Table */}
-                <div className="rounded-md border">
+                <div className="rounded-md border border-gray-200 bg-white overflow-hidden">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Item ID & Name</TableHead>
-                        <TableHead>Batch Number</TableHead>
-                        <TableHead>Quantity Available</TableHead>
-                        <TableHead>Location/Department</TableHead>
-                        <TableHead>Expiry Date</TableHead>
-                        <TableHead>Supplier</TableHead>
-                        <TableHead>Status</TableHead>
+                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-200">
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Item ID & Name</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Batch Number</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Quantity Available</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Location/Department</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Expiry Date</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Supplier</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Status</TableHead>
+                        {(canEdit('inventory') || canDelete('inventory')) && (
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4 text-right">Actions</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {stockLoading ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-8">
+                          <TableCell colSpan={(canEdit('inventory') || canDelete('inventory')) ? 8 : 7} className="text-center py-12">
                             <div className="flex items-center justify-center">
-                              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                              Loading stock entries...
+                              <RefreshCw className="h-4 w-4 animate-spin mr-2 text-gray-400" />
+                              <span className="text-gray-500">Loading stock entries...</span>
                             </div>
                           </TableCell>
                         </TableRow>
                       ) : filteredStockEntries.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={7}
-                            className="text-center py-8 text-gray-500"
+                            colSpan={canEdit('inventory') || canDelete('inventory') ? 8 : 7}
+                            className="text-center py-12 text-gray-500"
                           >
                             No stock entries found
                           </TableCell>
                         </TableRow>
                       ) : (
                         filteredStockEntries.map((entry, index) => (
-                          <TableRow key={entry.id}>
-                            <TableCell>
+                          <TableRow key={entry.id} className="hover:bg-gray-50/30 border-b border-gray-100 transition-colors">
+                            <TableCell className="py-3 px-4">
                               <div>
-                                <div className="font-medium">
+                                <div className="font-semibold text-gray-900">
                                   #{index + 1} - {entry.itemName}
                                 </div>
+                                {entry.itemSku && (
+                                  <div className="text-xs text-gray-500 mt-0.5 font-mono">
+                                    SKU: {entry.itemSku}
+                                  </div>
+                                )}
                               </div>
                             </TableCell>
-                            <TableCell className="font-mono text-sm">
+                            <TableCell className="font-mono text-sm text-gray-700 py-3 px-4">
                               {entry.batchNumber}
                             </TableCell>
-                            <TableCell className="font-medium">
+                            <TableCell className="font-semibold text-gray-900 py-3 px-4">
                               {entry.quantityAvailable}
                             </TableCell>
-                            <TableCell>
-                              <div className="flex items-center">
+                            <TableCell className="py-3 px-4">
+                              <div className="flex items-center text-gray-700">
                                 <MapPin className="h-3 w-3 mr-1 text-gray-400" />
                                 {entry.location}
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="py-3 px-4">
                               <span
                                 className={
                                   entry.isExpired
@@ -1487,7 +2070,7 @@ export default function Inventory() {
                                           Date.now() + 30 * 24 * 60 * 60 * 1000,
                                         )
                                       ? "text-yellow-600"
-                                      : ""
+                                      : "text-gray-700"
                                 }
                               >
                                 {format(
@@ -1496,26 +2079,55 @@ export default function Inventory() {
                                 )}
                               </span>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="text-gray-700 py-3 px-4">
                               {entry.supplierName || "Unknown"}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="py-3 px-4">
                               {entry.isExpired ? (
-                                <Badge variant="destructive">Expired</Badge>
+                                <Badge className="bg-red-50 text-red-700 border-red-200">Expired</Badge>
                               ) : new Date(entry.expiryDate) <=
                                 new Date(
                                   Date.now() + 30 * 24 * 60 * 60 * 1000,
                                 ) ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-yellow-600 border-yellow-600"
-                                >
+                                <Badge className="bg-yellow-50 text-yellow-700 border-yellow-200">
                                   Expiring Soon
                                 </Badge>
                               ) : (
-                                <Badge variant="default">Valid</Badge>
+                                <Badge className="bg-blue-500 text-white border-0">Valid</Badge>
                               )}
                             </TableCell>
+                            {(canEdit('inventory') || canDelete('inventory')) && (
+                              <TableCell className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  {canEdit('inventory') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedBatch(entry);
+                                        setShowEditBatchDialog(true);
+                                      }}
+                                      className="h-8 w-8 p-0 hover:bg-gray-100"
+                                    >
+                                      <Edit className="h-4 w-4 text-gray-600" />
+                                    </Button>
+                                  )}
+                                  {canDelete('inventory') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setBatchToDelete(entry);
+                                        setShowDeleteBatchModal(true);
+                                      }}
+                                      className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))
                       )}
@@ -1528,39 +2140,38 @@ export default function Inventory() {
 
           {/* 3. Purchase Orders Tab */}
           <TabsContent value="purchase-orders" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="border-b border-gray-200 bg-gray-50/50">
+                <CardTitle className="text-lg font-semibold flex items-center">
                   <ShoppingCart className="h-5 w-5 mr-2" />
-                  Purchase Orders (POs) - Supplier & Order Management
+                  Purchase Orders
                 </CardTitle>
-                <CardDescription>
-                  Manage PO Numbers, Supplier IDs, Order Status, and Items
-                  Ordered with quantities
+                <CardDescription className="mt-1">
+                  Supplier & order management
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="rounded-md border">
+              <CardContent className="p-6">
+                <div className="rounded-md border border-gray-200 bg-white overflow-hidden">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>PO Number</TableHead>
-                        <TableHead>Supplier ID & Name</TableHead>
-                        <TableHead>Order Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Total Amount</TableHead>
-                        <TableHead>Items Ordered</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Actions</TableHead>
+                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-200">
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">PO Number</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Supplier ID & Name</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Order Date</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Status</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Total Amount</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Items Ordered</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Quantity</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {poLoading ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center py-8">
+                          <TableCell colSpan={8} className="text-center py-12">
                             <div className="flex items-center justify-center">
-                              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                              Loading purchase orders...
+                              <RefreshCw className="h-4 w-4 animate-spin mr-2 text-gray-400" />
+                              <span className="text-gray-500">Loading purchase orders...</span>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1568,7 +2179,7 @@ export default function Inventory() {
                         <TableRow>
                           <TableCell
                             colSpan={8}
-                            className="text-center py-8 text-gray-500"
+                            className="text-center py-12 text-gray-500"
                           >
                             No purchase orders found
                           </TableCell>
@@ -1577,70 +2188,91 @@ export default function Inventory() {
                         purchaseOrders.map((po) => {
                           const totalQuantity = po.itemsOrdered?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
                           return (
-                          <TableRow key={po.id}>
-                            <TableCell className="font-mono font-medium">
+                          <TableRow key={po.id} className="hover:bg-gray-50/30 border-b border-gray-100 transition-colors">
+                            <TableCell className="font-mono font-semibold text-gray-900 py-3 px-4">
                               {po.poNumber}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="py-3 px-4">
                               <div>
-                                <div className="font-medium">
+                                <div className="font-semibold text-gray-900">
                                   #{po.supplierId} - {po.supplierName}
                                 </div>
                                 {po.supplierEmail && (
-                                  <div className="text-sm text-gray-500">
+                                  <div className="text-sm text-gray-500 mt-0.5">
                                     {po.supplierEmail}
                                   </div>
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="text-gray-700 py-3 px-4">
                               {format(new Date(po.orderDate), "MMM dd, yyyy")}
                             </TableCell>
-                            <TableCell>{getStatusBadge(po.status)}</TableCell>
-                            <TableCell className="font-medium">
-                              £{parseFloat(po.totalAmount).toFixed(2)}
+                            <TableCell className="py-3 px-4">
+                              <div className="flex items-center gap-2">
+                                {getStatusBadge(po.status)}
+                                {(canEdit('inventory') || isAdmin() || isDoctor() || isNurse()) && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0 hover:bg-gray-100"
+                                    onClick={() => {
+                                      setSelectedPOForStatusEdit(po);
+                                      setPOStatusForm({ status: po.status });
+                                      setShowEditPOStatusDialog(true);
+                                    }}
+                                    title="Edit Status"
+                                  >
+                                    <Edit className="h-3 w-3 text-gray-600" />
+                                  </Button>
+                                )}
+                              </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="font-semibold text-gray-900 py-3 px-4">
+                              {currencySymbol}{parseFloat(po.totalAmount).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-gray-700 py-3 px-4">
                               <div className="text-sm">
                                 {po.itemsOrdered?.length || 0} items
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="text-gray-700 py-3 px-4">
                               <div className="text-sm font-medium">
                                 {totalQuantity}
                               </div>
                             </TableCell>
-                            <TableCell>
-                              <div className="flex items-center space-x-2">
+                            <TableCell className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1">
                                 <Button
                                   size="sm"
-                                  variant="outline"
+                                  variant="ghost"
                                   onClick={() => viewPurchaseOrder(po)}
+                                  className="h-8 px-2 hover:bg-gray-100"
                                 >
                                   <Eye className="h-3 w-3 mr-1" />
                                   View
                                 </Button>
                                 <Button
                                   size="sm"
+                                  variant="ghost"
                                   onClick={() => handleSendEmail(po)}
                                   disabled={sendEmailMutation.isPending}
-                                  variant={po.emailSent ? "outline" : "default"}
+                                  className="h-8 px-2 hover:bg-gray-100"
                                 >
                                   {po.emailSent ? "Resend" : "Send"}
                                 </Button>
                                 {canDelete('inventory') && (
                                   <Button
                                     size="sm"
-                                    variant="destructive"
+                                    variant="ghost"
                                     onClick={() =>
                                       deletePurchaseOrderMutation.mutate(po.id)
                                     }
                                     disabled={
                                       deletePurchaseOrderMutation.isPending
                                     }
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                                   >
-                                    <Trash2 className="h-3 w-3 mr-1" />
-                                    Delete
+                                    <Trash2 className="h-3 w-3" />
                                   </Button>
                                 )}
                               </div>
@@ -1658,38 +2290,37 @@ export default function Inventory() {
 
           {/* 4. Goods Receipt Tab */}
           <TabsContent value="goods-receipt" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="border-b border-gray-200 bg-gray-50/50">
+                <CardTitle className="text-lg font-semibold flex items-center">
                   <Truck className="h-5 w-5 mr-2" />
-                  Goods Receipt - Delivery & Batch Recording
+                  Goods Receipt
                 </CardTitle>
-                <CardDescription>
-                  Record Receipt Numbers, Items Received with batch/expiry
-                  information, and Supplier Names
+                <CardDescription className="mt-1">
+                  Delivery & batch recording
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="rounded-md border">
+              <CardContent className="p-6">
+                <div className="rounded-md border border-gray-200 bg-white overflow-hidden">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">Receipt Number</TableHead>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">PO Number</TableHead>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">Supplier Name</TableHead>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">Received Date</TableHead>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">Items Received</TableHead>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">Total Amount</TableHead>
-                        <TableHead className="py-2 px-3 text-xs font-semibold">Actions</TableHead>
+                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-200">
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Receipt Number</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">PO Number</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Supplier Name</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Received Date</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Items Received</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4">Total Amount</TableHead>
+                        <TableHead className="font-semibold text-gray-700 py-3 px-4 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {receiptLoading ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-8">
+                          <TableCell colSpan={7} className="text-center py-12">
                             <div className="flex items-center justify-center">
-                              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                              Loading goods receipts...
+                              <RefreshCw className="h-4 w-4 animate-spin mr-2 text-gray-400" />
+                              <span className="text-gray-500">Loading goods receipts...</span>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1697,56 +2328,57 @@ export default function Inventory() {
                         <TableRow>
                           <TableCell
                             colSpan={7}
-                            className="text-center py-8 text-gray-500"
+                            className="text-center py-12 text-gray-500"
                           >
                             No goods receipts found
                           </TableCell>
                         </TableRow>
                       ) : (
                         goodsReceipts.map((receipt) => (
-                          <TableRow key={receipt.id}>
-                            <TableCell className="font-mono font-medium">
+                          <TableRow key={receipt.id} className="hover:bg-gray-50/30 border-b border-gray-100 transition-colors">
+                            <TableCell className="font-mono font-medium text-gray-900 py-3 px-4">
                               {receipt.receiptNumber}
                             </TableCell>
-                            <TableCell className="font-mono">
+                            <TableCell className="font-mono text-gray-700 py-3 px-4">
                               {receipt.poNumber ||
                                 (receipt.purchaseOrderId
                                   ? `PO-${receipt.purchaseOrderId}`
                                   : "N/A")}
                             </TableCell>
-                            <TableCell className="font-medium">
+                            <TableCell className="font-medium text-gray-900 py-3 px-4">
                               {receipt.supplierName}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="text-gray-700 py-3 px-4">
                               {format(
                                 new Date(receipt.receivedDate),
                                 "MMM dd, yyyy",
                               )}
                             </TableCell>
-                            <TableCell>
-                              <div className="text-sm">
+                            <TableCell className="py-3 px-4">
+                              <div className="text-sm text-gray-700">
                                 {receipt.itemsReceived?.length || 0} items
                               </div>
                             </TableCell>
-                            <TableCell className="font-medium">
-                              £{parseFloat(receipt.totalAmount).toFixed(2)}
+                            <TableCell className="font-medium text-gray-900 py-3 px-4">
+                              {currencySymbol}{parseFloat(receipt.totalAmount).toFixed(2)}
                             </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
+                            <TableCell className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1">
                                 <Button
                                   size="sm"
-                                  variant="outline"
+                                  variant="ghost"
                                   onClick={() => openGoodsReceiptDetails(receipt.id)}
                                   title="View Details"
+                                  className="h-8 w-8 p-0 hover:bg-gray-100"
                                 >
-                                  <Eye className="h-3 w-3" />
+                                  <Eye className="h-3 w-3 text-gray-600" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => handleViewGoodsReceiptPdf(receipt)}
                                   title="View PDF"
-                                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                 >
                                   <FileText className="h-3 w-3" />
                                 </Button>
@@ -1755,7 +2387,7 @@ export default function Inventory() {
                                     size="sm"
                                     variant="ghost"
                                     onClick={() => handleDeleteGoodsReceipt(receipt.id)}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                                   >
                                     <Trash2 className="h-3 w-3" />
                                   </Button>
@@ -1896,7 +2528,7 @@ export default function Inventory() {
                             Total Amount
                           </p>
                           <p className="font-semibold text-emerald-600">
-                            £{typeof selectedGoodsReceiptDetails.purchaseOrder.totalAmount === 'number'
+                            {currencySymbol}{typeof selectedGoodsReceiptDetails.purchaseOrder.totalAmount === 'number'
                               ? selectedGoodsReceiptDetails.purchaseOrder.totalAmount.toFixed(2)
                               : parseFloat(String(selectedGoodsReceiptDetails.purchaseOrder.totalAmount || '0')).toFixed(2)}
                           </p>
@@ -1906,7 +2538,7 @@ export default function Inventory() {
                             Tax Amount
                           </p>
                           <p className="font-medium">
-                            £{typeof selectedGoodsReceiptDetails.purchaseOrder.taxAmount === 'number'
+                            {currencySymbol}{typeof selectedGoodsReceiptDetails.purchaseOrder.taxAmount === 'number'
                               ? selectedGoodsReceiptDetails.purchaseOrder.taxAmount.toFixed(2)
                               : parseFloat(String(selectedGoodsReceiptDetails.purchaseOrder.taxAmount || '0')).toFixed(2)}
                           </p>
@@ -1959,7 +2591,7 @@ export default function Inventory() {
                         Total Amount
                       </p>
                       <p className="text-base font-semibold text-emerald-600">
-                        £{selectedGoodsReceiptDetails.totalAmount.toFixed(2)}
+                        {currencySymbol}{selectedGoodsReceiptDetails.totalAmount.toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -2007,12 +2639,12 @@ export default function Inventory() {
                                 <TableCell>{item.itemName || 'Unknown Item'}</TableCell>
                                 <TableCell>{item.quantity}</TableCell>
                                 <TableCell className="text-right">
-                                  £{typeof item.unitPrice === 'number' 
+                                  {currencySymbol}{typeof item.unitPrice === 'number' 
                                     ? item.unitPrice.toFixed(2) 
                                     : parseFloat(item.unitPrice || "0").toFixed(2)}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  £{typeof item.totalPrice === 'number'
+                                  {currencySymbol}{typeof item.totalPrice === 'number'
                                     ? item.totalPrice.toFixed(2)
                                     : (item.quantity * (typeof item.unitPrice === 'number' ? item.unitPrice : parseFloat(item.unitPrice || "0"))).toFixed(2)}
                                 </TableCell>
@@ -2116,10 +2748,7 @@ export default function Inventory() {
                             </div>
                             <div className="text-right">
                               <div className="text-sm text-gray-500">
-                                {format(
-                                  new Date(alert.createdAt),
-                                  "MMM dd, HH:mm",
-                                )}
+                                {formatUTC(alert.createdAt, "MMM dd, HH:mm")}
                               </div>
                               {alert.currentStock !== undefined && (
                                 <div className="text-xs">
@@ -2146,12 +2775,296 @@ export default function Inventory() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="history" className="space-y-6">
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="border-b border-gray-200 bg-gray-50/50">
+                <CardTitle className="flex items-center">
+                  <Clock className="h-5 w-5 mr-2" />
+                  Stock Movement History
+                </CardTitle>
+                <CardDescription>
+                  Complete log of all stock adjustments, purchases, sales, and transfers with timestamps
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {movementsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                    <span className="ml-2 text-gray-500">Loading history...</span>
+                  </div>
+                ) : stockMovements.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Clock className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <p className="text-lg font-medium">No Stock Movements</p>
+                    <p className="text-sm">
+                      Stock movement history will appear here when items are adjusted
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-gray-200 bg-white overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-200">
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Date & Time</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Item Name</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Movement Type</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Direction</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Quantity</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Previous Stock</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">New Stock</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Reason</TableHead>
+                          <TableHead className="font-semibold text-gray-700 py-3 px-4">Notes</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {stockMovements.map((movement: any) => {
+                          const isIn = movement.quantity > 0;
+                          const direction = isIn ? "IN" : "OUT";
+                          const quantity = Math.abs(movement.quantity);
+                          
+                          // Extract reason from notes (format: "Reason: {reason}. Notes: {notes}" or "Reason: {reason}")
+                          let reason = "";
+                          let notes = movement.notes || "";
+                          if (movement.notes) {
+                            const reasonMatch = movement.notes.match(/Reason:\s*([^.]+)/);
+                            if (reasonMatch) {
+                              reason = reasonMatch[1].trim();
+                              const notesMatch = movement.notes.match(/Notes:\s*(.+)/);
+                              if (notesMatch) {
+                                notes = notesMatch[1].trim();
+                              } else {
+                                notes = "";
+                              }
+                            } else {
+                              notes = movement.notes;
+                            }
+                          }
+
+                          // Format movement type for display
+                          const movementTypeLabels: Record<string, string> = {
+                            purchase: "Purchase",
+                            sale: "Sale",
+                            return: "Return",
+                            expired: "Waste/Expired",
+                            damaged: "Damaged",
+                            adjustment: "Manual Adjustment",
+                            transfer: "Transfer",
+                          };
+
+                          const movementTypeLabel = movementTypeLabels[movement.movementType] || movement.movementType;
+
+                          return (
+                            <TableRow key={movement.id} className="hover:bg-gray-50/30 border-b border-gray-100 transition-colors">
+                              <TableCell className="font-mono text-sm text-gray-700 py-3 px-4">
+                                {formatUTC(movement.createdAt, "MMM dd, yyyy")}
+                                <br />
+                                <span className="text-gray-500 text-xs">
+                                  {formatUTC(movement.createdAt, "HH:mm:ss")}
+                                </span>
+                              </TableCell>
+                              <TableCell className="font-medium text-gray-900 py-3 px-4">
+                                {movement.itemName || "Unknown Item"}
+                              </TableCell>
+                              <TableCell className="py-3 px-4">
+                                <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">{movementTypeLabel}</Badge>
+                              </TableCell>
+                              <TableCell className="py-3 px-4">
+                                <Badge
+                                  className={
+                                    isIn
+                                      ? "bg-green-50 text-green-700 border-green-200"
+                                      : "bg-red-50 text-red-700 border-red-200"
+                                  }
+                                >
+                                  {isIn ? (
+                                    <>
+                                      <ArrowUp className="h-3 w-3 mr-1 inline" />
+                                      IN
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ArrowDown className="h-3 w-3 mr-1 inline" />
+                                      OUT
+                                    </>
+                                  )}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-semibold text-gray-900 py-3 px-4">
+                                {quantity}
+                              </TableCell>
+                              <TableCell className="text-gray-700 py-3 px-4">{movement.previousStock}</TableCell>
+                              <TableCell className="font-medium text-gray-900 py-3 px-4">
+                                {movement.newStock}
+                              </TableCell>
+                              <TableCell className="text-sm text-gray-600 py-3 px-4">
+                                {reason || "-"}
+                              </TableCell>
+                              <TableCell className="text-sm text-gray-500 max-w-xs truncate py-3 px-4" title={notes}>
+                                {notes || "-"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
 
         {/* Dialogs */}
         {showAddDialog && (
           <AddItemDialog open={showAddDialog} onOpenChange={setShowAddDialog} />
         )}
+
+        {showEditDialog && (
+          <AddItemDialog 
+            open={showEditDialog} 
+            onOpenChange={(open) => {
+              setShowEditDialog(open);
+              if (!open) {
+                setItemToEdit(null);
+              }
+            }} 
+            itemToEdit={itemToEdit}
+          />
+        )}
+
+        {/* Existing Items Dialog */}
+        <Dialog open={showExistingItemsDialog} onOpenChange={setShowExistingItemsDialog}>
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Package className="h-5 w-5 mr-2" />
+                  Item Names (inventory_items_name)
+                </div>
+                {canCreate('inventory') && (
+                  <Button
+                    onClick={() => {
+                      setItemNameToEdit(null);
+                      setShowAddItemNameDialog(true);
+                    }}
+                    size="sm"
+                    className="h-8"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add New Item Name
+                  </Button>
+                )}
+              </DialogTitle>
+              <DialogDescription>
+                View, edit, and delete item names from inventory_items_name table
+              </DialogDescription>
+            </DialogHeader>
+            <div className="rounded-md border border-gray-200 bg-white overflow-hidden mt-4">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-200">
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">ID</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">Item Name</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">Brand Name</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">Manufacturer</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">Unit of Measurement</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">Description</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4">Status</TableHead>
+                    <TableHead className="font-semibold text-gray-700 py-3 px-4 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {itemNamesLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-12">
+                        <div className="flex items-center justify-center">
+                          <RefreshCw className="h-4 w-4 animate-spin mr-2 text-gray-400" />
+                          <span className="text-gray-500">Loading item names...</span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : itemNames.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-12 text-gray-500">
+                        No item names found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    itemNames.map((itemName) => (
+                      <TableRow key={itemName.id} className="hover:bg-gray-50/30 border-b border-gray-100 transition-colors">
+                        <TableCell className="font-medium text-gray-900 py-3 px-4">
+                          #{itemName.id}
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <div className="font-medium text-gray-900">{itemName.name}</div>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <div className="text-sm text-gray-700">
+                            {itemName.brandName || <span className="text-gray-400">-</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <div className="text-sm text-gray-700">
+                            {itemName.manufacturer || <span className="text-gray-400">-</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <div className="text-sm text-gray-700 capitalize">
+                            {itemName.unitOfMeasurement || <span className="text-gray-400">-</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <div className="text-sm text-gray-600">
+                            {itemName.description || <span className="text-gray-400">No description</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          {getStatusBadge(itemName.isActive ? "active" : "inactive")}
+                        </TableCell>
+                        <TableCell className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {(canEdit('inventory') || isAdmin() || isDoctor() || isNurse()) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setItemNameToEdit(itemName);
+                                  setShowAddItemNameDialog(true);
+                                }}
+                                className="h-8 w-8 p-0 hover:bg-gray-100"
+                                title="Edit Item Name"
+                              >
+                                <Edit className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowExistingItemsDialog(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add/Edit Item Name Dialog */}
+        <AddItemNameDialog
+          open={showAddItemNameDialog}
+          onOpenChange={(open) => {
+            setShowAddItemNameDialog(open);
+            if (!open) {
+              setItemNameToEdit(null);
+            }
+          }}
+          editingItemName={itemNameToEdit}
+        />
 
         {showStockDialog && selectedItem && (
           <StockAdjustmentDialog
@@ -2308,7 +3221,7 @@ export default function Inventory() {
                         Total Amount
                       </Label>
                       <div className="text-lg font-bold text-green-600">
-                        £{parseFloat(selectedPO.totalAmount).toFixed(2)}
+                        {currencySymbol}{parseFloat(selectedPO.totalAmount).toFixed(2)}
                       </div>
                     </div>
                     <div>
@@ -2316,7 +3229,7 @@ export default function Inventory() {
                         Tax Amount
                       </Label>
                       <div className="font-medium">
-                        £{parseFloat(selectedPO.taxAmount || "0").toFixed(2)}
+                        {currencySymbol}{parseFloat(selectedPO.taxAmount || "0").toFixed(2)}
                       </div>
                     </div>
                     <div>
@@ -2488,7 +3401,7 @@ export default function Inventory() {
                             Purchase Price
                           </Label>
                           <p className="font-bold text-lg">
-                            £{parseFloat(selectedItem.purchasePrice).toFixed(2)}
+                            {currencySymbol}{parseFloat(selectedItem.purchasePrice).toFixed(2)}
                           </p>
                         </div>
                         <div>
@@ -2496,7 +3409,7 @@ export default function Inventory() {
                             Sale Price
                           </Label>
                           <p className="font-bold text-lg text-green-600">
-                            £{parseFloat(selectedItem.salePrice).toFixed(2)}
+                            {currencySymbol}{parseFloat(selectedItem.salePrice).toFixed(2)}
                           </p>
                         </div>
                         {selectedItem.mrp && (
@@ -2505,7 +3418,7 @@ export default function Inventory() {
                               MRP
                             </Label>
                             <p className="font-medium">
-                              £{parseFloat(selectedItem.mrp).toFixed(2)}
+                              {currencySymbol}{parseFloat(selectedItem.mrp).toFixed(2)}
                             </p>
                           </div>
                         )}
@@ -2514,7 +3427,7 @@ export default function Inventory() {
                             Stock Value
                           </Label>
                           <p className="font-bold text-lg text-blue-600">
-                            £
+                            {currencySymbol}
                             {parseFloat(
                               selectedItem.stockValue.toString(),
                             ).toFixed(2)}
@@ -2539,7 +3452,9 @@ export default function Inventory() {
                           Current Stock
                         </Label>
                         <p className="text-2xl font-bold mt-1">
-                          {selectedItem.currentStock}
+                          {selectedItem.batchStock !== undefined && selectedItem.batchStock !== null 
+                            ? selectedItem.batchStock 
+                            : selectedItem.currentStock}
                         </p>
                         <p className="text-sm text-gray-500">
                           {selectedItem.unitOfMeasurement}
@@ -3051,6 +3966,725 @@ export default function Inventory() {
                   </Button>
                 </>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Create Batch Dialog */}
+        <Dialog open={showCreateBatchDialog} onOpenChange={setShowCreateBatchDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Create New Batch</DialogTitle>
+              <DialogDescription>
+                Add a new batch entry to track inventory stock
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <Label htmlFor="createItemId">Item *</Label>
+                  <Select
+                    value={createBatchForm.itemId}
+                    onValueChange={(value) => {
+                      // Clear error when field is changed
+                      setCreateBatchErrors(prev => ({ ...prev, itemId: undefined }));
+                      
+                      // Find the selected item
+                      const selectedItem = items.find((item) => String(item.id) === value);
+                      if (selectedItem) {
+                        // Auto-fill quantity from currentStock from inventory_items table
+                        const stockValue = selectedItem.currentStock || 0;
+                        
+                        // Auto-fill purchase price
+                        const purchasePrice = selectedItem.purchasePrice || "";
+                        
+                        setCreateBatchForm({ 
+                          ...createBatchForm, 
+                          itemId: value,
+                          quantity: String(stockValue),
+                          purchasePrice: purchasePrice
+                        });
+                      } else {
+                        setCreateBatchForm({ ...createBatchForm, itemId: value });
+                      }
+                    }}
+                  >
+                    <SelectTrigger className={createBatchErrors.itemId ? "border-red-500" : ""}>
+                      <SelectValue placeholder="Select item" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(() => {
+                        // Get item IDs that already have batches
+                        const itemsWithBatches = new Set(
+                          stockEntries.map((entry: StockEntry) => entry.itemId)
+                        );
+                        
+                        // Filter items: only show active items that don't have batches yet
+                        const availableItems = items.filter((item) => {
+                          return item.isActive && !itemsWithBatches.has(item.id);
+                        });
+                        
+                        if (availableItems.length === 0) {
+                          return (
+                            <div className="px-2 py-1.5 text-sm text-gray-500">
+                              No items available. All items already have batches created.
+                            </div>
+                          );
+                        }
+                        
+                        return availableItems.map((item) => (
+                          <SelectItem key={item.id} value={String(item.id)}>
+                            {item.name} ({item.sku})
+                          </SelectItem>
+                        ));
+                      })()}
+                    </SelectContent>
+                  </Select>
+                  {createBatchErrors.itemId && (
+                    <p className="text-sm text-red-500 mt-1">{createBatchErrors.itemId}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="createBatchNumber">Batch Number</Label>
+                  <Input
+                    id="createBatchNumber"
+                    value={createBatchForm.batchNumber}
+                    onChange={(e) => setCreateBatchForm({ ...createBatchForm, batchNumber: e.target.value })}
+                    placeholder="Auto-generated"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="createQuantity">Quantity *</Label>
+                  <Input
+                    id="createQuantity"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={createBatchForm.quantity}
+                    onChange={(e) => {
+                      setCreateBatchForm({ ...createBatchForm, quantity: e.target.value });
+                      setCreateBatchErrors(prev => ({ ...prev, quantity: undefined }));
+                    }}
+                    className={createBatchErrors.quantity ? "border-red-500" : ""}
+                    required
+                  />
+                  {createBatchErrors.quantity && (
+                    <p className="text-sm text-red-500 mt-1">{createBatchErrors.quantity}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="createExpiryDate">Expiry Date</Label>
+                  <Input
+                    id="createExpiryDate"
+                    type="date"
+                    min={new Date().toISOString().split('T')[0]}
+                    value={createBatchForm.expiryDate}
+                    onChange={(e) => setCreateBatchForm({ ...createBatchForm, expiryDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="createManufactureDate">Manufacture Date</Label>
+                  <Input
+                    id="createManufactureDate"
+                    type="date"
+                    max={new Date().toISOString().split('T')[0]}
+                    value={createBatchForm.manufactureDate}
+                    onChange={(e) => setCreateBatchForm({ ...createBatchForm, manufactureDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="createPurchasePrice">Purchase Price ({currencySymbol}) *</Label>
+                  <Input
+                    id="createPurchasePrice"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={createBatchForm.purchasePrice}
+                    onChange={(e) => {
+                      setCreateBatchForm({ ...createBatchForm, purchasePrice: e.target.value });
+                      setCreateBatchErrors(prev => ({ ...prev, purchasePrice: undefined }));
+                    }}
+                    className={createBatchErrors.purchasePrice ? "border-red-500" : ""}
+                    required
+                  />
+                  {createBatchErrors.purchasePrice && (
+                    <p className="text-sm text-red-500 mt-1">{createBatchErrors.purchasePrice}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="createReceivedDate">Received Date *</Label>
+                  <Input
+                    id="createReceivedDate"
+                    type="date"
+                    value={createBatchForm.receivedDate}
+                    onChange={(e) => {
+                      setCreateBatchForm({ ...createBatchForm, receivedDate: e.target.value });
+                      setCreateBatchErrors(prev => ({ ...prev, receivedDate: undefined }));
+                    }}
+                    className={createBatchErrors.receivedDate ? "border-red-500" : ""}
+                    required
+                  />
+                  {createBatchErrors.receivedDate && (
+                    <p className="text-sm text-red-500 mt-1">{createBatchErrors.receivedDate}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="createPurchaseOrderId">Supplier (from Purchase Order)</Label>
+                  <Select
+                    value={createBatchForm.purchaseOrderId || undefined}
+                    onValueChange={(value) => {
+                      if (value === "none") {
+                        setCreateBatchForm({ ...createBatchForm, purchaseOrderId: "none", supplierId: "none" });
+                      } else {
+                        const po = purchaseOrders.find((po: any) => String(po.id) === value);
+                        setCreateBatchForm({ 
+                          ...createBatchForm, 
+                          purchaseOrderId: value,
+                          supplierId: po ? String(po.supplierId) : "none"
+                        });
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select purchase order" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {purchaseOrders
+                        .filter((po: any) => po.status === "received" || po.status === "sent")
+                        .map((po: any) => (
+                          <SelectItem key={po.id} value={String(po.id)}>
+                            {po.poNumber} - {po.supplierName || "Unknown Supplier"}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="createWarehouseId">Location/Department/Warehouse *</Label>
+                  <Select
+                    value={createBatchForm.warehouseId || undefined}
+                    onValueChange={(value) => {
+                      setCreateBatchForm({ ...createBatchForm, warehouseId: value });
+                      setCreateBatchErrors(prev => ({ ...prev, warehouseId: undefined }));
+                    }}
+                    disabled={warehousesLoading}
+                  >
+                    <SelectTrigger className={createBatchErrors.warehouseId ? "border-red-500" : ""}>
+                      <SelectValue placeholder={warehousesLoading ? "Loading warehouses..." : warehouses.filter((w: any) => w.status === "active").length === 0 ? "No warehouses available" : "Select warehouse"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehousesLoading ? (
+                        <div className="px-2 py-1.5 text-sm text-gray-500">Loading warehouses...</div>
+                      ) : warehouses.filter((w: any) => w.status === "active").length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-gray-500">No active warehouses found. Please create a warehouse first.</div>
+                      ) : (
+                        warehouses
+                          .filter((w: any) => w.status === "active")
+                          .map((warehouse: any) => (
+                            <SelectItem key={warehouse.id} value={String(warehouse.id)}>
+                              {warehouse.warehouseName}
+                              {warehouse.location && ` - ${warehouse.location}`}
+                            </SelectItem>
+                          ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {createBatchErrors.warehouseId && (
+                    <p className="text-sm text-red-500 mt-1">{createBatchErrors.warehouseId}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCreateBatchDialog(false);
+                  setCreateBatchForm({
+                    itemId: "",
+                    batchNumber: "",
+                    quantity: "",
+                    expiryDate: "",
+                    manufactureDate: "",
+                    purchasePrice: "",
+                    receivedDate: new Date().toISOString().split('T')[0],
+                    supplierId: "none",
+                    purchaseOrderId: "none",
+                    warehouseId: "",
+                  });
+                  setCreateBatchErrors({});
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  // Validate all required fields and set individual errors
+                  const errors: {
+                    itemId?: string;
+                    quantity?: string;
+                    purchasePrice?: string;
+                    receivedDate?: string;
+                    warehouseId?: string;
+                  } = {};
+                  
+                  if (!createBatchForm.itemId) {
+                    errors.itemId = "Item is required";
+                  } else {
+                    // Check if item already has a batch
+                    const itemId = parseInt(createBatchForm.itemId);
+                    const itemHasBatch = stockEntries.some((entry: StockEntry) => entry.itemId === itemId);
+                    if (itemHasBatch) {
+                      const selectedItem = items.find((item) => item.id === itemId);
+                      errors.itemId = `Item "${selectedItem?.name || 'Unknown'}" (SKU: ${selectedItem?.sku || 'N/A'}) already has a batch. Please select a different item.`;
+                    }
+                  }
+                  if (!createBatchForm.quantity) {
+                    errors.quantity = "Quantity is required";
+                  }
+                  if (!createBatchForm.purchasePrice) {
+                    errors.purchasePrice = "Purchase Price is required";
+                  }
+                  if (!createBatchForm.receivedDate) {
+                    errors.receivedDate = "Received Date is required";
+                  }
+                  if (!createBatchForm.warehouseId) {
+                    errors.warehouseId = "Location/Department/Warehouse is required";
+                  }
+                  
+                  // If there are errors, set them and return
+                  if (Object.keys(errors).length > 0) {
+                    setCreateBatchErrors(errors);
+                    toast({
+                      title: "Validation Error",
+                      description: "Please fill in all required fields",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  // Clear errors if validation passes
+                  setCreateBatchErrors({});
+
+                  const batchData: any = {
+                    itemId: parseInt(createBatchForm.itemId),
+                    quantity: parseFloat(createBatchForm.quantity),
+                    purchasePrice: createBatchForm.purchasePrice,
+                    receivedDate: createBatchForm.receivedDate,
+                    warehouseId: parseInt(createBatchForm.warehouseId),
+                  };
+
+                  if (createBatchForm.batchNumber) {
+                    batchData.batchNumber = createBatchForm.batchNumber;
+                  }
+                  if (createBatchForm.expiryDate) {
+                    batchData.expiryDate = createBatchForm.expiryDate;
+                  }
+                  if (createBatchForm.manufactureDate) {
+                    batchData.manufactureDate = createBatchForm.manufactureDate;
+                  }
+                  if (createBatchForm.purchaseOrderId && createBatchForm.purchaseOrderId !== "none") {
+                    batchData.purchaseOrderId = parseInt(createBatchForm.purchaseOrderId);
+                    // Get supplier from purchase order
+                    const po = purchaseOrders.find((po: any) => String(po.id) === createBatchForm.purchaseOrderId);
+                    if (po && po.supplierId) {
+                      batchData.supplierId = po.supplierId;
+                    }
+                  } else if (createBatchForm.supplierId && createBatchForm.supplierId !== "none") {
+                    batchData.supplierId = parseInt(createBatchForm.supplierId);
+                  }
+
+                  createBatchMutation.mutate(batchData);
+                }}
+                disabled={createBatchMutation.isPending}
+              >
+                {createBatchMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Batch"
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Batch Dialog */}
+        <Dialog open={showEditBatchDialog} onOpenChange={setShowEditBatchDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Batch</DialogTitle>
+              <DialogDescription>
+                Update batch information for {selectedBatch?.itemName}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="batchNumber">Batch Number</Label>
+                  <Input
+                    id="batchNumber"
+                    value={editBatchForm.batchNumber}
+                    onChange={(e) => setEditBatchForm({ ...editBatchForm, batchNumber: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="remainingQuantity">Quantity Available</Label>
+                  <Input
+                    id="remainingQuantity"
+                    type="number"
+                    value={editBatchForm.remainingQuantity}
+                    onChange={(e) => setEditBatchForm({ ...editBatchForm, remainingQuantity: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="expiryDate">Expiry Date</Label>
+                  <Input
+                    id="expiryDate"
+                    type="date"
+                    min={new Date().toISOString().split('T')[0]}
+                    value={editBatchForm.expiryDate}
+                    onChange={(e) => setEditBatchForm({ ...editBatchForm, expiryDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="manufactureDate">Manufacture Date</Label>
+                  <Input
+                    id="manufactureDate"
+                    type="date"
+                    max={new Date().toISOString().split('T')[0]}
+                    value={editBatchForm.manufactureDate}
+                    onChange={(e) => setEditBatchForm({ ...editBatchForm, manufactureDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="purchasePrice">Purchase Price ({currencySymbol})</Label>
+                  <Input
+                    id="purchasePrice"
+                    type="number"
+                    step="0.01"
+                    value={editBatchForm.purchasePrice}
+                    onChange={(e) => setEditBatchForm({ ...editBatchForm, purchasePrice: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="receivedDate">Received Date</Label>
+                  <Input
+                    id="receivedDate"
+                    type="date"
+                    value={editBatchForm.receivedDate}
+                    onChange={(e) => setEditBatchForm({ ...editBatchForm, receivedDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="supplierId">Supplier</Label>
+                  <Select
+                    value={editBatchForm.supplierId || undefined}
+                    onValueChange={(value) => {
+                      // Use "none" as a special value to represent no supplier
+                      if (value === "none") {
+                        setEditBatchForm({ ...editBatchForm, supplierId: "" });
+                      } else {
+                        setEditBatchForm({ ...editBatchForm, supplierId: value });
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select supplier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {suppliers.filter((s: any) => s.isActive).map((supplier: any) => (
+                        <SelectItem key={supplier.id} value={String(supplier.id)}>
+                          {supplier.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="editWarehouseId">Location/Department/Warehouse</Label>
+                  <Select
+                    value={editBatchForm.warehouseId || "none"}
+                    onValueChange={(value) => {
+                      setEditBatchForm({ ...editBatchForm, warehouseId: value });
+                    }}
+                    disabled={warehousesLoading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={warehousesLoading ? "Loading warehouses..." : warehouses.filter((w: any) => w.status === "active").length === 0 ? "No warehouses available" : "Select warehouse"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehousesLoading ? (
+                        <div className="px-2 py-1.5 text-sm text-gray-500">Loading warehouses...</div>
+                      ) : warehouses.filter((w: any) => w.status === "active").length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-gray-500">No active warehouses found. Please create a warehouse first.</div>
+                      ) : (
+                        <>
+                          <SelectItem value="none">None</SelectItem>
+                          {warehouses
+                            .filter((w: any) => w.status === "active")
+                            .map((warehouse: any) => (
+                              <SelectItem key={warehouse.id} value={String(warehouse.id)}>
+                                {warehouse.warehouseName}
+                                {warehouse.location && ` - ${warehouse.location}`}
+                              </SelectItem>
+                            ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowEditBatchDialog(false);
+                  setSelectedBatch(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (selectedBatch) {
+                    const updates: any = {};
+                    if (editBatchForm.batchNumber) updates.batchNumber = editBatchForm.batchNumber;
+                    if (editBatchForm.remainingQuantity) updates.remainingQuantity = parseFloat(editBatchForm.remainingQuantity);
+                    if (editBatchForm.expiryDate) updates.expiryDate = editBatchForm.expiryDate;
+                    if (editBatchForm.manufactureDate) updates.manufactureDate = editBatchForm.manufactureDate;
+                    if (editBatchForm.purchasePrice) updates.purchasePrice = editBatchForm.purchasePrice;
+                    if (editBatchForm.receivedDate) updates.receivedDate = editBatchForm.receivedDate;
+                    if (editBatchForm.supplierId && editBatchForm.supplierId !== "none" && editBatchForm.supplierId !== "") {
+                      updates.supplierId = parseInt(editBatchForm.supplierId);
+                    } else {
+                      updates.supplierId = null;
+                    }
+                    if (editBatchForm.warehouseId && editBatchForm.warehouseId !== "none" && editBatchForm.warehouseId !== "") {
+                      updates.warehouseId = parseInt(editBatchForm.warehouseId);
+                    } else {
+                      updates.warehouseId = null;
+                    }
+
+                    updateBatchMutation.mutate({ batchId: selectedBatch.id, updates });
+                  }
+                }}
+                disabled={updateBatchMutation.isPending}
+              >
+                {updateBatchMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  "Update Batch"
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Batch Confirmation Dialog */}
+        <AlertDialog open={showDeleteBatchModal} onOpenChange={setShowDeleteBatchModal}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Batch</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete batch "{batchToDelete?.batchNumber}" for item "{batchToDelete?.itemName}"? 
+                This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {
+                setShowDeleteBatchModal(false);
+                setBatchToDelete(null);
+              }}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (batchToDelete) {
+                    deleteBatchMutation.mutate(batchToDelete.id);
+                  }
+                }}
+                className="bg-red-600 hover:bg-red-700"
+                disabled={deleteBatchMutation.isPending}
+              >
+                {deleteBatchMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Create Warehouse Dialog */}
+        <Dialog open={showCreateWarehouseDialog} onOpenChange={setShowCreateWarehouseDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create New Warehouse</DialogTitle>
+              <DialogDescription>
+                Add a new warehouse location to track inventory storage
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="warehouseName">Warehouse Name *</Label>
+                <Input
+                  id="warehouseName"
+                  value={warehouseForm.warehouseName}
+                  onChange={(e) =>
+                    setWarehouseForm({ ...warehouseForm, warehouseName: e.target.value })
+                  }
+                  placeholder="e.g., Main Warehouse, Pharmacy, Emergency Room"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="warehouseLocation">Location</Label>
+                <Input
+                  id="warehouseLocation"
+                  value={warehouseForm.location}
+                  onChange={(e) =>
+                    setWarehouseForm({ ...warehouseForm, location: e.target.value })
+                  }
+                  placeholder="e.g., Building A, Floor 2, Room 201"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="warehouseStatus">Status</Label>
+                <Select
+                  value={warehouseForm.status}
+                  onValueChange={(value: "active" | "inactive") =>
+                    setWarehouseForm({ ...warehouseForm, status: value })
+                  }
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCreateWarehouseDialog(false);
+                  setWarehouseForm({ warehouseName: "", location: "", status: "active" });
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!warehouseForm.warehouseName.trim()) {
+                    toast({
+                      title: "Validation Error",
+                      description: "Warehouse name is required",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  const warehouseData: { warehouseName: string; location?: string; status: string } = {
+                    warehouseName: warehouseForm.warehouseName.trim(),
+                    status: warehouseForm.status,
+                  };
+                  
+                  // Only include location if it's not empty
+                  if (warehouseForm.location && warehouseForm.location.trim() !== "") {
+                    warehouseData.location = warehouseForm.location.trim();
+                  }
+                  
+                  createWarehouseMutation.mutate(warehouseData);
+                }}
+                disabled={createWarehouseMutation.isPending}
+              >
+                {createWarehouseMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Warehouse"
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Purchase Order Status Dialog */}
+        <Dialog open={showEditPOStatusDialog} onOpenChange={setShowEditPOStatusDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Purchase Order Status</DialogTitle>
+              <DialogDescription>
+                Update the status for purchase order: {selectedPOForStatusEdit?.poNumber}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="poStatus">Status *</Label>
+                <Select
+                  value={poStatusForm.status}
+                  onValueChange={(value) => setPOStatusForm({ status: value })}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="sent">Sent</SelectItem>
+                    <SelectItem value="received">Received</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowEditPOStatusDialog(false);
+                  setSelectedPOForStatusEdit(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (selectedPOForStatusEdit) {
+                    updatePOStatusMutation.mutate({
+                      purchaseOrderId: selectedPOForStatusEdit.id,
+                      status: poStatusForm.status,
+                    });
+                  }
+                }}
+                disabled={updatePOStatusMutation.isPending}
+              >
+                {updatePOStatusMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  "Update Status"
+                )}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

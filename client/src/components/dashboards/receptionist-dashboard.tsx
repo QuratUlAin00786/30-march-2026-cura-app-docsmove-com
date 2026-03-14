@@ -3,8 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Users, Calendar, Phone, CreditCard, Clock, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { useCurrency } from "@/hooks/use-currency";
 
 export function ReceptionistDashboard() {
+  const { currencySymbol } = useCurrency();
   const { data: stats, isLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
   });
@@ -28,7 +30,7 @@ export function ReceptionistDashboard() {
     },
     {
       title: "Pending Payments",
-      value: isLoading ? "--" : "£0",
+      value: isLoading ? "--" : `${currencySymbol}0`,
       description: "Outstanding balance",
       icon: CreditCard,
       href: "/billing",

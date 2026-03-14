@@ -2,6 +2,7 @@ import { forwardRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { useCurrency } from "@/hooks/use-currency";
 import curaLogo from "@assets/cura-logo.png";
 
 interface InvoiceTemplateProps {
@@ -28,15 +29,17 @@ interface InvoiceTemplateProps {
 
 const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
   ({ invoice }, ref) => {
+    const { currencyCode } = useCurrency();
+    
     const formatCurrency = (
       amount: number | string,
-      currency: string = "GBP",
+      currency: string = currencyCode,
     ) => {
       const numAmount =
         typeof amount === "string" ? parseFloat(amount) : amount;
       return new Intl.NumberFormat("en-GB", {
         style: "currency",
-        currency: currency,
+        currency: currency || currencyCode,
       }).format(numAmount);
     };
 

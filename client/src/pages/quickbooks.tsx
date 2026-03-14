@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useCurrency } from "@/hooks/use-currency";
+import { CurrencyIcon } from "@/components/ui/currency-icon";
 import { apiRequest } from "@/lib/queryClient";
 import { Header } from "@/components/layout/header";
 import { 
@@ -98,6 +100,7 @@ interface InvoiceMapping {
 }
 
 export default function QuickBooks() {
+  const { currencySymbol } = useCurrency();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -1105,8 +1108,8 @@ export default function QuickBooks() {
                             <TableCell className="font-medium">{invoice.DocNumber}</TableCell>
                             <TableCell>{invoice.CustomerRef?.name || 'N/A'}</TableCell>
                             <TableCell>{invoice.TxnDate}</TableCell>
-                            <TableCell>${invoice.TotalAmt?.toFixed(2) || '0.00'}</TableCell>
-                            <TableCell>${invoice.Balance?.toFixed(2) || '0.00'}</TableCell>
+                            <TableCell>{currencySymbol}{invoice.TotalAmt?.toFixed(2) || '0.00'}</TableCell>
+                            <TableCell>{currencySymbol}{invoice.Balance?.toFixed(2) || '0.00'}</TableCell>
                             <TableCell>
                               {invoice.Balance === 0 ? (
                                 <Badge className="bg-green-100 text-green-800">Paid</Badge>
@@ -1126,7 +1129,7 @@ export default function QuickBooks() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
-                    <PoundSterling className="w-5 h-5 mr-2" />
+                    <CurrencyIcon className="w-5 h-5 mr-2" />
                     Recent Expenses
                   </CardTitle>
                   <CardDescription>Latest expense transactions from QuickBooks</CardDescription>
@@ -1159,7 +1162,7 @@ export default function QuickBooks() {
                             <TableCell>{expense.TxnDate}</TableCell>
                             <TableCell>{expense.PaymentType || 'N/A'}</TableCell>
                             <TableCell>{expense.EntityRef?.name || 'N/A'}</TableCell>
-                            <TableCell>${expense.TotalAmt?.toFixed(2) || '0.00'}</TableCell>
+                            <TableCell>{currencySymbol}{expense.TotalAmt?.toFixed(2) || '0.00'}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

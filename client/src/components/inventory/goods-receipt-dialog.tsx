@@ -43,6 +43,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useCurrency } from "@/hooks/use-currency";
 import { Plus, Trash2, Check, ChevronsUpDown, XCircle, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -135,6 +136,7 @@ type GoodsReceiptFormData = z.infer<typeof goodsReceiptSchema>;
 type AddItemFormData = z.infer<typeof addItemSchema>;
 
 export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultPurchaseOrderId, onReceiptCreated }: GoodsReceiptDialogProps) {
+  const { currencySymbol } = useCurrency();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -494,21 +496,21 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="max-w-3xl max-h-[500px] overflow-hidden p-2 flex flex-col" style={{ fontSize: '12px' }}>
-        <DialogHeader className="pb-1 flex-shrink-0">
-          <DialogTitle className="font-semibold" style={{ fontSize: '12px' }}>Create Goods Receipt</DialogTitle>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden p-6 flex flex-col">
+        <DialogHeader className="pb-4 flex-shrink-0">
+          <DialogTitle className="text-xl font-semibold">Create Goods Receipt</DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1" style={{ fontSize: '12px' }}>
+        <div className="flex-1 overflow-y-auto space-y-6 pr-2">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-1.5">
-              <div className="grid gap-1.5 md:grid-cols-3">
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="purchaseOrderId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="" style={{ fontSize: '12px' }}>Purchase Order</FormLabel>
+                      <FormLabel>Purchase Order *</FormLabel>
                       <FormControl>
                         <Popover open={purchaseOrderOpen} onOpenChange={setPurchaseOrderOpen}>
                           <PopoverTrigger asChild>
@@ -516,27 +518,25 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
                               variant="outline"
                               role="combobox"
                               aria-expanded={purchaseOrderOpen}
-                              className="w-full justify-between text-left h-7"
-                              style={{ fontSize: '12px' }}
+                              className="w-full justify-between text-left h-10"
                               data-testid="select-purchase-order"
                             >
-                              <span className="truncate" style={{ fontSize: '12px' }}>
+                              <span className="truncate">
                                 {selectedPO ? selectedPO.poNumber : "Select purchase order..."}
                               </span>
                               <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
                             </Button>
                           </PopoverTrigger>
-                          <PopoverContent className="w-full p-0" align="start" style={{ fontSize: '12px' }}>
-                            <div className="max-h-[200px] overflow-y-auto">
+                          <PopoverContent className="w-full p-0" align="start">
+                            <div className="max-h-[300px] overflow-y-auto">
                               <Command>
-                                <CommandInput placeholder="Search purchase orders..." style={{ fontSize: '12px' }} />
-                                <CommandEmpty style={{ fontSize: '12px' }}>No purchase order found.</CommandEmpty>
+                                <CommandInput placeholder="Search purchase orders..." />
+                                <CommandEmpty>No purchase order found.</CommandEmpty>
                                 <CommandGroup>
                                   {purchaseOrders.map((po) => (
                                     <CommandItem
                                       key={po.id}
                                       value={po.poNumber}
-                                      style={{ fontSize: '12px' }}
                                       onSelect={() => {
                                         field.onChange(po.id);
                                         setPurchaseOrderOpen(false);
@@ -550,9 +550,9 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
                                         )}
                                       />
                                       <div className="flex flex-col">
-                                        <span className="font-medium" style={{ fontSize: '12px' }}>{po.poNumber}</span>
-                                        <span className="text-gray-500 truncate" style={{ fontSize: '12px' }}>
-                                          {po.supplierName} — £{po.totalAmount}
+                                        <span className="font-medium">{po.poNumber}</span>
+                                        <span className="text-gray-500 truncate text-sm">
+                                          {po.supplierName} — {currencySymbol}{po.totalAmount}
                                         </span>
                                       </div>
                                     </CommandItem>
@@ -563,7 +563,7 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
                           </PopoverContent>
                         </Popover>
                       </FormControl>
-                      <FormMessage style={{ fontSize: '12px' }} />
+                      <FormMessage />
                     </FormItem>
                   )}
                 />
@@ -573,11 +573,11 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
                   name="receivedDate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="" style={{ fontSize: '12px' }}>Received Date</FormLabel>
+                      <FormLabel>Received Date *</FormLabel>
                       <FormControl>
-                        <Input type="date" data-testid="input-received-date" className="h-7" style={{ fontSize: '12px' }} {...field} />
+                        <Input type="date" data-testid="input-received-date" className="h-10" {...field} />
                       </FormControl>
-                      <FormMessage style={{ fontSize: '12px' }} />
+                      <FormMessage />
                     </FormItem>
                   )}
                 />
@@ -587,192 +587,130 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
                 control={form.control}
                 name="notes"
                 render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="" style={{ fontSize: '12px' }}>Notes</FormLabel>
-                      <FormControl>
+                  <FormItem>
+                    <FormLabel>Notes</FormLabel>
+                    <FormControl>
                       <Textarea
                         data-testid="textarea-notes"
                         placeholder="Additional notes about this goods receipt..."
-                        className="min-h-[60px]"
-                        style={{ fontSize: '12px' }}
+                        className="min-h-[80px]"
                         {...field}
                       />
                     </FormControl>
-                    <FormMessage style={{ fontSize: '12px' }} />
+                    <FormMessage />
                   </FormItem>
                 )}
               />
             </form>
           </Form>
 
-          <div className="grid gap-1.5 md:grid-cols-3">
-            <Card className="shadow-sm bg-white/90 dark:bg-gray-800/90 dark:border-gray-700">
-              <CardHeader className="pb-1 pt-2 px-2">
-                <CardTitle className="font-semibold tracking-[0.2em] text-gray-500 dark:text-gray-400 uppercase" style={{ fontSize: '12px' }}>
-                  Purchase Order
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-0.5 py-1 px-2">
-                <p className="font-semibold text-gray-900 dark:text-white" style={{ fontSize: '12px' }}>
-                  {selectedPO?.poNumber || "Select a purchase order"}
-                </p>
-                <p className="text-gray-500 dark:text-gray-400 truncate" style={{ fontSize: '12px' }}>
-                  {selectedPO?.supplierName || "Supplier will populate here"}
-                </p>
-                <Badge variant="secondary" className="capitalize dark:bg-gray-700 dark:text-gray-200" style={{ fontSize: '12px' }}>
-                  {selectedPO?.status?.replace("_", " ") || "status pending"}
-                </Badge>
-                {selectedPO?.expectedDeliveryDate && (
-                  <p className="text-gray-500 dark:text-gray-400" style={{ fontSize: '12px' }}>
-                    Expected delivery: {format(new Date(selectedPO.expectedDeliveryDate), "MMM dd, yyyy")}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm border">
-              <CardHeader className="pb-1 pt-2 px-2">
-                <CardTitle className="font-semibold tracking-[0.2em] text-gray-500 uppercase" style={{ fontSize: '12px' }}>
-                  Items overview
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-0.5 text-gray-600 py-1 px-2" style={{ fontSize: '12px' }}>
-                <div className="flex justify-between">
-                  <span style={{ fontSize: '12px' }}>Items found</span>
-                  <span style={{ fontSize: '12px' }}>{purchaseOrderItems.length || receiptItems.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span style={{ fontSize: '12px' }}>Total value</span>
-                  <span style={{ fontSize: '12px' }}>£{calculateTotalAmount()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span style={{ fontSize: '12px' }}>Received date</span>
-                  <span style={{ fontSize: '12px' }}>{form.getValues("receivedDate")}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm border">
-              <CardHeader className="pb-1 pt-2 px-2">
-                <CardTitle className="font-semibold tracking-[0.2em] text-gray-500 uppercase" style={{ fontSize: '12px' }}>
-                  Sync status
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-0.5 text-gray-500 py-1 px-2" style={{ fontSize: '12px' }}>
-                <p style={{ fontSize: '12px' }}>
-                  {purchaseOrderItemsLoading ? "Pulling PO items..." : "Auto-fetch ready"}
-                </p>
-                <p style={{ fontSize: '12px' }}>Use the add-item grid to include extras outside the PO.</p>
-              </CardContent>
-            </Card>
-          </div>
-
-        {selectedPO && (
-          <Card className="border shadow-sm bg-white dark:bg-gray-800 dark:border-gray-700">
-            <CardHeader className="space-y-0.5 pb-1 pt-2 px-2">
-              <CardTitle className="font-semibold tracking-[0.2em] text-gray-500 dark:text-gray-400 uppercase" style={{ fontSize: '12px' }}>
-                Purchase Order Details
-              </CardTitle>
-              <p className="text-gray-600 dark:text-gray-300" style={{ fontSize: '12px' }}>
-                {computedPurchaseOrderMeta.status.replace("_", " ")} · Created on{" "}
-                {format(new Date(computedPurchaseOrderMeta.orderDate), "PPP")}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-1 py-1 px-2">
-              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-4 text-gray-600 dark:text-gray-300" style={{ fontSize: '12px' }}>
-                <div>
-                  <p className="uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500" style={{ fontSize: '12px' }}>PO Number</p>
-                  <p className="font-semibold text-gray-900 dark:text-white" style={{ fontSize: '12px' }}>{computedPurchaseOrderMeta.poNumber}</p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500" style={{ fontSize: '12px' }}>Supplier</p>
-                  <p className="font-medium dark:text-gray-200" style={{ fontSize: '12px' }}>{computedPurchaseOrderMeta.supplierName}</p>
-                  <p className="text-gray-500 dark:text-gray-400" style={{ fontSize: '12px' }}>
-                    {computedPurchaseOrderMeta.supplierEmail || "No email"}
-                  </p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500" style={{ fontSize: '12px' }}>Expected Delivery</p>
-                  <p className="font-semibold dark:text-gray-200" style={{ fontSize: '12px' }}>
-                    {computedPurchaseOrderMeta.expectedDeliveryDate
-                      ? format(new Date(computedPurchaseOrderMeta.expectedDeliveryDate), "PPP")
-                      : "Not set"}
-                  </p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500" style={{ fontSize: '12px' }}>Status</p>
-                  <p className="font-semibold text-emerald-600 dark:text-emerald-400" style={{ fontSize: '12px' }}>{computedPurchaseOrderMeta.status}</p>
-                </div>
-              </div>
-
-              <div className="grid gap-1 sm:grid-cols-2 text-gray-600 dark:text-gray-300" style={{ fontSize: '12px' }}>
-                <div>
-                  <p className="uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500" style={{ fontSize: '12px' }}>Total Amount</p>
-                  <p className="font-semibold dark:text-gray-200" style={{ fontSize: '12px' }}>£{parseFloat(computedPurchaseOrderMeta.totalAmount || "0").toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500" style={{ fontSize: '12px' }}>Tax / Discount</p>
-                  <p className="text-gray-500 dark:text-gray-400" style={{ fontSize: '12px' }}>
-                    Tax: £{parseFloat(computedPurchaseOrderMeta.taxAmount || "0").toFixed(2)} · Discount: £{parseFloat(computedPurchaseOrderMeta.discountAmount || "0").toFixed(2)}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <p className="uppercase tracking-[0.3em] text-gray-400" style={{ fontSize: '12px' }}>Notes</p>
-                <p className="text-gray-600" style={{ fontSize: '12px' }}>
-                  {computedPurchaseOrderMeta.notes || "No additional notes were added."}
-                </p>
-              </div>
-
-              <div>
-                <p className="uppercase tracking-[0.2em] text-gray-400 mb-0.5" style={{ fontSize: '12px' }}>
-                  Items in Purchase Order
-                </p>
-                <div className="overflow-hidden rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="py-1 px-2" style={{ fontSize: '12px' }}>Item</TableHead>
-                        <TableHead className="py-1 px-2" style={{ fontSize: '12px' }}>Qty</TableHead>
-                        <TableHead className="text-right py-1 px-2" style={{ fontSize: '12px' }}>Unit Price</TableHead>
-                        <TableHead className="text-right py-1 px-2" style={{ fontSize: '12px' }}>Line Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {displayedPurchaseOrderItems.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={4}
-                            className="text-center py-1 text-gray-500"
-                            style={{ fontSize: '12px' }}
-                          >
-                            {purchaseOrderDetailLoading || purchaseOrderItemsLoading
-                              ? "Loading purchase order items..."
-                              : "No items were found for this purchase order."}
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        displayedPurchaseOrderItems.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell className="py-1 px-2" style={{ fontSize: '12px' }}>{item.itemName}</TableCell>
-                            <TableCell className="py-1 px-2" style={{ fontSize: '12px' }}>{item.quantity}</TableCell>
-                            <TableCell className="text-right py-1 px-2" style={{ fontSize: '12px' }}>
-                              £{parseFloat(item.unitPrice || "0").toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-right py-1 px-2" style={{ fontSize: '12px' }}>
-                              £{parseFloat(item.totalPrice || "0").toFixed(2)}
-                            </TableCell>
-                          </TableRow>
-                        ))
+          {selectedPO && (
+            <div className="space-y-4">
+              <Card className="border bg-gray-50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Purchase Order Summary</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">PO Number</p>
+                      <p className="font-semibold">{computedPurchaseOrderMeta.poNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Supplier</p>
+                      <p className="font-medium">{computedPurchaseOrderMeta.supplierName}</p>
+                      {computedPurchaseOrderMeta.supplierEmail && (
+                        <p className="text-sm text-gray-500">{computedPurchaseOrderMeta.supplierEmail}</p>
                       )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Order Date</p>
+                      <p className="font-medium">
+                        {format(new Date(computedPurchaseOrderMeta.orderDate), "MMM dd, yyyy")}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Status</p>
+                      <Badge variant="secondary" className="capitalize">
+                        {computedPurchaseOrderMeta.status.replace("_", " ")}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-3 pt-2 border-t">
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Total Amount</p>
+                      <p className="text-lg font-semibold">
+                        {currencySymbol}{parseFloat(computedPurchaseOrderMeta.totalAmount || "0").toFixed(2)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Items Count</p>
+                      <p className="text-lg font-semibold">
+                        {purchaseOrderItems.length || receiptItems.length} items
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Receipt Value</p>
+                      <p className="text-lg font-semibold">
+                        {currencySymbol}{calculateTotalAmount()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {computedPurchaseOrderMeta.notes && (
+                    <div className="pt-2 border-t">
+                      <p className="text-sm text-gray-500 mb-1">PO Notes</p>
+                      <p className="text-sm text-gray-700">{computedPurchaseOrderMeta.notes}</p>
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Items in Purchase Order</p>
+                    <div className="overflow-hidden rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Item</TableHead>
+                            <TableHead>Quantity</TableHead>
+                            <TableHead className="text-right">Unit Price</TableHead>
+                            <TableHead className="text-right">Line Total</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {displayedPurchaseOrderItems.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                className="text-center py-4 text-gray-500"
+                              >
+                                {purchaseOrderDetailLoading || purchaseOrderItemsLoading
+                                  ? "Loading purchase order items..."
+                                  : "No items were found for this purchase order."}
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            displayedPurchaseOrderItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell className="font-medium">{item.itemName}</TableCell>
+                                <TableCell>{item.quantity}</TableCell>
+                                <TableCell className="text-right">
+                                  {currencySymbol}{parseFloat(item.unitPrice || "0").toFixed(2)}
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {currencySymbol}{parseFloat(item.totalPrice || "0").toFixed(2)}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           {!showAddExtraItems ? (
             <div className="flex justify-end">
@@ -780,195 +718,189 @@ export default function GoodsReceiptDialog({ open, onOpenChange, items, defaultP
                 type="button"
                 variant="outline"
                 onClick={() => setShowAddExtraItems(true)}
-                className="h-7 px-3"
-                style={{ fontSize: '12px' }}
+                className="h-10"
               >
-                <Plus className="h-3 w-3 mr-1" />
-                Add Item
+                <Plus className="h-4 w-4 mr-2" />
+                Add Extra Items
               </Button>
             </div>
           ) : (
-            <Form {...addItemForm}>
-              <div className="border rounded-lg bg-slate-50 p-1.5 shadow-inner">
-                <div className="flex items-center justify-between mb-1">
-                  <h6 className="font-semibold text-gray-700" style={{ fontSize: '12px' }}>Add extra items</h6>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500" style={{ fontSize: '12px' }}>Optional</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setShowAddExtraItems(false);
-                        addItemForm.reset();
-                      }}
-                      className="h-5 w-5 p-0 text-gray-500 hover:text-gray-700"
-                      title="Hide"
-                    >
-                      <XCircle className="h-3 w-3" />
-                    </Button>
+            <Card className="border">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">Add Extra Items</CardTitle>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowAddExtraItems(false);
+                      addItemForm.reset();
+                    }}
+                    className="h-8 w-8 p-0"
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-500">Add items not included in the purchase order</p>
+              </CardHeader>
+              <CardContent>
+                <Form {...addItemForm}>
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <FormField
+                        control={addItemForm.control}
+                        name="itemId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Item *</FormLabel>
+                            <FormControl>
+                              <Select value={field.value} onValueChange={field.onChange}>
+                                <SelectTrigger data-testid="select-item" className="h-10">
+                                  <SelectValue placeholder="Select item" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {items.map((item) => (
+                                    <SelectItem key={item.id} value={item.id.toString()}>
+                                      {item.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={addItemForm.control}
+                        name="quantityReceived"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Quantity *</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min="1"
+                                data-testid="input-quantity"
+                                className="h-10"
+                                placeholder="1"
+                                {...field}
+                                onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={addItemForm.control}
+                        name="unitPrice"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Unit Price *</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                data-testid="input-unit-price"
+                                className="h-10"
+                                placeholder="0.00"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={addItemForm.control}
+                        name="batchNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Batch Number *</FormLabel>
+                            <FormControl>
+                              <Input data-testid="input-batch-number" className="h-10" placeholder="Batch #" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <FormField
+                        control={addItemForm.control}
+                        name="expiryDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Expiry Date *</FormLabel>
+                            <FormControl>
+                              <Input type="date" data-testid="input-expiry-date" className="h-10" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={addItemForm.control}
+                        name="manufacturingDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Manufacturing Date *</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="date"
+                                data-testid="input-manufacturing-date"
+                                className="h-10"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="flex items-end">
+                        <Button
+                          type="button"
+                          className="w-full h-10"
+                          onClick={addItemForm.handleSubmit(addItem)}
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Item
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="grid gap-1">
-                <div className="grid gap-1 md:grid-cols-4">
-                  <FormField
-                    control={addItemForm.control}
-                    name="itemId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="" style={{ fontSize: '12px' }}>Item</FormLabel>
-                        <FormControl>
-                          <Select value={field.value} onValueChange={field.onChange}>
-                            <SelectTrigger data-testid="select-item" className="h-7" style={{ fontSize: '12px' }}>
-                              <SelectValue placeholder="Select item" style={{ fontSize: '12px' }} />
-                            </SelectTrigger>
-                            <SelectContent style={{ fontSize: '12px' }}>
-                              {items.map((item) => (
-                                <SelectItem key={item.id} value={item.id.toString()} style={{ fontSize: '12px' }}>
-                                  {item.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </FormControl>
-                        <FormMessage className="text-red-600" style={{ fontSize: '12px' }} />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={addItemForm.control}
-                    name="quantityReceived"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="" style={{ fontSize: '12px' }}>Quantity</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            min="1"
-                            data-testid="input-quantity"
-                            className="h-7"
-                            style={{ fontSize: '12px' }}
-                            placeholder="1"
-                            {...field}
-                            onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
-                          />
-                        </FormControl>
-                        <FormMessage className="text-red-600" style={{ fontSize: '12px' }} />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={addItemForm.control}
-                    name="unitPrice"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="" style={{ fontSize: '12px' }}>Unit Price</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            data-testid="input-unit-price"
-                            className="h-7"
-                            style={{ fontSize: '12px' }}
-                            placeholder="0.00"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage className="text-red-600" style={{ fontSize: '12px' }} />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={addItemForm.control}
-                    name="batchNumber"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="" style={{ fontSize: '12px' }}>Batch #</FormLabel>
-                        <FormControl>
-                          <Input data-testid="input-batch-number" className="h-7" style={{ fontSize: '12px' }} placeholder="Batch #" {...field} />
-                        </FormControl>
-                        <FormMessage className="text-red-600" style={{ fontSize: '12px' }} />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                <div className="grid gap-1 md:grid-cols-3 items-end">
-                  <FormField
-                    control={addItemForm.control}
-                    name="expiryDate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="" style={{ fontSize: '12px' }}>Expiry</FormLabel>
-                        <FormControl>
-                          <Input type="date" data-testid="input-expiry-date" className="h-7" style={{ fontSize: '12px' }} placeholder="dd/mm/yyyy" {...field} />
-                        </FormControl>
-                        <FormMessage className="text-red-600" style={{ fontSize: '12px' }} />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={addItemForm.control}
-                    name="manufacturingDate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="" style={{ fontSize: '12px' }}>Mfg Date</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="date"
-                            data-testid="input-manufacturing-date"
-                            className="h-7"
-                            style={{ fontSize: '12px' }}
-                            placeholder="dd/mm/yyyy"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage className="text-red-600" style={{ fontSize: '12px' }} />
-                      </FormItem>
-                    )}
-                  />
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      className="w-full"
-                      style={{ fontSize: '12px' }}
-                      onClick={addItemForm.handleSubmit(addItem)}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Item
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Form>
+                </Form>
+              </CardContent>
+            </Card>
           )}
 
           {form.formState.errors.root && (
-            <div className="text-red-600 font-medium" style={{ fontSize: '12px' }} data-testid="error-form-root">
+            <div className="text-red-600 font-medium text-sm" data-testid="error-form-root">
               {form.formState.errors.root.message}
             </div>
           )}
           {form.formState.errors.purchaseOrderId && (
-            <div className="text-red-600 font-medium" style={{ fontSize: '12px' }}>
+            <div className="text-red-600 font-medium text-sm">
               {form.formState.errors.purchaseOrderId.message}
             </div>
           )}
           {form.formState.errors.receivedDate && (
-            <div className="text-red-600 font-medium" style={{ fontSize: '12px' }}>
+            <div className="text-red-600 font-medium text-sm">
               {form.formState.errors.receivedDate.message}
             </div>
           )}
         </div>
 
-        <div className="flex justify-end gap-2 pt-1 border-t flex-shrink-0 mt-1">
-          <Button variant="outline" onClick={resetForm} className="h-7 px-3" style={{ fontSize: '12px' }}>
+        <div className="flex justify-end gap-3 pt-4 border-t flex-shrink-0">
+          <Button variant="outline" onClick={resetForm} className="h-10">
             Reset
           </Button>
           <Button
             onClick={() => form.handleSubmit(handleSubmit)()}
             disabled={createReceiptMutation.isPending}
-            className="h-7 px-3"
-            style={{ fontSize: '12px' }}
+            className="h-10"
           >
             {createReceiptMutation.isPending ? "Processing..." : "Create Goods Receipt"}
           </Button>

@@ -224,8 +224,9 @@ export default function ClinicalDecisionSupport() {
   const filteredPatients = patients.filter((patient: any) => {
     const fullName = `${patient.firstName} ${patient.lastName}`.toLowerCase();
     const patientId = patient.patientId?.toLowerCase() || "";
+    const email = patient.email?.toLowerCase() || "";
     const searchTerm = patientSearch.toLowerCase();
-    return fullName.includes(searchTerm) || patientId.includes(searchTerm);
+    return fullName.includes(searchTerm) || patientId.includes(searchTerm) || email.includes(searchTerm);
   });
 
   // Get selected patient name for display
@@ -938,9 +939,13 @@ export default function ClinicalDecisionSupport() {
                             <FormControl>
                               <SelectTrigger data-testid="select-patient">
                                 <SelectValue placeholder="Select patient">
-                                  {patients.find((p: any) => p.id === field.value) 
-                                    ? `${patients.find((p: any) => p.id === field.value)?.firstName} ${patients.find((p: any) => p.id === field.value)?.lastName}` 
-                                    : "Select patient"}
+                                  {(() => {
+                                    const selectedPatient = patients.find((p: any) => p.id === field.value);
+                                    if (!selectedPatient) return "Select patient";
+                                    return selectedPatient.email
+                                      ? `${selectedPatient.firstName} ${selectedPatient.lastName} (${selectedPatient.email})`
+                                      : `${selectedPatient.firstName} ${selectedPatient.lastName}`;
+                                  })()}
                                 </SelectValue>
                               </SelectTrigger>
                             </FormControl>
@@ -959,7 +964,17 @@ export default function ClinicalDecisionSupport() {
                               ) : (
                                 filteredPatients.map((patient: any) => (
                                   <SelectItem key={patient.id} value={patient.id.toString()}>
-                                    {`${patient.firstName} ${patient.lastName} (${patient.patientId})`}
+                                    <div className="flex flex-col">
+                                      <span>{patient.firstName} {patient.lastName}</span>
+                                      <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                        {patient.email && (
+                                          <span>{patient.email}</span>
+                                        )}
+                                        {patient.patientId && (
+                                          <span>({patient.patientId})</span>
+                                        )}
+                                      </div>
+                                    </div>
                                   </SelectItem>
                                 ))
                               )}
@@ -1669,20 +1684,20 @@ export default function ClinicalDecisionSupport() {
       <Dialog open={showCreateInsightSuccess} onOpenChange={setShowCreateInsightSuccess}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-green-600">
+            <DialogTitle className="text-xl font-bold text-green-600 dark:text-green-400">
               AI Insight Generated
             </DialogTitle>
           </DialogHeader>
           <div className="flex flex-col items-center gap-3 py-4 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
               <Check className="h-6 w-6" />
             </span>
-            <p className="text-lg font-semibold text-gray-900">
+            <p className="text-lg font-semibold text-gray-900 dark:text-white">
               {createdInsightTitle
                 ? `"${createdInsightTitle}" created successfully`
                 : "Insight created successfully"}
             </p>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               The insight has been saved and the Clinical Insights list was refreshed.
             </p>
           </div>

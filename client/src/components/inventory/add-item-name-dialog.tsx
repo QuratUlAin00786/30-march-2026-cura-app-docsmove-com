@@ -1,9 +1,16 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -26,10 +33,30 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { CheckCircle } from "lucide-react";
 
+const UNIT_OF_MEASUREMENT_OPTIONS = [
+  "Tablet",
+  "Capsule",
+  "Bottle",
+  "Vial",
+  "Ampoule",
+  "Injection",
+  "Piece",
+  "Pack",
+  "Box",
+  "Roll",
+  "Pair",
+  "Kit",
+  "ml",
+  "Liter",
+];
+
 interface InventoryItemName {
   id: number;
   name: string;
   description?: string;
+  brandName?: string;
+  manufacturer?: string;
+  unitOfMeasurement?: string;
   isActive: boolean;
 }
 
@@ -48,7 +75,11 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
   const [formData, setFormData] = useState({
     name: "",
     description: "",
+    brandName: "",
+    manufacturer: "",
+    unitOfMeasurement: "Piece",
   });
+  const [nameError, setNameError] = useState<string>("");
 
   // Populate form when editing
   useEffect(() => {
@@ -56,6 +87,9 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
       setFormData({
         name: editingItemName.name || "",
         description: editingItemName.description || "",
+        brandName: editingItemName.brandName || "",
+        manufacturer: editingItemName.manufacturer || "",
+        unitOfMeasurement: editingItemName.unitOfMeasurement || "Piece",
       });
     } else if (!editingItemName && open) {
       resetForm();
@@ -64,6 +98,17 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Fetch all item names to check for duplicates
+  const { data: allItemNames = [] } = useQuery<InventoryItemName[]>({
+    queryKey: ["/api/inventory/item-names"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/inventory/item-names");
+      return response.json();
+    },
+    enabled: open, // Only fetch when dialog is open
+    retry: 3,
+  });
 
   const addItemNameMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -213,17 +258,49 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
     setFormData({
       name: "",
       description: "",
+      brandName: "",
+      manufacturer: "",
+      unitOfMeasurement: "Piece",
     });
+    setNameError("");
+  };
+
+  const checkDuplicateName = (name: string): boolean => {
+    if (!name.trim()) return false;
+    
+    const trimmedName = name.trim().toLowerCase();
+    // Check if name already exists (excluding current item being edited)
+    const existingItem = allItemNames.find(
+      (item) => item.name.toLowerCase() === trimmedName && 
+      (!isEditMode || item.id !== editingItemName?.id)
+    );
+    
+    return !!existingItem;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Clear previous errors
+    setNameError("");
+    
     // Basic validation
     if (!formData.name.trim()) {
+      setNameError("Item name is required");
       toast({
         title: "Validation Error",
         description: "Please enter an item name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check for duplicate name
+    if (checkDuplicateName(formData.name)) {
+      setNameError("Item name already exists. Please add another item name.");
+      toast({
+        title: "Validation Error",
+        description: "Item name already exists. Please use a different name.",
         variant: "destructive",
       });
       return;
@@ -233,23 +310,53 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
       updateItemNameMutation.mutate({
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
+        brandName: formData.brandName.trim() || undefined,
+        manufacturer: formData.manufacturer.trim() || undefined,
+        unitOfMeasurement: formData.unitOfMeasurement || "Piece",
       });
     } else {
       addItemNameMutation.mutate({
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
+        brandName: formData.brandName.trim() || undefined,
+        manufacturer: formData.manufacturer.trim() || undefined,
+        unitOfMeasurement: formData.unitOfMeasurement || "Piece",
       });
     }
   };
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    
+    // Validate name in real-time when user types
+    if (field === "name") {
+      if (!value.trim()) {
+        setNameError("");
+      } else if (checkDuplicateName(value)) {
+        setNameError("Item name already exists. Please add another item name.");
+      } else {
+        setNameError("");
+      }
+    }
   };
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md">
+      <Dialog 
+        open={open} 
+        onOpenChange={onOpenChange}
+      >
+        <DialogContent 
+          className="max-w-md"
+          onPointerDownOutside={(e) => {
+            // Prevent closing on outside click - only close via X button or Cancel
+            e.preventDefault();
+          }}
+          onEscapeKeyDown={(e) => {
+            // Prevent closing on Escape key - only close via X button or Cancel
+            e.preventDefault();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{isEditMode ? "Edit Item Name" : "Add New Item Name"}</DialogTitle>
             <DialogDescription>
@@ -268,8 +375,12 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
                 value={formData.name}
                 onChange={(e) => handleInputChange("name", e.target.value)}
                 placeholder="e.g., Paracetamol 500mg"
+                className={nameError ? "border-red-500" : ""}
                 required
               />
+              {nameError && (
+                <p className="text-sm text-red-500 mt-1">{nameError}</p>
+              )}
             </div>
 
             <div>
@@ -281,6 +392,45 @@ export default function AddItemNameDialog({ open, onOpenChange, onItemNameAdded,
                 placeholder="Brief description of the item name"
                 rows={3}
               />
+            </div>
+
+            <div>
+              <Label htmlFor="brandName">Brand Name</Label>
+              <Input
+                id="brandName"
+                value={formData.brandName}
+                onChange={(e) => handleInputChange("brandName", e.target.value)}
+                placeholder="e.g., Panadol"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="manufacturer">Manufacturer</Label>
+              <Input
+                id="manufacturer"
+                value={formData.manufacturer}
+                onChange={(e) => handleInputChange("manufacturer", e.target.value)}
+                placeholder="e.g., GSK"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="unitOfMeasurement">Unit of Measurement</Label>
+              <Select
+                value={formData.unitOfMeasurement}
+                onValueChange={(value) => handleInputChange("unitOfMeasurement", value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select unit of measurement" />
+                </SelectTrigger>
+                <SelectContent>
+                  {UNIT_OF_MEASUREMENT_OPTIONS.map((unit) => (
+                    <SelectItem key={unit} value={unit}>
+                      {unit}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </form>
 

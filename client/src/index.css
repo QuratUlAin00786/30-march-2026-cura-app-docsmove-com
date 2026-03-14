@@ -315,18 +315,27 @@ button[data-testid="delete-customer-button"] {
 .border-cura-mist { border-color: #E0E1F4 !important; }
 .border-cura-mint-drift { border-color: #6CFFEB !important; }
 
-/* Patients tab - Age Distribution chart: force white border (override theme black/dark border) */
+/* Patients tab - Age Distribution chart: white border in light theme, matches card background in dark theme */
 [data-age-distribution-chart],
 .age-distribution-card-white-border {
   border: 2px solid white !important;
+}
+.dark [data-age-distribution-chart],
+.dark .age-distribution-card-white-border {
+  border-color: var(--card) !important;
 }
 [data-age-distribution-chart] > *,
 [data-age-distribution-chart] [class*="CardContent"],
 [data-age-distribution-chart] [class*="card-content"] {
   border-color: white !important;
 }
+.dark [data-age-distribution-chart] > *,
+.dark [data-age-distribution-chart] [class*="CardContent"],
+.dark [data-age-distribution-chart] [class*="card-content"] {
+  border-color: var(--card) !important;
+}
 
-/* Chart wrapper and Recharts containers: white border only, no black box */
+/* Chart wrapper and Recharts containers: white border in light theme, matches card background in dark theme */
 .age-distribution-chart-wrap,
 [data-age-distribution-chart] .age-distribution-chart-wrap,
 [data-age-distribution-chart] .recharts-responsive-container,
@@ -334,6 +343,13 @@ button[data-testid="delete-customer-button"] {
 [data-age-distribution-chart] .recharts-surface {
   border: 1px solid white !important;
   outline: none !important;
+}
+.dark .age-distribution-chart-wrap,
+.dark [data-age-distribution-chart] .age-distribution-chart-wrap,
+.dark [data-age-distribution-chart] .recharts-responsive-container,
+.dark [data-age-distribution-chart] .recharts-wrapper,
+.dark [data-age-distribution-chart] .recharts-surface {
+  border-color: var(--card) !important;
 }
 .age-distribution-chart-wrap {
   border-width: 2px !important;

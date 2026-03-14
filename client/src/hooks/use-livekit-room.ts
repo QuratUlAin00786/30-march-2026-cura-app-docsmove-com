@@ -5,6 +5,7 @@ import { useToast } from '@/hooks/use-toast';
 export interface LiveKitRoomConfig {
   roomName: string;
   participantName: string;
+  participantRole?: string;
   url?: string;
   token?: string;
   audioEnabled?: boolean;
@@ -36,6 +37,8 @@ export function useLiveKitRoom(): UseLiveKitRoomReturn {
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const roomRef = useRef<Room | null>(null);
+  const localParticipantInfoRef = useRef<{ name: string; role?: string } | null>(null);
+  const remoteParticipantsInfoRef = useRef<Map<string, { name: string; role?: string }>>(new Map());
   const { toast } = useToast();
 
   const connect = useCallback(async (config: LiveKitRoomConfig) => {
@@ -90,6 +93,12 @@ export function useLiveKitRoom(): UseLiveKitRoomReturn {
           resolution: { width: 1280, height: 720 },
         },
       });
+
+      // Store local participant info
+      localParticipantInfoRef.current = {
+        name: config.participantName,
+        role: config.participantRole,
+      };
 
       // Set up event listeners
       newRoom.on(RoomEvent.Connected, () => {
@@ -148,24 +157,88 @@ export function useLiveKitRoom(): UseLiveKitRoomReturn {
           console.log('Error stopping media streams on disconnect:', e);
         }
         
+        // Get the local participant's identity before clearing state
+        const localParticipantIdentity = newRoom.localParticipant?.identity;
+        let disconnectedParticipantName = '';
+        let disconnectedParticipantRole: string | undefined;
+        
+        // Try to extract name and role from local participant identity
+        if (localParticipantIdentity) {
+          const identityParts = localParticipantIdentity.split(':');
+          if (identityParts.length >= 5) {
+            disconnectedParticipantRole = identityParts[0];
+            const firstName = identityParts[2];
+            const lastName = identityParts[3];
+            if (firstName && lastName) {
+              disconnectedParticipantName = `${firstName} ${lastName}`;
+            }
+          } else {
+            // Fallback to stored local info
+            const localInfo = localParticipantInfoRef.current;
+            if (localInfo) {
+              disconnectedParticipantName = localInfo.name;
+              disconnectedParticipantRole = localInfo.role;
+            } else {
+              disconnectedParticipantName = localParticipantIdentity;
+            }
+          }
+        } else {
+          // Fallback to stored local info if identity is not available
+          const localInfo = localParticipantInfoRef.current;
+          if (localInfo) {
+            disconnectedParticipantName = localInfo.name;
+            disconnectedParticipantRole = localInfo.role;
+          }
+        }
+        
         setIsConnected(false);
         setIsConnecting(false);
         setLocalParticipant(null);
         setRemoteParticipants([]);
-        toast({
-          title: 'Disconnected',
-          description: 'You have left the call',
-        });
+        
+        // Don't show toast here - parent components handle showing modals
+        // Clear stored participant info
+        localParticipantInfoRef.current = null;
+        remoteParticipantsInfoRef.current.clear();
       });
 
       newRoom.on(RoomEvent.ParticipantConnected, (participant) => {
         console.log('👤 Participant connected:', participant.identity);
         setRemoteParticipants(Array.from(newRoom.remoteParticipants.values()));
+        
+        // Try to extract name and role from participant identity or metadata
+        // The identity format is typically: "role:id:firstName:lastName:email"
+        const identityParts = participant.identity?.split(':') || [];
+        let participantName = participant.name || participant.identity || 'Unknown';
+        let participantRole: string | undefined;
+        
+        if (identityParts.length >= 5) {
+          participantRole = identityParts[0];
+          const firstName = identityParts[2];
+          const lastName = identityParts[3];
+          if (firstName && lastName) {
+            participantName = `${firstName} ${lastName}`;
+          }
+        } else if (participant.name) {
+          participantName = participant.name;
+        }
+        
+        // Store remote participant info
+        remoteParticipantsInfoRef.current.set(participant.identity, {
+          name: participantName,
+          role: participantRole,
+        });
       });
 
       newRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
         console.log('👤 Participant disconnected:', participant.identity);
         setRemoteParticipants(Array.from(newRoom.remoteParticipants.values()));
+        
+        // Don't show toast here - LiveKit components handle this and call onDisconnect()
+        // which triggers the modal in parent components
+        
+        // Remove from stored participants
+        remoteParticipantsInfoRef.current.delete(participant.identity);
       });
 
       newRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {

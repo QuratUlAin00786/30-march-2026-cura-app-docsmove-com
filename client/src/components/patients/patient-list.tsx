@@ -2771,10 +2771,12 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
     );
     toast({
       title: "Book Appointment",
-      description: `Opening appointment booking for ${patient.firstName} ${patient.lastName}`,
+      description: `Booking appointment for ${patient.firstName} ${patient.lastName}`,
     });
+    // Use patient.id (not patient.patientId) to match the URL parameter format
+    // Navigate to calendar page with patientId in URL so the modal opens with correct patient
     const subdomain = getTenantSubdomain();
-    setLocation(`/${subdomain}/appointments?patientId=${patient.id}`);
+    setLocation(`/${subdomain}/calendar?patientId=${patient.id}`);
   };
 
   if (error) {

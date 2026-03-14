@@ -649,6 +649,9 @@ export default function PatientFamilyHistory({
     occupation: "",
     education: "",
   });
+  const [showAllergyDeleteSuccessModal, setShowAllergyDeleteSuccessModal] = useState(false);
+  const [showMedicalHistoryUpdateSuccessModal, setShowMedicalHistoryUpdateSuccessModal] = useState(false);
+  const [showChronicConditionDeleteSuccessModal, setShowChronicConditionDeleteSuccessModal] = useState(false);
 
   // Ensure Family History tab is selected when dialog opens
   useEffect(() => {
@@ -656,6 +659,10 @@ export default function PatientFamilyHistory({
       setActiveTab("family");
     }
   }, [isEditing]);
+
+  // Track if the mutation is for allergy deletion or chronic condition deletion
+  const [isAllergyDeletion, setIsAllergyDeletion] = useState(false);
+  const [isChronicConditionDeletion, setIsChronicConditionDeletion] = useState(false);
 
   const updateMedicalHistoryMutation = useMutation({
     mutationFn: async (medicalHistory: any) => {
@@ -681,12 +688,21 @@ export default function PatientFamilyHistory({
       queryClient.invalidateQueries({
         queryKey: [`/api/patients/${patient.id}`],
       });
-      toast({
-        title: "Medical history updated",
-        description: "Patient medical information has been saved successfully",
-      });
+      
+      // Show success modal for allergy deletion, chronic condition deletion, or general medical history updates
+      if (isAllergyDeletion) {
+        setShowAllergyDeleteSuccessModal(true);
+        setIsAllergyDeletion(false); // Reset flag
+      } else if (isChronicConditionDeletion) {
+        setShowChronicConditionDeleteSuccessModal(true);
+        setIsChronicConditionDeletion(false); // Reset flag
+      } else {
+        setShowMedicalHistoryUpdateSuccessModal(true);
+      }
     },
     onError: () => {
+      setIsAllergyDeletion(false); // Reset flag on error
+      setIsChronicConditionDeletion(false); // Reset flag on error
       toast({
         title: "Error updating medical history",
         description: "Failed to save medical information. Please try again.",
@@ -890,6 +906,9 @@ export default function PatientFamilyHistory({
       (allergy) => allergy !== allergyToRemove,
     );
 
+    // Set flag to show success modal instead of toast
+    setIsAllergyDeletion(true);
+
     updateMedicalHistoryMutation.mutate({
       allergies: updatedAllergies,
       chronicConditions: patient.medicalHistory?.chronicConditions || [],
@@ -946,6 +965,9 @@ export default function PatientFamilyHistory({
   const removeChronicCondition = (index: number) => {
     const currentConditions = patient.medicalHistory?.chronicConditions || [];
     const updatedConditions = currentConditions.filter((_, i) => i !== index);
+
+    // Set flag to show success modal instead of toast
+    setIsChronicConditionDeletion(true);
 
     updateMedicalHistoryMutation.mutate({
       allergies: patient.medicalHistory?.allergies || [],
@@ -2802,6 +2824,84 @@ export default function PatientFamilyHistory({
 
           <div className="flex justify-end mt-6">
             <Button variant="outline" onClick={closeImmunizationDetails}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Allergy Deletion Success Modal */}
+      <Dialog open={showAllergyDeleteSuccessModal} onOpenChange={setShowAllergyDeleteSuccessModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Allergy Deleted Successfully</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-6">
+            <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 mb-4">
+              <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              Allergies deleted successfully
+            </h3>
+            <Button
+              onClick={() => {
+                setShowAllergyDeleteSuccessModal(false);
+              }}
+              className="mt-6 w-full"
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Medical History Update Success Modal */}
+      <Dialog open={showMedicalHistoryUpdateSuccessModal} onOpenChange={setShowMedicalHistoryUpdateSuccessModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Medical History Updated Successfully</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-6">
+            <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 mb-4">
+              <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              Medical history updated
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-4">
+              Patient medical information has been saved successfully
+            </p>
+            <Button
+              onClick={() => {
+                setShowMedicalHistoryUpdateSuccessModal(false);
+              }}
+              className="mt-2 w-full"
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Chronic Condition Deletion Success Modal */}
+      <Dialog open={showChronicConditionDeleteSuccessModal} onOpenChange={setShowChronicConditionDeleteSuccessModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Chronic Condition Deleted Successfully</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-6">
+            <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 mb-4">
+              <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              Chronic Conditions deleted successfully
+            </h3>
+            <Button
+              onClick={() => {
+                setShowChronicConditionDeleteSuccessModal(false);
+              }}
+              className="mt-6 w-full"
+            >
               Close
             </Button>
           </div>

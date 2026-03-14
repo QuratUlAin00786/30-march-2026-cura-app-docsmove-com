@@ -332,18 +332,29 @@ export default function MessagingPage() {
     participant: any;
     token?: string;
     serverUrl?: string;
+    initiatorSocketId?: string;
+    participantSocketId?: string;
   } | null>(null);
   const [liveKitAudioCall, setLiveKitAudioCall] = useState<{
     roomName: string;
     participant: any;
     token?: string;
     serverUrl?: string;
+    initiatorSocketId?: string;
+    participantSocketId?: string;
   } | null>(null);
   const [callStatusModal, setCallStatusModal] = useState<{
     open: boolean;
     title: string;
     description: string;
   }>({ open: false, title: "", description: "" });
+  
+  // Call timer and state refs (matching telemedicine.tsx)
+  const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const callTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const callStartTimeRef = useRef<number | null>(null);
+  const currentAudioCallRef = useRef<typeof liveKitAudioCall>(null);
+  const callAcceptedRef = useRef<boolean>(false);
   const [newMessageContent, setNewMessageContent] = useState("");
   const [showSentConfirmation, setShowSentConfirmation] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -699,6 +710,9 @@ export default function MessagingPage() {
         participant,
         token: liveKitRoom.token,
         serverUrl: liveKitRoom.serverUrl,
+        // Store exact socket identifiers used to route events (critical for closing Incoming Call popup)
+        initiatorSocketId: fromIdentifier,
+        participantSocketId: toIdentifier,
       });
     } catch (error: any) {
       console.error("LiveKit video call failed:", error);
@@ -760,6 +774,9 @@ export default function MessagingPage() {
         participant,
         token: liveKitRoom.token,
         serverUrl: liveKitRoom.serverUrl,
+        // Store exact socket identifiers used to route events (critical for closing Incoming Call popup)
+        initiatorSocketId: fromIdentifier,
+        participantSocketId: toIdentifier,
       });
     } catch (error: any) {
       console.error("LiveKit audio call failed:", error);
@@ -771,101 +788,156 @@ export default function MessagingPage() {
     }
   };
 
-  const handleLiveKitVideoCallEnd = () => {
-    // Stop all camera/video tracks before closing
-    // Stop all video tracks from video elements in the document
-    document.querySelectorAll('video').forEach(videoElement => {
-      const video = videoElement as HTMLVideoElement;
-      if (video.srcObject instanceof MediaStream) {
-        const stream = video.srcObject as MediaStream;
-        stream.getVideoTracks().forEach(track => {
-          track.stop();
-          console.log('[Messaging] Stopped video track from video element on call end');
-        });
-        video.srcObject = null;
-      }
-    });
-    
-    // Also stop any active media tracks that might be running
-    // Get all active media streams and stop video tracks
-    const allStreams = new Set<MediaStream>();
-    document.querySelectorAll('video, audio').forEach(element => {
-      const mediaElement = element as HTMLVideoElement | HTMLAudioElement;
-      if (mediaElement.srcObject instanceof MediaStream) {
-        allStreams.add(mediaElement.srcObject as MediaStream);
-      }
-    });
-    
-    allStreams.forEach(stream => {
-      stream.getVideoTracks().forEach(track => {
-        track.stop();
-        console.log('[Messaging] Stopped video track from media stream on call end');
-      });
-    });
-    
+  const handleLiveKitVideoCallEnd = (disconnectedParticipant?: { name: string; role?: string }) => {
+    // Stop call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    setCallDuration(0);
+
+    // Capture values before clearing state (matching telemedicine.tsx)
+    const currentVideoCall = liveKitVideoCall;
+    const currentUser = user;
+
     // Emit both call_ended and call_declined events to ensure recipient's popup closes
-    if (liveKitVideoCall && user) {
-      const initiatorUserId = buildSocketUserIdentifier(user);
-      const participantId = buildSocketUserIdentifier(liveKitVideoCall.participant);
+    // Do this BEFORE clearing state to ensure we have the data
+    if (currentVideoCall && currentUser) {
+      // Prefer the exact identifiers used when the room/call was created (matches telemedicine routing)
+      const initiatorUserId =
+        currentVideoCall.initiatorSocketId || buildSocketUserIdentifier(currentUser);
+      const participantId =
+        currentVideoCall.participantSocketId ||
+        buildSocketUserIdentifier(currentVideoCall.participant);
       
       if (initiatorUserId && participantId) {
         // Emit call_declined to close recipient's incoming call popup
         socketManager.emitToServer('call_declined', {
-          roomId: liveKitVideoCall.roomName,
+          roomId: currentVideoCall.roomName,
           fromUserId: initiatorUserId,
           toUserId: participantId,
           isGroup: false,
         });
-        console.log('[Messaging] Emitted call_declined for video call:', liveKitVideoCall.roomName);
+        console.log('[Messaging] Emitted call_declined for video call:', {
+          roomId: currentVideoCall.roomName,
+          fromUserId: initiatorUserId,
+          toUserId: participantId,
+        });
         
         // Also emit call_ended for consistency
         socketManager.emitToServer('call_ended', {
-          roomId: liveKitVideoCall.roomName,
+          roomId: currentVideoCall.roomName,
           initiatorUserId: initiatorUserId,
           participantIds: [participantId],
         });
-        console.log('[Messaging] Emitted call_ended for video call:', liveKitVideoCall.roomName);
+        console.log('[Messaging] Emitted call_ended for video call:', {
+          roomId: currentVideoCall.roomName,
+          initiatorUserId: initiatorUserId,
+          participantIds: [participantId],
+        });
       }
     }
     
+    // Clear state after emitting events
     setLiveKitVideoCall(null);
-    toast({
-      title: "Call Ended",
-      description: "Video call has been terminated",
-    });
+    
+    // Format disconnect message with participant name if available
+    let description = "Video call has been terminated";
+    if (disconnectedParticipant && disconnectedParticipant.name) {
+      const rolePrefix = disconnectedParticipant.role?.toLowerCase() === 'nurse' ? 'Nurse.' : disconnectedParticipant.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+      const displayName = rolePrefix ? `${rolePrefix} ${disconnectedParticipant.name}` : disconnectedParticipant.name;
+      description = `Disconnected ${displayName} have left the call`;
+    }
+    
+    // Use setTimeout to ensure modal shows after main dialog closes
+    setTimeout(() => {
+      setCallStatusModal({
+        open: true,
+        title: "Call Ended",
+        description: description,
+      });
+    }, 100);
   };
 
-  const handleLiveKitAudioCallEnd = () => {
+  const handleLiveKitAudioCallEnd = (disconnectedParticipant?: { name: string; role?: string }) => {
+    // Stop call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    
+    // Stop timeout timer
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+    
+    setCallDuration(0);
+
+    // Capture values before clearing state (matching telemedicine.tsx)
+    const currentAudioCall = liveKitAudioCall;
+    const currentUser = user;
+
     // Emit both call_ended and call_declined events to ensure recipient's popup closes
-    if (liveKitAudioCall && user) {
-      const initiatorUserId = buildSocketUserIdentifier(user);
-      const participantId = buildSocketUserIdentifier(liveKitAudioCall.participant);
+    // Do this BEFORE clearing state to ensure we have the data
+    if (currentAudioCall && currentUser) {
+      // Prefer the exact identifiers used when the room/call was created (matches telemedicine routing)
+      const initiatorUserId =
+        currentAudioCall.initiatorSocketId || buildSocketUserIdentifier(currentUser);
+      const participantId =
+        currentAudioCall.participantSocketId ||
+        buildSocketUserIdentifier(currentAudioCall.participant);
       
       if (initiatorUserId && participantId) {
         // Emit call_declined to close recipient's incoming call popup
         socketManager.emitToServer('call_declined', {
-          roomId: liveKitAudioCall.roomName,
+          roomId: currentAudioCall.roomName,
           fromUserId: initiatorUserId,
           toUserId: participantId,
           isGroup: false,
         });
-        console.log('[Messaging] Emitted call_declined for audio call:', liveKitAudioCall.roomName);
+        console.log('[Messaging] Emitted call_declined for audio call:', {
+          roomId: currentAudioCall.roomName,
+          fromUserId: initiatorUserId,
+          toUserId: participantId,
+        });
         
         // Also emit call_ended for consistency
         socketManager.emitToServer('call_ended', {
-          roomId: liveKitAudioCall.roomName,
+          roomId: currentAudioCall.roomName,
           initiatorUserId: initiatorUserId,
           participantIds: [participantId],
         });
-        console.log('[Messaging] Emitted call_ended for audio call:', liveKitAudioCall.roomName);
+        console.log('[Messaging] Emitted call_ended for audio call:', {
+          roomId: currentAudioCall.roomName,
+          initiatorUserId: initiatorUserId,
+          participantIds: [participantId],
+        });
       }
     }
     
+    // Clear state after emitting events
     setLiveKitAudioCall(null);
-    toast({
-      title: "Call Ended",
-      description: "Audio call has been terminated",
-    });
+    currentAudioCallRef.current = null;
+    callStartTimeRef.current = null;
+    callAcceptedRef.current = false;
+    
+    // Format disconnect message with participant name if available
+    let description = "Audio call has been terminated";
+    if (disconnectedParticipant && disconnectedParticipant.name) {
+      const rolePrefix = disconnectedParticipant.role?.toLowerCase() === 'nurse' ? 'Nurse.' : disconnectedParticipant.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+      const displayName = rolePrefix ? `${rolePrefix} ${disconnectedParticipant.name}` : disconnectedParticipant.name;
+      description = `Disconnected ${displayName} have left the call`;
+    }
+    
+    // Use setTimeout to ensure modal shows after main dialog closes
+    setTimeout(() => {
+      setCallStatusModal({
+        open: true,
+        title: "Call Ended",
+        description: description,
+      });
+    }, 100);
   };
 
   // Listen for call_ended and call_declined events from other participants
@@ -874,9 +946,15 @@ export default function MessagingPage() {
     const unsubscribeCallEnded = socketManager.on('call_ended', (data: any) => {
       console.log('[Messaging] Received call_ended event:', data);
       
-      // Check if this is for our current video call
+      // Check if this is for our current video call (exact matching like telemedicine.tsx)
       if (liveKitVideoCall && data.roomId === liveKitVideoCall.roomName) {
         console.log('[Messaging] Closing video call - other party ended');
+        // Stop call timer
+        if (callTimerRef.current) {
+          clearInterval(callTimerRef.current);
+          callTimerRef.current = null;
+        }
+        setCallDuration(0);
         
         // Stop all camera/video tracks before closing
         document.querySelectorAll('video').forEach(videoElement => {
@@ -906,23 +984,70 @@ export default function MessagingPage() {
           });
         });
         
+        // Get participant info for disconnect message
+        const participant = liveKitVideoCall.participant;
+        let description = "Video call has been terminated";
+        if (participant) {
+          const rolePrefix = participant.role?.toLowerCase() === 'nurse' ? 'Nurse.' : participant.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+          const displayName = rolePrefix 
+            ? `${rolePrefix} ${participant.firstName || participant.name?.split(' ')[0] || ''} ${participant.lastName || participant.name?.split(' ').slice(1).join(' ') || ''}`.trim()
+            : `${participant.firstName || participant.name?.split(' ')[0] || ''} ${participant.lastName || participant.name?.split(' ').slice(1).join(' ') || ''}`.trim();
+          if (displayName && displayName !== 'Unknown') {
+            description = `Disconnected ${displayName} have left the call`;
+          }
+        }
+        
         setLiveKitVideoCall(null);
-        setCallStatusModal({
-          open: true,
-          title: "Call Ended",
-          description: "The other participant ended the call",
-        });
+        // Use setTimeout to ensure modal shows after main dialog closes
+        setTimeout(() => {
+          setCallStatusModal({
+            open: true,
+            title: "Call Ended",
+            description: description,
+          });
+        }, 100);
       }
       
-      // Check if this is for our current audio call
+      // Check if this is for our current audio call (exact matching like telemedicine.tsx)
       if (liveKitAudioCall && data.roomId === liveKitAudioCall.roomName) {
         console.log('[Messaging] Closing audio call - other party ended');
+        // Stop call timer
+        if (callTimerRef.current) {
+          clearInterval(callTimerRef.current);
+          callTimerRef.current = null;
+        }
+        // Stop timeout timer
+        if (callTimeoutRef.current) {
+          clearTimeout(callTimeoutRef.current);
+          callTimeoutRef.current = null;
+        }
+        setCallDuration(0);
+        
+        // Get participant info for disconnect message
+        const participant = liveKitAudioCall.participant;
+        let description = "Audio call has been terminated";
+        if (participant) {
+          const rolePrefix = participant.role?.toLowerCase() === 'nurse' ? 'Nurse.' : participant.role?.toLowerCase() === 'doctor' ? 'Dr.' : '';
+          const displayName = rolePrefix 
+            ? `${rolePrefix} ${participant.firstName || participant.name?.split(' ')[0] || ''} ${participant.lastName || participant.name?.split(' ').slice(1).join(' ') || ''}`.trim()
+            : `${participant.firstName || participant.name?.split(' ')[0] || ''} ${participant.lastName || participant.name?.split(' ').slice(1).join(' ') || ''}`.trim();
+          if (displayName && displayName !== 'Unknown') {
+            description = `Disconnected ${displayName} have left the call`;
+          }
+        }
+        
         setLiveKitAudioCall(null);
-        setCallStatusModal({
-          open: true,
-          title: "Call Ended",
-          description: "The other participant ended the call",
-        });
+        currentAudioCallRef.current = null;
+        callStartTimeRef.current = null;
+        callAcceptedRef.current = false;
+        // Use setTimeout to ensure modal shows after main dialog closes
+        setTimeout(() => {
+          setCallStatusModal({
+            open: true,
+            title: "Call Ended",
+            description: description,
+          });
+        }, 100);
       }
     });
 
@@ -930,9 +1055,15 @@ export default function MessagingPage() {
     const unsubscribeCallDeclined = socketManager.on('call_declined', (data: any) => {
       console.log('[Messaging] Received call_declined event:', data);
       
-      // Check if this is for our current video call
+      // Check if this is for our current video call (exact matching like telemedicine.tsx)
       if (liveKitVideoCall && data.roomId === liveKitVideoCall.roomName) {
         console.log('[Messaging] Closing video call - call was declined');
+        // Stop call timer
+        if (callTimerRef.current) {
+          clearInterval(callTimerRef.current);
+          callTimerRef.current = null;
+        }
+        setCallDuration(0);
         
         // Stop all camera/video tracks before closing
         // Stop all video tracks from video elements in the document
@@ -973,10 +1104,24 @@ export default function MessagingPage() {
         });
       }
       
-      // Check if this is for our current audio call
+      // Check if this is for our current audio call (exact matching like telemedicine.tsx)
       if (liveKitAudioCall && data.roomId === liveKitAudioCall.roomName) {
         console.log('[Messaging] Closing audio call - call was declined');
+        // Stop call timer
+        if (callTimerRef.current) {
+          clearInterval(callTimerRef.current);
+          callTimerRef.current = null;
+        }
+        // Stop timeout timer
+        if (callTimeoutRef.current) {
+          clearTimeout(callTimeoutRef.current);
+          callTimeoutRef.current = null;
+        }
+        setCallDuration(0);
         setLiveKitAudioCall(null);
+        currentAudioCallRef.current = null;
+        callStartTimeRef.current = null;
+        callAcceptedRef.current = false;
         setCallStatusModal({
           open: true,
           title: "Call Declined",
@@ -990,6 +1135,18 @@ export default function MessagingPage() {
       unsubscribeCallDeclined();
     };
   }, [liveKitVideoCall, liveKitAudioCall]);
+
+  // Cleanup on unmount (matching telemedicine.tsx)
+  useEffect(() => {
+    return () => {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+      }
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Clear message content when conversation changes
   useEffect(() => {
@@ -4090,7 +4247,7 @@ export default function MessagingPage() {
                 </Button>
                 <Button
                   onClick={handleStartVideoCall}
-                  className="bg-blue-600 hover:bg-blue-700"
+                  variant="default"
                 >
                   {videoCall.scheduled ? "Schedule Call" : "Start Call"}
                 </Button>
@@ -4429,7 +4586,8 @@ export default function MessagingPage() {
                 <Button
                   onClick={handleSendNewMessage}
                   disabled={sendMessageMutation.isPending}
-                  className="h-8 text-xs bg-blue-600 hover:bg-blue-700 leading-none"
+                  variant="default"
+                  className="h-8 text-xs leading-none"
                 >
                   {sendMessageMutation.isPending ? "Sending..." : "Send Message"}
                 </Button>
@@ -5231,7 +5389,8 @@ export default function MessagingPage() {
                         <div className="flex flex-col gap-1">
                           <Button
                             size="sm"
-                            className="h-8 w-8 p-0 bg-blue-600 hover:bg-blue-700 shrink-0"
+                            variant="default"
+                            className="h-8 w-8 p-0 shrink-0"
                             onClick={handleSendConversationMessage}
                             disabled={!newMessageContent.trim()}
                           >
@@ -8296,19 +8455,20 @@ export default function MessagingPage() {
               >
                 {isVideoOn ? '📹' : '📵'}
               </Button>
-              <Button variant="outline" size="sm" className="bg-gray-700 text-white border-gray-600 hover:bg-gray-600">
+              <Button variant="outline" size="sm">
                 🖥️
               </Button>
-              <Button variant="outline" size="sm" className="bg-gray-700 text-white border-gray-600 hover:bg-gray-600">
+              <Button variant="outline" size="sm">
                 💬
               </Button>
               <Button
                 onClick={handleEndVideoCall}
-                className="bg-red-600 hover:bg-red-700 text-white px-6"
+                variant="destructive"
+                className="px-6"
               >
                 End Call
               </Button>
-              <Button variant="outline" size="sm" className="bg-gray-700 text-white border-gray-600 hover:bg-gray-600">
+              <Button variant="outline" size="sm">
                 ⚙️
               </Button>
             </div>
@@ -8324,6 +8484,7 @@ export default function MessagingPage() {
               <LiveKitVideoCall
                 roomName={liveKitVideoCall.roomName}
                 participantName={getDisplayName(liveKitVideoCall.participant)}
+                participantRole={user?.role}
                 token={liveKitVideoCall.token}
                 serverUrl={liveKitVideoCall.serverUrl}
                 onDisconnect={handleLiveKitVideoCallEnd}
@@ -8340,6 +8501,7 @@ export default function MessagingPage() {
             <LiveKitAudioCall
               roomName={liveKitAudioCall.roomName}
               participantName={getDisplayName(liveKitAudioCall.participant)}
+              participantRole={user?.role}
               token={liveKitAudioCall.token}
               serverUrl={liveKitAudioCall.serverUrl}
               onDisconnect={handleLiveKitAudioCallEnd}
@@ -8356,7 +8518,14 @@ export default function MessagingPage() {
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{callStatusModal.title}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              {callStatusModal.description?.includes("Audio") ? (
+                <Phone className="h-5 w-5" />
+              ) : callStatusModal.description?.includes("Video") ? (
+                <Video className="h-5 w-5" />
+              ) : null}
+              {callStatusModal.title}
+            </DialogTitle>
           </DialogHeader>
           <div className="py-4">
             <p className="text-gray-700 dark:text-gray-300">{callStatusModal.description}</p>

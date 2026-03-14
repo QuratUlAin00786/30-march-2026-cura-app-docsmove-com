@@ -31,7 +31,6 @@ import {
   PoundSterling, 
   Clock,
   Download,
-  Filter,
   Activity,
   FileText,
   AlertTriangle
@@ -41,6 +40,8 @@ import { Header } from "@/components/layout/header";
 import { useAuth } from "@/hooks/use-auth";
 import { isDoctorLike } from "@/lib/role-utils";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
+import { useCurrency } from "@/hooks/use-currency";
+import { CurrencyIcon } from "@/components/ui/currency-icon";
 import { apiRequest } from "@/lib/queryClient";
 
 function getTenantSubdomain(): string {
@@ -124,9 +125,9 @@ interface AnalyticsData {
 const COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 export default function AnalyticsPage() {
+  const { currencySymbol } = useCurrency();
   const { user } = useAuth();
   const { canView } = useRolePermissions();
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [showAppointmentsDialog, setShowAppointmentsDialog] = useState(false);
   const [completedAppointments, setCompletedAppointments] = useState<any[]>([]);
   const [filters, setFilters] = useState({
@@ -308,91 +309,6 @@ export default function AnalyticsPage() {
       <div className="w-full px-4 sm:px-5 lg:px-6 py-5">
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center justify-end gap-3 sm:gap-4 mb-5">
-          <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Filter className="h-4 w-4 mr-2" />
-                Filter
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Filter Analytics</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="dateRange">Date Range</Label>
-                  <Select value={filters.dateRange} onValueChange={(value) => setFilters({...filters, dateRange: value})}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="7">Last 7 days</SelectItem>
-                      <SelectItem value="30">Last 30 days</SelectItem>
-                      <SelectItem value="90">Last 3 months</SelectItem>
-                      <SelectItem value="180">Last 6 months</SelectItem>
-                      <SelectItem value="365">Last year</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="department">Department</Label>
-                  <Select value={filters.department} onValueChange={(value) => setFilters({...filters, department: value})}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Departments</SelectItem>
-                      <SelectItem value="cardiology">Cardiology</SelectItem>
-                      <SelectItem value="general">General Practice</SelectItem>
-                      <SelectItem value="orthopedics">Orthopedics</SelectItem>
-                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="provider">Provider</Label>
-                  <Select value={filters.provider} onValueChange={(value) => setFilters({...filters, provider: value})}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Providers</SelectItem>
-                      <SelectItem value="dr-smith">Dr. Smith</SelectItem>
-                      <SelectItem value="dr-jones">Dr. Jones</SelectItem>
-                      <SelectItem value="dr-williams">Dr. Williams</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="patientType">Patient Type</Label>
-                  <Select value={filters.patientType} onValueChange={(value) => setFilters({...filters, patientType: value})}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Patients</SelectItem>
-                      <SelectItem value="new">New Patients</SelectItem>
-                      <SelectItem value="returning">Returning Patients</SelectItem>
-                      <SelectItem value="emergency">Emergency</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="flex justify-end gap-2 mt-6">
-                  <Button variant="outline" onClick={() => setIsFilterOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={() => setIsFilterOpen(false)}>
-                    Apply Filters
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -444,7 +360,7 @@ export default function AnalyticsPage() {
                   +5.2% vs last month
                 </p>
               </div>
-              <PoundSterling className="h-8 w-8 text-green-600" />
+              <CurrencyIcon className="h-8 w-8 text-green-600" />
             </div>
           </CardContent>
         </Card>
@@ -489,132 +405,132 @@ export default function AnalyticsPage() {
 
           <TabsContent value="overview" className="space-y-4">
             {/* Compact Analytics Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 auto-rows-fr mt-[70px]">
               {/* Patients This Month */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Patients</div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Patients (Month)</div>
-                  <div className="text-2xl font-bold text-blue-600">{analytics.overview.patientsThisMonth || 0}</div>
-                  <div className="text-xs text-gray-500">New registrations</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Patients</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Patients (Month)</div>
+                  <div className="text-xl sm:text-2xl font-bold text-blue-600 dark:text-blue-400 break-words mb-1 flex items-center">{analytics.overview.patientsThisMonth || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">New registrations</div>
                 </Card>
               </div>
 
               {/* Top Doctor */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Doctors </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Top Doctor</div>
-                  <div className="text-sm font-semibold text-green-600 truncate">{analytics.overview.topDoctor?.name || 'No data'}</div>
-                  <div className="text-lg font-bold text-gray-900 dark:text-white">{analytics.overview.topDoctor?.appointmentCount || 0}</div>
-                  <div className="text-xs text-gray-500">Appointments</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Doctors</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Top Doctor</div>
+                  <div className="text-xs sm:text-sm font-semibold text-green-600 dark:text-green-400 truncate mb-1" title={analytics.overview.topDoctor?.name || 'No data'}>{analytics.overview.topDoctor?.name || 'No data'}</div>
+                  <div className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-1">{analytics.overview.topDoctor?.appointmentCount || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Appointments</div>
                 </Card>
               </div>
 
               {/* Total Revenue */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Billing </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Total Revenue</div>
-                  <div className="text-2xl font-bold text-green-600">{formatCurrency(analytics.overview.totalRevenue || 0)}</div>
-                  <div className="text-xs text-gray-500">All payments</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Billing</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Total Revenue</div>
+                  <div className="text-base sm:text-lg font-bold text-green-600 dark:text-green-400 break-words leading-tight mb-1 flex items-center">{formatCurrency(analytics.overview.totalRevenue || 0)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">All payments</div>
                 </Card>
               </div>
 
               {/* Outstanding Dues */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Billing </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Outstanding</div>
-                  <div className="text-2xl font-bold text-orange-600">{formatCurrency(analytics.overview.outstandingDues || 0)}</div>
-                  <div className="text-xs text-gray-500">Unpaid invoices</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Billing</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Outstanding</div>
+                  <div className="text-base sm:text-lg font-bold text-orange-600 dark:text-orange-400 break-words leading-tight mb-1 flex items-center">{formatCurrency(analytics.overview.outstandingDues || 0)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Unpaid invoices</div>
                 </Card>
               </div>
 
               {/* Total Lab Tests */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Lab Tests </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Lab Tests (7d)</div>
-                  <div className="text-2xl font-bold text-purple-600">{analytics.overview.labTestsCount || 0}</div>
-                  <div className="text-xs text-gray-500">Total ordered</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Lab Tests</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Lab Tests (7d)</div>
+                  <div className="text-xl sm:text-2xl font-bold text-purple-600 dark:text-purple-400 break-words mb-1 flex items-center">{analytics.overview.labTestsCount || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Total ordered</div>
                 </Card>
               </div>
 
               {/* Appointments Today */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Appointments </div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Appointments</div>
                 <Card 
-                  className="p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  className="p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700"
                   onClick={handleAppointmentsClick}
                 >
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Appointments</div>
-                  <div className="text-2xl font-bold text-blue-600">{futureAndCurrentCount || 0}</div>
-                  <div className="text-xs text-gray-500">{completedCount || 0} completed</div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Appointments</div>
+                  <div className="text-xl sm:text-2xl font-bold text-blue-600 dark:text-blue-400 break-words mb-1 flex items-center">{futureAndCurrentCount || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">{completedCount || 0} completed</div>
                 </Card>
               </div>
 
               {/* No-Shows */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Appointments </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">No-Shows</div>
-                  <div className="text-2xl font-bold text-red-600">{analytics.overview.noShowCount || 0}</div>
-                  <div className="text-xs text-gray-500">{analytics.overview.noShowRate || 0}% rate</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Appointments</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">No-Shows</div>
+                  <div className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400 break-words mb-1 flex items-center">{analytics.overview.noShowCount || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">{analytics.overview.noShowRate || 0}% rate</div>
                 </Card>
               </div>
 
               {/* Cancellations */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Appointments </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Cancelled</div>
-                  <div className="text-2xl font-bold text-yellow-600">{analytics.overview.cancelledCount || 0}</div>
-                  <div className="text-xs text-gray-500">Appointments</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Appointments</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Cancelled</div>
+                  <div className="text-xl sm:text-2xl font-bold text-yellow-600 dark:text-yellow-400 break-words mb-1 flex items-center">{analytics.overview.cancelledCount || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Appointments</div>
                 </Card>
               </div>
 
               {/* Most Frequent Test */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Lab Tests </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Top Lab Test</div>
-                  <div className="text-sm font-semibold text-purple-600 truncate">{analytics.overview.topLabTest?.name || 'No data'}</div>
-                  <div className="text-lg font-bold text-gray-900 dark:text-white">{analytics.overview.topLabTest?.count || 0}</div>
-                  <div className="text-xs text-gray-500">Orders</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Lab Tests</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Top Lab Test</div>
+                  <div className="text-xs sm:text-sm font-semibold text-purple-600 dark:text-purple-400 truncate mb-1" title={analytics.overview.topLabTest?.name || 'No data'}>{analytics.overview.topLabTest?.name || 'No data'}</div>
+                  <div className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-1">{analytics.overview.topLabTest?.count || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Orders</div>
                 </Card>
               </div>
 
               {/* Payment Mode */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Billing </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Top Payment</div>
-                  <div className="text-sm font-semibold text-green-600 truncate">{analytics.overview.topPaymentMode?.mode || 'No data'}</div>
-                  <div className="text-lg font-bold text-gray-900 dark:text-white">{analytics.overview.topPaymentMode?.count || 0}</div>
-                  <div className="text-xs text-gray-500">Transactions</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Billing</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Top Payment</div>
+                  <div className="text-xs sm:text-sm font-semibold text-green-600 dark:text-green-400 truncate mb-1" title={analytics.overview.topPaymentMode?.mode || 'No data'}>{analytics.overview.topPaymentMode?.mode || 'No data'}</div>
+                  <div className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-1">{analytics.overview.topPaymentMode?.count || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Transactions</div>
                 </Card>
               </div>
 
               {/* Age Distribution */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Patients </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Avg Age</div>
-                  <div className="text-2xl font-bold text-blue-600">{analytics.overview.averageAge || 0}</div>
-                  <div className="text-xs text-gray-500">Years</div>
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Patients</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Avg Age</div>
+                  <div className="text-xl sm:text-2xl font-bold text-blue-600 dark:text-blue-400 break-words mb-1 flex items-center">{analytics.overview.averageAge || 0}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Years</div>
                 </Card>
               </div>
 
               {/* Gender Ratio */}
-              <div>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Patients </div>
-                <Card className="p-3">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Gender Ratio</div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-white">
+              <div className="min-w-0 flex flex-col">
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide truncate">Patients</div>
+                <Card className="p-3 overflow-hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800/50 border-gray-200 dark:border-slate-700">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">Gender Ratio</div>
+                  <div className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white break-words mb-1">
                     M:{analytics.overview.maleCount || 0} F:{analytics.overview.femaleCount || 0}
                   </div>
-                  <div className="text-xs text-gray-500">Patients</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-auto">Patients</div>
                 </Card>
               </div>
             </div>
@@ -758,7 +674,7 @@ export default function AnalyticsPage() {
                 <CardTitle className="dark:text-white">Age Distribution</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="age-distribution-chart-wrap rounded-lg overflow-hidden" style={{ border: "2px solid white", boxSizing: "border-box" }}>
+                <div className="age-distribution-chart-wrap rounded-lg overflow-hidden border-2" style={{ boxSizing: "border-box" }}>
                   <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
                     <Pie

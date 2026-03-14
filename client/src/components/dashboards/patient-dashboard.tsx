@@ -22,6 +22,7 @@ const statusColors = {
 
 export function PatientDashboard() {
   const { user } = useAuth();
+  const { currencySymbol } = useCurrency();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
@@ -1124,7 +1125,7 @@ export function PatientDashboard() {
                             <div>
                               <h4 className="font-semibold text-gray-900">Claim #{claim.claimNumber}</h4>
                               <p className="text-sm text-gray-600">Insurance: {claim.insuranceProvider}</p>
-                              <p className="text-sm text-gray-600">Amount: £{claim.amount}</p>
+                              <p className="text-sm text-gray-600">Amount: {currencySymbol}{claim.amount}</p>
                               <p className="text-sm text-gray-600">Service Date: {new Date(claim.serviceDate).toLocaleDateString()}</p>
                             </div>
                             <span className="px-2 py-1 rounded text-xs bg-yellow-100 text-yellow-800">

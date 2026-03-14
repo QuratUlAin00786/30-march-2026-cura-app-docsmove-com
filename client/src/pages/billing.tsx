@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
+import { useCurrency } from "@/hooks/use-currency";
 import { isDoctorLike } from "@/lib/role-utils";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -201,18 +202,22 @@ async function fetchResource<T = any>(path: string): Promise<T> {
   return response.json();
 }
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('en-GB', {
-    style: 'currency',
-    currency: 'GBP'
-  }).format(amount);
-};
+// formatCurrency will be defined inside components that use useCurrency hook
 
 function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName: string; role: string; userId?: number } }) {
   const scopeToCurrentUser = props?.scopeToCurrentUser;
+  const { currencySymbol, currencyCode } = useCurrency();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { canCreate, canEdit, canDelete } = useRolePermissions();
+  
+  // formatCurrency function using organization currency
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: currencyCode
+    }).format(amount);
+  };
   const [pricingTab, setPricingTab] = useState(scopeToCurrentUser ? "doctors" : "doctors");
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
@@ -1128,7 +1133,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         colorCode: treatmentForm.colorCode,
         doctorRole: treatmentForm.doctorRole || null,
         doctorName: treatmentForm.doctorName || null,
-        currency: "GBP",
+        currency: currencyCode,
       };
 
       if (treatmentForm.doctorId) {
@@ -1235,7 +1240,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
           doctorRole: treatmentForm.doctorRole || null,
           doctorName: treatmentForm.doctorName || null,
           doctorId: treatmentForm.doctorId,
-          currency: "GBP",
+          currency: currencyCode,
         };
         await apiRequest("POST", "/api/pricing/treatments", payload);
         addedCount += 1;
@@ -1383,7 +1388,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
               category: test.category,
               basePrice: Number(test.basePrice),
               isActive: true,
-              currency: "GBP",
+              currency: currencyCode,
               version: 1,
             }),
           });
@@ -1494,7 +1499,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
             modality: '',
             bodyPart: '',
             basePrice: img.basePrice.toString(), // Convert number to string for decimal type
-            currency: 'GBP',
+            currency: currencyCode,
             isActive: true,
             version: 1
           });
@@ -1591,7 +1596,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
           doctorRole: formData.doctorRole,
           basePrice: parseFloat(service.basePrice) || 0,
           isActive: true,
-          currency: "GBP",
+          currency: currencyCode,
           version: 1
         };
         
@@ -1685,7 +1690,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
             doctorRole: formData.doctorRole,
             basePrice: parseFloat(fee.basePrice) || 0,
             isActive: true,
-            currency: "GBP",
+            currency: currencyCode,
             version: 1
           };
 
@@ -1860,7 +1865,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
               doctorRole: formData.doctorRole,
               basePrice: parseFloat(service.basePrice) || 0,
               isActive: true,
-              currency: "GBP",
+              currency: currencyCode,
               version: 1
             };
           } else if (pricingTab === "lab-tests") {
@@ -1870,7 +1875,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
               category: service.category?.trim() || "",
               basePrice: parseFloat(service.basePrice) || 0,
               isActive: true,
-              currency: "GBP",
+              currency: currencyCode,
               version: 1
             };
           } else if (pricingTab === "imaging") {
@@ -1881,7 +1886,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
               imagingType: service.serviceName.trim(),
               basePrice: parseFloat(service.basePrice) || 0,
               isActive: formData.isActive !== undefined ? formData.isActive : true,
-              currency: "GBP",
+              currency: currencyCode,
               version: 1
             };
             
@@ -1934,7 +1939,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
             doctorName: formData.doctorName,
             doctorRole: formData.doctorRole,
             basePrice: parseFloat(formData.basePrice) || 0,
-            currency: formData.currency || "GBP",
+            currency: formData.currency || currencyCode,
             isActive: formData.isActive !== undefined ? formData.isActive : true
           };
         } else if (pricingTab === "lab-tests") {
@@ -1943,7 +1948,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
             testCode: formData.testCode,
             category: formData.category,
             basePrice: parseFloat(formData.basePrice) || 0,
-            currency: formData.currency || "GBP",
+            currency: formData.currency || currencyCode,
             isActive: formData.isActive !== undefined ? formData.isActive : true
           };
         } else if (pricingTab === "imaging") {
@@ -1953,7 +1958,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
             modality: formData.modality,
             bodyPart: formData.bodyPart,
             basePrice: parseFloat(formData.basePrice) || 0,
-            currency: formData.currency || "USD",
+            currency: formData.currency || currencyCode,
             isActive: formData.isActive !== undefined ? formData.isActive : true
           };
         } else {
@@ -2004,7 +2009,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
   const openAddDialog = () => {
     setFormData({
       isActive: true,
-      currency: "GBP",
+      currency: currencyCode,
       version: 1,
       ...(pricingTab === "doctors" && scopeToCurrentUser ? { doctorName: scopeToCurrentUser.displayName, doctorRole: scopeToCurrentUser.role } : {})
     });
@@ -2194,7 +2199,14 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                                     <td className="p-3">{fee.doctorName || '-'}</td>
                                     <td className="p-3">{fee.serviceCode || '-'}</td>
                                     <td className="p-3">{fee.category || '-'}</td>
-                                    <td className="p-3 font-semibold">{fee.currency} {fee.basePrice}</td>
+                                    <td className="p-3 font-semibold">
+                                      {(() => {
+                                        const priceNumber = Number(fee.basePrice);
+                                        return Number.isNaN(priceNumber)
+                                          ? `${currencySymbol} ${fee.basePrice ?? "—"}`.trim()
+                                          : formatCurrency(priceNumber);
+                                      })()}
+                                    </td>
                                     <td className="p-3">
                                       <Badge variant={fee.isActive ? "default" : "secondary"}>
                                         {fee.isActive ? "Active" : "Inactive"}
@@ -2340,7 +2352,14 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                       <td className="p-3 font-medium">{test.testName}</td>
                       <td className="p-3">{test.testCode || '-'}</td>
                       <td className="p-3">{test.category || '-'}</td>
-                      <td className="p-3 font-semibold">{test.currency} {test.basePrice}</td>
+                      <td className="p-3 font-semibold">
+                        {(() => {
+                          const priceNumber = Number(test.basePrice);
+                          return Number.isNaN(priceNumber)
+                            ? `${currencySymbol} ${test.basePrice ?? "—"}`.trim()
+                            : formatCurrency(priceNumber);
+                        })()}
+                      </td>
                       <td className="p-3">
                         <Badge variant={test.isActive ? "default" : "secondary"}>
                           {test.isActive ? "Active" : "Inactive"}
@@ -2427,7 +2446,14 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                   <tr key={img.id} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800" data-testid={`row-imaging-${img.id}`}>
                     <td className="p-3 font-medium">{img.imagingType}</td>
                     <td className="p-3">{img.imagingCode || '-'}</td>
-                    <td className="p-3 font-semibold">{img.currency} {img.basePrice}</td>
+                    <td className="p-3 font-semibold">
+                      {(() => {
+                        const priceNumber = Number(img.basePrice);
+                        return Number.isNaN(priceNumber)
+                          ? `${currencySymbol} ${img.basePrice ?? "—"}`.trim()
+                          : formatCurrency(priceNumber);
+                      })()}
+                    </td>
                     <td className="p-3">
                       <Badge variant={img.isActive ? "default" : "secondary"}>
                         {img.isActive ? "Active" : "Inactive"}
@@ -2554,7 +2580,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                                     {(() => {
                                       const priceNumber = Number(treatment.basePrice);
                                       return Number.isNaN(priceNumber)
-                                        ? `${treatment.currency || ""} ${treatment.basePrice ?? "—"}`.trim()
+                                        ? `${currencySymbol} ${treatment.basePrice ?? "—"}`.trim()
                                         : formatCurrency(priceNumber);
                                     })()}
                                   </td>
@@ -2692,6 +2718,11 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
             <DialogTitle>
               {editingItem ? "Edit" : "Add"} {pricingTab === "doctors" ? "Doctor Fee" : pricingTab === "lab-tests" ? "Lab Test" : "Imaging Service"}
             </DialogTitle>
+            <DialogDescription>
+              {editingItem 
+                ? `Update the details for this ${pricingTab === "doctors" ? "doctor fee" : pricingTab === "lab-tests" ? "lab test" : "imaging service"}.`
+                : `Add a new ${pricingTab === "doctors" ? "doctor fee" : pricingTab === "lab-tests" ? "lab test" : "imaging service"} to your pricing list.`}
+            </DialogDescription>
           </DialogHeader>
           
           <div className="grid gap-4 py-4">
@@ -2730,7 +2761,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                                   <th className="text-left p-2 text-sm font-medium">Service Name</th>
                                   <th className="text-left p-2 text-sm font-medium">Code</th>
                                   <th className="text-left p-2 text-sm font-medium">Category</th>
-                                  <th className="text-left p-2 text-sm font-medium">Price (£)</th>
+                                  <th className="text-left p-2 text-sm font-medium">Price ({currencySymbol})</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -2739,7 +2770,14 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                                     <td className="p-2 text-sm">{fee.serviceName}</td>
                                     <td className="p-2 text-sm">{fee.serviceCode || '-'}</td>
                                     <td className="p-2 text-sm">{fee.category || '-'}</td>
-                                    <td className="p-2 text-sm">{fee.basePrice}</td>
+                                    <td className="p-2 text-sm">
+                                      {(() => {
+                                        const priceNumber = Number(fee.basePrice);
+                                        return Number.isNaN(priceNumber)
+                                          ? `${currencySymbol} ${fee.basePrice ?? "—"}`.trim()
+                                          : formatCurrency(priceNumber);
+                                      })()}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -2912,7 +2950,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                           <th className="text-left p-2 text-sm font-medium">Service Name *</th>
                           <th className="text-left p-2 text-sm font-medium">Service Code</th>
                           <th className="text-left p-2 text-sm font-medium">Category</th>
-                          <th className="text-left p-2 text-sm font-medium">Base Price (£) *</th>
+                          <th className="text-left p-2 text-sm font-medium">Base Price ({currencySymbol}) *</th>
                           <th className="w-10"></th>
                         </tr>
                       </thead>
@@ -3199,9 +3237,9 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                     <Label htmlFor="currency">Currency</Label>
                     <Input
                       id="currency"
-                      value={formData.currency || "GBP"}
+                      value={formData.currency || currencyCode}
                       onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                      placeholder="GBP"
+                      placeholder={currencyCode}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -3232,7 +3270,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                             <th className="text-left p-2 text-sm font-medium">Test Type</th>
                             <th className="text-left p-2 text-sm font-medium">Code</th>
                             <th className="text-left p-2 text-sm font-medium">Category</th>
-                            <th className="text-left p-2 text-sm font-medium">Price (£)</th>
+                            <th className="text-left p-2 text-sm font-medium">Price ({currencySymbol})</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3260,7 +3298,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                           <th className="text-left p-2 text-sm font-medium">Test Type *</th>
                           <th className="text-left p-2 text-sm font-medium">Code</th>
                           <th className="text-left p-2 text-sm font-medium">Category</th>
-                          <th className="text-left p-2 text-sm font-medium">Price (£) *</th>
+                          <th className="text-left p-2 text-sm font-medium">Price ({currencySymbol}) *</th>
                           <th className="w-10"></th>
                         </tr>
                       </thead>
@@ -3437,9 +3475,9 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                     <Label htmlFor="currency">Currency</Label>
                     <Input
                       id="currency"
-                      value={formData.currency || "USD"}
+                      value={formData.currency || currencyCode}
                       onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                      placeholder="USD"
+                      placeholder={currencyCode}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -3469,7 +3507,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                           <tr>
                             <th className="text-left p-2 text-sm font-medium">Imaging Type</th>
                             <th className="text-left p-2 text-sm font-medium">Code</th>
-                            <th className="text-left p-2 text-sm font-medium">Price (£)</th>
+                            <th className="text-left p-2 text-sm font-medium">Price ({currencySymbol})</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3495,7 +3533,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                         <tr>
                           <th className="text-left p-2 text-sm font-medium">Imaging Type *</th>
                           <th className="text-left p-2 text-sm font-medium">Code</th>
-                          <th className="text-left p-2 text-sm font-medium">Price (£) *</th>
+                          <th className="text-left p-2 text-sm font-medium">Price ({currencySymbol}) *</th>
                           <th className="w-10"></th>
                         </tr>
                       </thead>
@@ -3679,9 +3717,9 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                     <Label htmlFor="currency">Currency</Label>
                     <Input
                       id="currency"
-                      value={formData.currency || "USD"}
+                      value={formData.currency || currencyCode}
                       onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                      placeholder="USD"
+                      placeholder={currencyCode}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -3732,6 +3770,11 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{editingTreatmentInfo ? "Edit Treatment Metadata" : "Create Treatment Metadata"}</DialogTitle>
+            <DialogDescription>
+              {editingTreatmentInfo 
+                ? "Update the treatment metadata including name and color."
+                : "Create a new treatment metadata entry with a name and color for categorization."}
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div>
@@ -3813,12 +3856,10 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Tests Already Exist</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-gray-700 dark:text-gray-300">
+            <DialogDescription>
               All default lab tests already exist in the database. No new tests were added.
-            </p>
-          </div>
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter>
             <Button onClick={() => setShowTestsExistsModal(false)}>
               OK
@@ -3832,12 +3873,10 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Imaging Already Exists</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-gray-700 dark:text-gray-300">
+            <DialogDescription>
               All default imaging services already exist in the database. No new imaging was added.
-            </p>
-          </div>
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter>
             <Button onClick={() => setShowImagingExistsModal(false)}>
               OK
@@ -3856,12 +3895,10 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
               </div>
             </div>
             <DialogTitle className="text-center text-xl">{defaultFeesSuccessMessage.title}</DialogTitle>
-          </DialogHeader>
-          <div className="text-center py-4">
-            <p className="text-muted-foreground">
+            <DialogDescription className="text-center">
               {defaultFeesSuccessMessage.description}
-            </p>
-          </div>
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter className="sm:justify-center">
             <Button onClick={() => setShowDefaultFeesSuccessModal(false)} className="w-full sm:w-auto">
               OK
@@ -3880,12 +3917,10 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
               </div>
             </div>
             <DialogTitle className="text-center text-xl">Success</DialogTitle>
-          </DialogHeader>
-          <div className="text-center py-4">
-            <p className="text-muted-foreground">
+            <DialogDescription className="text-center">
               {bulkTreatmentSuccessMessage}
-            </p>
-          </div>
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter className="sm:justify-center">
             <Button onClick={() => setShowBulkTreatmentSuccessModal(false)} className="w-full sm:w-auto">
               OK
@@ -4027,7 +4062,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="treatment-price">Price (GBP)</Label>
+                <Label htmlFor="treatment-price">Price ({currencyCode})</Label>
                 <Input id="treatment-price" type="number" step="0.01" min="0" value={treatmentForm.basePrice} onChange={(e) => setTreatmentForm({ ...treatmentForm, basePrice: e.target.value })} placeholder="e.g. 5.00" />
               </div>
               {treatmentError && <p className="text-sm text-red-500">{treatmentError}</p>}
@@ -4106,7 +4141,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
                   <label htmlFor="select-all-treatments" className="text-sm font-medium cursor-pointer">Select all treatments</label>
                 </div>
                 <div className="flex items-center gap-2 ml-auto">
-                  <Label htmlFor="bulk-default-price" className="text-sm text-gray-500 whitespace-nowrap">Default price (GBP):</Label>
+                  <Label htmlFor="bulk-default-price" className="text-sm text-gray-500 whitespace-nowrap">Default price ({currencyCode}):</Label>
                   <Input
                     id="bulk-default-price"
                     type="number"
@@ -4251,6 +4286,9 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         <DialogContent className="max-w-md" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Deleting Imaging Pricing...</DialogTitle>
+            <DialogDescription>
+              Please wait while imaging pricing entries are being deleted. This may take a moment.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex items-center gap-3">
@@ -4320,6 +4358,9 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         <DialogContent className="max-w-md" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Deleting Lab Test Pricing...</DialogTitle>
+            <DialogDescription>
+              Please wait while lab test pricing entries are being deleted. This may take a moment.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex items-center gap-3">
@@ -4360,6 +4401,15 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
 
 export default function BillingPage() {
   const { user } = useAuth();
+  const { currencyCode, currencySymbol } = useCurrency();
+  
+  // formatCurrency function using organization currency
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: currencyCode
+    }).format(amount);
+  };
   const { toast } = useToast();
   const { canCreate, canEdit, canDelete } = useRolePermissions();
   const isDoctor = isDoctorLike(user?.role);
@@ -5095,7 +5145,7 @@ export default function BillingPage() {
           invoiceId: selectedInvoice.id,
           patientId: selectedInvoice.patientId,
           amount: typeof selectedInvoice.totalAmount === 'string' ? parseFloat(selectedInvoice.totalAmount) : selectedInvoice.totalAmount,
-          currency: 'GBP',
+          currency: currencyCode,
           paymentMethod: 'manual',
           paymentProvider: 'manual',
           paymentStatus: 'completed',
@@ -6022,8 +6072,8 @@ export default function BillingPage() {
         doc.setFontSize(9);
         yPosition -= 2;
         doc.text(item.quantity.toString(), pageWidth - margin - 80, yPosition, { align: 'right' });
-        doc.text(`£${toNum(item.unitPrice || item.amount / (item.quantity || 1)).toFixed(2)}`, pageWidth - margin - 50, yPosition, { align: 'right' });
-        doc.text(`£${toNum(item.total || item.amount).toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
+        doc.text(`${currencySymbol}${toNum(item.unitPrice || item.amount / (item.quantity || 1)).toFixed(2)}`, pageWidth - margin - 50, yPosition, { align: 'right' });
+        doc.text(`${currencySymbol}${toNum(item.total || item.amount).toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
         
         yPosition += 8;
         rowCount++;
@@ -6035,11 +6085,11 @@ export default function BillingPage() {
       const totalsX = pageWidth - margin - 60;
       doc.setFont('helvetica', 'normal');
       doc.text('Subtotal:', totalsX, yPosition);
-      doc.text(`£${toNum(invoice.totalAmount).toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
+      doc.text(`${currencySymbol}${toNum(invoice.totalAmount).toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
       
       yPosition += 6;
       doc.text('VAT (0%):', totalsX, yPosition);
-      doc.text('£0.00', pageWidth - margin - 2, yPosition, { align: 'right' });
+      doc.text(`${currencySymbol}0.00`, pageWidth - margin - 2, yPosition, { align: 'right' });
       
       yPosition += 6;
       doc.setDrawColor(79, 70, 229);
@@ -6050,7 +6100,7 @@ export default function BillingPage() {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.text('Total Amount:', totalsX, yPosition);
-      doc.text(`£${toNum(invoice.totalAmount).toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
+      doc.text(`${currencySymbol}${toNum(invoice.totalAmount).toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
 
       if (toNum(invoice.paidAmount) > 0) {
         yPosition += 8;
@@ -8619,7 +8669,9 @@ export default function BillingPage() {
                         <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Total Revenue</p>
                         <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCurrency(getTotalRevenue())}</p>
                       </div>
-                      <PoundSterling className="h-8 w-8 text-green-600" />
+                      <span className="h-8 w-8 text-green-600 flex items-center justify-center text-2xl font-bold">
+                        {currencySymbol}
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
@@ -10208,7 +10260,7 @@ export default function BillingPage() {
                                       {payment.paymentMethod === 'cash' ? 'Cash' : payment.paymentMethod === 'debit_card' ? 'Debit Card' : payment.paymentMethod.replace('_', ' ')}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 text-right font-medium">
-                                      £{(typeof payment.amount === 'string' ? parseFloat(payment.amount) : payment.amount).toFixed(2)}
+                                      {formatCurrency(typeof payment.amount === 'string' ? parseFloat(payment.amount) : payment.amount)}
                                     </td>
                                     <td className="px-4 py-3 text-sm">
                                       <span className={`inline-flex items-center gap-1 ${
@@ -10336,7 +10388,7 @@ export default function BillingPage() {
                                         {format(new Date(invoice.dueDate), 'MMM d, yyyy')}
                                       </td>
                                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 text-right font-medium">
-                                        £{totalAmount.toFixed(2)}
+                                        {formatCurrency(totalAmount)}
                                       </td>
                                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 capitalize">
                                         {(() => {
@@ -10418,7 +10470,7 @@ export default function BillingPage() {
                                 <div className="flex items-center justify-between">
                                   <div>
                                     <p className="text-sm text-gray-600 dark:text-gray-400">Total Billed</p>
-                                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">£{totalBilled.toFixed(2)}</p>
+                                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCurrency(totalBilled)}</p>
                                   </div>
                                   <Calendar className="h-8 w-8 text-blue-500" />
                                 </div>
@@ -10429,7 +10481,7 @@ export default function BillingPage() {
                                 <div className="flex items-center justify-between">
                                   <div>
                                     <p className="text-sm text-gray-600 dark:text-gray-400">Total Paid</p>
-                                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">£{totalPaid.toFixed(2)}</p>
+                                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(totalPaid)}</p>
                                   </div>
                                   <CheckCircle className="h-8 w-8 text-green-500" />
                                 </div>
@@ -10440,7 +10492,7 @@ export default function BillingPage() {
                                 <div className="flex items-center justify-between">
                                   <div>
                                     <p className="text-sm text-gray-600 dark:text-gray-400">Total Pending</p>
-                                    <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">£{totalPending.toFixed(2)}</p>
+                                    <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalPending)}</p>
                                   </div>
                                   <Clock className="h-8 w-8 text-orange-500" />
                                 </div>
@@ -10485,13 +10537,13 @@ export default function BillingPage() {
                                         {invoice.insurance?.claimNumber || '—'}
                                       </td>
                                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 text-right font-medium">
-                                        £{totalAmount.toFixed(2)}
+                                        {formatCurrency(totalAmount)}
                                       </td>
                                       <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400 text-right font-medium">
-                                        £{paidAmount.toFixed(2)}
+                                        {formatCurrency(paidAmount)}
                                       </td>
                                       <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400 text-right font-medium">
-                                        £{balance.toFixed(2)}
+                                        {formatCurrency(balance)}
                                       </td>
                                       <td className="px-4 py-3 text-sm">
                                         {invoice.insurance?.status === 'approved' ? (
@@ -10939,7 +10991,7 @@ export default function BillingPage() {
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <PoundSterling className="h-5 w-5" />
+                        <span className="text-lg font-semibold">{currencySymbol}</span>
                         Pricing Management
                       </CardTitle>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -11014,7 +11066,7 @@ export default function BillingPage() {
                     <Clock className="h-8 w-8 text-orange-600" />
                   </div>
                   <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-                    30+ days: £1,250
+                    30+ days: {currencySymbol}1,250
                   </div>
                 </CardContent>
               </Card>
@@ -11689,7 +11741,7 @@ export default function BillingPage() {
                                   onChange={(e) => handleUpdateLineItemUnitPrice(item.id, e.target.value)}
                                 />
                               </td>
-                              <td className="p-2 text-right font-semibold">£{item.total.toFixed(2)}</td>
+                              <td className="p-2 text-right font-semibold">{currencySymbol}{item.total.toFixed(2)}</td>
                               <td className="p-2">
                                 <Badge className="border border-dashed border-gray-300 dark:border-gray-600 text-xs">
                                   {SERVICE_TYPE_LABELS[item.serviceType]}
@@ -11859,7 +11911,7 @@ export default function BillingPage() {
             <Button variant="outline" onClick={() => setShowNewInvoice(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateInvoice} disabled={isCreatingInvoice} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Button onClick={handleCreateInvoice} disabled={isCreatingInvoice} variant="default">
               {isCreatingInvoice ? "Processing..." : "Review & Confirm"}
             </Button>
           </DialogFooter>
@@ -11918,9 +11970,9 @@ export default function BillingPage() {
                         </Badge>
                       )}
                     </div>
-                    <div><strong>Total Amount:</strong> £{parseFloat(selectedInvoice.totalAmount.toString()).toFixed(2)}</div>
-                    <div><strong>Paid Amount:</strong> £{parseFloat(selectedInvoice.paidAmount.toString()).toFixed(2)}</div>
-                    <div><strong>Outstanding:</strong> £{(parseFloat(selectedInvoice.totalAmount.toString()) - parseFloat(selectedInvoice.paidAmount.toString())).toFixed(2)}</div>
+                    <div><strong>Total Amount:</strong> {currencySymbol}{parseFloat(selectedInvoice.totalAmount.toString()).toFixed(2)}</div>
+                    <div><strong>Paid Amount:</strong> {currencySymbol}{parseFloat(selectedInvoice.paidAmount.toString()).toFixed(2)}</div>
+                    <div><strong>Outstanding:</strong> {currencySymbol}{(parseFloat(selectedInvoice.totalAmount.toString()) - parseFloat(selectedInvoice.paidAmount.toString())).toFixed(2)}</div>
                     {selectedInvoice.paymentMethod && (
                       <div className="flex items-center gap-2">
                         <strong>Payment Method:</strong>
@@ -11951,8 +12003,8 @@ export default function BillingPage() {
                         <tr key={index} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
                           <td className="p-3 font-mono text-gray-900 dark:text-gray-100">{item.code}</td>
                           <td className="p-3 text-gray-900 dark:text-gray-100">{item.description}</td>
-                          <td className="p-3 text-right text-gray-900 dark:text-gray-100">£{Number(item.unitPrice || item.total || 0).toFixed(2)}</td>
-                          <td className="p-3 text-right font-semibold text-gray-900 dark:text-gray-100">£{Number(item.total || 0).toFixed(2)}</td>
+                          <td className="p-3 text-right text-gray-900 dark:text-gray-100">{currencySymbol}{Number(item.unitPrice || item.total || 0).toFixed(2)}</td>
+                          <td className="p-3 text-right font-semibold text-gray-900 dark:text-gray-100">{currencySymbol}{Number(item.total || 0).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>

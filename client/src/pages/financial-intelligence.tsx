@@ -94,6 +94,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { Header } from "@/components/layout/header";
+import { useCurrency } from "@/hooks/use-currency";
 
 interface RevenueData {
   month: string;
@@ -170,6 +171,7 @@ interface FinancialForecast {
 
 export default function FinancialIntelligence() {
   const [location, setLocation] = useLocation();
+  const { currencySymbol, currencyCode } = useCurrency();
 
   // Insurance provider options for dropdown
   const insuranceProviders = [
@@ -1084,9 +1086,9 @@ export default function FinancialIntelligence() {
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat("en-GB", {
       style: "currency",
-      currency: "USD",
+      currency: currencyCode || "GBP",
     }).format(amount);
   };
 
@@ -1144,16 +1146,16 @@ export default function FinancialIntelligence() {
                 ],
                 [""],
                 ["REVENUE OVERVIEW"],
-                ["Monthly Revenue", "$162,000.00"],
+                ["Monthly Revenue", `${currencySymbol}162,000.00`],
                 ["Collection Rate", "94%"],
                 ["Outstanding Claims", "23"],
-                ["Net Profit", "$84,000.00"],
+                ["Net Profit", `${currencySymbol}84,000.00`],
                 [""],
                 ["MONTHLY BREAKDOWN"],
                 ["Month", "Revenue", "Collections", "Outstanding", "Profit"],
-                ["January", "$152,000", "$142,800", "$9,200", "$78,000"],
-                ["February", "$158,000", "$149,000", "$9,000", "$82,000"],
-                ["March", "$162,000", "$152,280", "$9,720", "$84,000"],
+                ["January", `${currencySymbol}152,000`, `${currencySymbol}142,800`, `${currencySymbol}9,200`, `${currencySymbol}78,000`],
+                ["February", `${currencySymbol}158,000`, `${currencySymbol}149,000`, `${currencySymbol}9,000`, `${currencySymbol}82,000`],
+                ["March", `${currencySymbol}162,000`, `${currencySymbol}152,280`, `${currencySymbol}9,720`, `${currencySymbol}84,000`],
                 [""],
                 ["CLAIMS ANALYSIS"],
                 ["Total Claims Processed", "1,247"],
@@ -1163,20 +1165,20 @@ export default function FinancialIntelligence() {
                 ["Average Processing Time", "3.2 days"],
                 [""],
                 ["PAYER BREAKDOWN"],
-                ["NHS", "45%", "$72,900"],
-                ["Private Insurance", "35%", "$56,700"],
-                ["Self-Pay", "20%", "$32,400"],
+                ["NHS", "45%", `${currencySymbol}72,900`],
+                ["Private Insurance", "35%", `${currencySymbol}56,700`],
+                ["Self-Pay", "20%", `${currencySymbol}32,400`],
                 [""],
                 ["FINANCIAL FORECASTING"],
-                ["Next Month Projection", "$168,000"],
+                ["Next Month Projection", `${currencySymbol}168,000`],
                 ["Growth Rate", "+3.7%"],
                 ["Confidence Level", "89%"],
                 [""],
                 ["KEY PERFORMANCE INDICATORS"],
                 ["Days in A/R", "28 days"],
                 ["Net Collection Rate", "96%"],
-                ["Cost per Collection", "£12.50"],
-                ["Revenue per Patient", "£340"],
+                ["Cost per Collection", `${currencySymbol}12.50`],
+                ["Revenue per Patient", `${currencySymbol}340`],
                 [""],
                 ["RECOMMENDATIONS"],
                 ["1. Focus on reducing outstanding claims to under 20"],
@@ -1239,7 +1241,7 @@ export default function FinancialIntelligence() {
                       )}
                     </p>
                   </div>
-                  <PoundSterling className="w-8 h-8 text-green-500" />
+                  <CurrencyIcon className="w-8 h-8 text-green-500" />
                 </div>
                 {revenueData && revenueData.length > 1 && (
                   <div className="flex items-center mt-2 text-sm">
@@ -1489,7 +1491,7 @@ export default function FinancialIntelligence() {
                               {patients?.map((patient: any) => (
                                 <CommandItem
                                   key={patient.id}
-                                  value={`${patient.firstName} ${patient.lastName}`}
+                                  value={`${patient.id}-${patient.firstName}-${patient.lastName}-${patient.email || ''}`}
                                   onSelect={() => {
                                     setClaimFormData((prev) => ({
                                       ...prev,
@@ -1506,7 +1508,12 @@ export default function FinancialIntelligence() {
                                         : "opacity-0"
                                     }`}
                                   />
-                                  {patient.firstName} {patient.lastName}
+                                  <div className="flex flex-col">
+                                    <span>{patient.firstName} {patient.lastName}</span>
+                                    {patient.email && (
+                                      <span className="text-xs text-gray-500 dark:text-gray-400">{patient.email}</span>
+                                    )}
+                                  </div>
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -1678,7 +1685,7 @@ export default function FinancialIntelligence() {
                             </div>
                             <div>
                               <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                Amount ($)
+                                Amount ({currencySymbol})
                               </label>
                               <Input
                                 type="number"
@@ -1709,7 +1716,7 @@ export default function FinancialIntelligence() {
                       Total Amount
                     </label>
                     <Input
-                      value={`$${claimFormData.totalAmount || '0.00'}`}
+                      value={`${currencySymbol}${claimFormData.totalAmount || '0.00'}`}
                       readOnly
                       className="bg-gray-50 dark:bg-gray-800"
                     />
@@ -1740,7 +1747,7 @@ export default function FinancialIntelligence() {
                       if (totalAmount > maxAmount) {
                         toast({
                           title: "Amount Too Large",
-                          description: `Total amount cannot exceed $${maxAmount.toLocaleString()}`,
+                          description: `Total amount cannot exceed ${currencySymbol}${maxAmount.toLocaleString()}`,
                           variant: "destructive",
                         });
                         return;
@@ -1751,7 +1758,7 @@ export default function FinancialIntelligence() {
                       if (invalidProcedure) {
                         toast({
                           title: "Procedure Amount Too Large",
-                          description: `Individual procedure amounts cannot exceed $${maxAmount.toLocaleString()}`,
+                          description: `Individual procedure amounts cannot exceed ${currencySymbol}${maxAmount.toLocaleString()}`,
                           variant: "destructive",
                         });
                         return;
@@ -1826,6 +1833,14 @@ export default function FinancialIntelligence() {
                         <div>
                           <CardTitle className="text-lg text-gray-900 dark:text-gray-100">
                             {claim.patientName}
+                            {(() => {
+                              const patient = patients?.find((p: any) => p.id === claim.patientId);
+                              return patient?.email ? (
+                                <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                                  ({patient.email})
+                                </span>
+                              ) : null;
+                            })()}
                           </CardTitle>
                           <div className="flex items-center gap-2 mt-1">
                             <div className="flex items-center gap-1">
@@ -2130,6 +2145,14 @@ export default function FinancialIntelligence() {
                     <div>
                       <CardTitle className="text-lg">
                         {insurance.patientName}
+                        {(() => {
+                          const patient = patients?.find((p: any) => p.id.toString() === insurance.patientId);
+                          return patient?.email ? (
+                            <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                              ({patient.email})
+                            </span>
+                          ) : null;
+                        })()}
                       </CardTitle>
                       <div className="flex items-center gap-2 mt-1">
                         <div className="flex items-center gap-1">
@@ -3203,7 +3226,7 @@ export default function FinancialIntelligence() {
                           {patients?.map((patient: any) => (
                             <CommandItem
                               key={patient.id}
-                              value={`${patient.firstName} ${patient.lastName}`}
+                              value={`${patient.id}-${patient.firstName}-${patient.lastName}-${patient.email || ''}`}
                               onSelect={() => {
                                 setNewInsuranceFormData((prev) => ({
                                   ...prev,
@@ -3222,13 +3245,18 @@ export default function FinancialIntelligence() {
                             >
                               <Check
                                 className={`mr-2 h-4 w-4 ${
-                                  newInsuranceFormData.patientName ===
-                                  `${patient.firstName} ${patient.lastName}`
+                                  newInsuranceFormData.patientId ===
+                                  patient.id.toString()
                                     ? "opacity-100"
                                     : "opacity-0"
                                 }`}
                               />
-                              {patient.firstName} {patient.lastName}
+                              <div className="flex flex-col">
+                                <span>{patient.firstName} {patient.lastName}</span>
+                                {patient.email && (
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">{patient.email}</span>
+                                )}
+                              </div>
                             </CommandItem>
                           ))}
                         </CommandGroup>
@@ -3495,7 +3523,7 @@ export default function FinancialIntelligence() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Copay (£)</label>
+                <label className="text-sm font-medium">Copay ({currencySymbol})</label>
                 <Input
                   type="number"
                   value={newInsuranceFormData.copay}
@@ -3528,7 +3556,7 @@ export default function FinancialIntelligence() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Deductible (£)</label>
+                <label className="text-sm font-medium">Deductible ({currencySymbol})</label>
                 <Input
                   type="number"
                   value={newInsuranceFormData.deductible}
@@ -3544,7 +3572,7 @@ export default function FinancialIntelligence() {
               </div>
               <div>
                 <label className="text-sm font-medium">
-                  Deductible Met (£)
+                  Deductible Met ({currencySymbol})
                 </label>
                 <Input
                   type="number"
@@ -3564,7 +3592,7 @@ export default function FinancialIntelligence() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium">
-                  Out-of-Pocket Max (£)
+                  Out-of-Pocket Max ({currencySymbol})
                 </label>
                 <Input
                   type="number"
@@ -3581,7 +3609,7 @@ export default function FinancialIntelligence() {
               </div>
               <div>
                 <label className="text-sm font-medium">
-                  Out-of-Pocket Met (£)
+                  Out-of-Pocket Met ({currencySymbol})
                 </label>
                 <Input
                   type="number"
@@ -3757,7 +3785,7 @@ export default function FinancialIntelligence() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Copay (£)</label>
+                <label className="text-sm font-medium">Copay ({currencySymbol})</label>
                 <Input
                   type="number"
                   value={newInsuranceFormData.copay}
@@ -3788,7 +3816,7 @@ export default function FinancialIntelligence() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium">Deductible (£)</label>
+                <label className="text-sm font-medium">Deductible ({currencySymbol})</label>
                 <Input
                   type="number"
                   value={newInsuranceFormData.deductible}
@@ -3951,7 +3979,7 @@ export default function FinancialIntelligence() {
               </div>
               <div className="flex justify-between">
                 <span className="text-sm font-medium">Amount:</span>
-                <span className="text-sm">${successClaimData?.amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="text-sm">{currencySymbol}{successClaimData?.amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm font-medium">Status:</span>

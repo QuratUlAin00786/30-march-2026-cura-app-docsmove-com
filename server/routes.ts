@@ -2647,6 +2647,11 @@ The Cura EMR Team`,
         return res.status(404).json({ error: "Tenant not found" });
       }
 
+      // Set cache-control headers to prevent caching
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+
       // Fetch full organization data to ensure all fields are included
       const organization = await storage.getOrganization(req.tenant.id);
 
@@ -3232,6 +3237,54 @@ The Cura EMR Team`,
         return res.status(400).json({ error: "Invalid request data", details: error.errors });
       }
       res.status(500).json({ error: "Failed to create imaging pricing", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Delete imaging pricing
+  app.delete("/api/pricing/imaging/:id", tenantMiddleware, authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant) {
+        return res.status(401).json({ error: "Organization not found" });
+      }
+
+      const organizationId = req.tenant.id;
+      const imagingId = parseInt(req.params.id);
+
+      if (isNaN(imagingId)) {
+        return res.status(400).json({ error: "Invalid imaging ID" });
+      }
+
+      // Check if imaging exists and belongs to organization
+      const existingImaging = await db
+        .select()
+        .from(imagingPricing)
+        .where(
+          and(
+            eq(imagingPricing.id, imagingId),
+            eq(imagingPricing.organizationId, organizationId)
+          )
+        )
+        .limit(1);
+
+      if (existingImaging.length === 0) {
+        return res.status(404).json({ error: "Imaging pricing not found" });
+      }
+
+      // Delete the imaging pricing
+      await db
+        .delete(imagingPricing)
+        .where(
+          and(
+            eq(imagingPricing.id, imagingId),
+            eq(imagingPricing.organizationId, organizationId)
+          )
+        );
+
+      console.log(`[IMAGING PRICING] Deleted imaging pricing ${imagingId} for organization ${organizationId}`);
+      res.json({ success: true, message: "Imaging pricing deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting imaging pricing:", error);
+      res.status(500).json({ error: "Failed to delete imaging pricing", details: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -13607,6 +13660,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }, 'prescriptionCreatedBy');
 
       console.log("About to create prescription with data:", prescriptionToInsert);
+      // storage.createPrescription will use local time formatting for created_at and updated_at
+      // This ensures the database stores exactly what your system time shows, not UTC or database server timezone
+      console.log("[PRESCRIPTION POST] Creating prescription - created_at and updated_at will use local time");
       const newPrescription = await storage.createPrescription(prescriptionToInsert);
       console.log("Prescription created successfully:", newPrescription.id);
 
@@ -13681,6 +13737,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         prescriptionUpdates.interactions = prescriptionData.interactions;
       }
 
+      // Update prescription - storage.updatePrescription will update updated_at with local time using formatLocalTimeString()
+      // This ensures the database stores exactly what your system time shows, not UTC or database server timezone
+      console.log(`[PRESCRIPTION PATCH] Updating prescription ${prescriptionId} - updated_at will use local time`);
       const updatedPrescription = await storage.updatePrescription(prescriptionId, req.tenant!.id, prescriptionUpdates);
 
       if (!updatedPrescription) {
@@ -13853,16 +13912,33 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Prescription not found" });
       }
 
-      // Create signature data
+      // Format current local time as a string (YYYY-MM-DD HH:MM:SS.mmm)
+      // Using local time components directly to ensure database stores exactly what system time shows
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+      const localTimeString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+      
+      console.log(`[PRESCRIPTION E-SIGN] Local time components - Year: ${year}, Month: ${month}, Day: ${day}, Time: ${hours}:${minutes}:${seconds}.${milliseconds}`);
+      console.log(`[PRESCRIPTION E-SIGN] Formatted local time string for database: ${localTimeString}`);
+      
+      // Create signature data with local time string
       const signatureData = {
         doctorSignature: signature,
         signedBy: `${(req.user as any).firstName || ''} ${(req.user as any).lastName || ''}`,
-        signedAt: new Date().toISOString(),
+        signedAt: localTimeString,
         signerId: req.user.id
       };
 
       // Update prescription with signature and status
+      // Note: storage.updatePrescription will also update updated_at with local time using formatLocalTimeString()
       console.log(`[PRESCRIPTION E-SIGN] Updating prescription ${prescriptionId} with signature and status='signed'`);
+      console.log(`[PRESCRIPTION E-SIGN] Signature signedAt (local time): ${localTimeString}`);
       const updatedPrescription = await storage.updatePrescription(prescriptionId, req.tenant!.id, {
         signature: signatureData,
         status: 'signed'
@@ -26096,18 +26172,61 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Prescription not found" });
       }
 
-      // Fetch patient
+      // Fetch patient with full medical history
       const patient = await storage.getPatient(prescription.patientId, organizationId);
       if (!patient) {
         return res.status(404).json({ error: "Patient not found" });
       }
 
-      // Fetch provider/doctor info
+      // Fetch weight from vitals in medical records
+      let weightFromVitals = null;
+      try {
+        const records = await storage.getMedicalRecordsByPatient(prescription.patientId, organizationId);
+        if (records && Array.isArray(records)) {
+          // Find the most recent vitals record
+          const vitalsRecords = records.filter((r: any) => r.type === 'vitals' || (r.notes && r.notes.includes('Weight:')));
+          if (vitalsRecords.length > 0) {
+            // Sort by date, most recent first
+            vitalsRecords.sort((a: any, b: any) => {
+              const dateA = new Date(a.visitDate || a.createdAt || 0);
+              const dateB = new Date(b.visitDate || b.createdAt || 0);
+              return dateB.getTime() - dateA.getTime();
+            });
+            const latestVitals = vitalsRecords[0];
+            // Extract weight from notes or vitalSigns
+            const vitalsData = latestVitals as any;
+            if (vitalsData.vitalSigns?.weight) {
+              weightFromVitals = `${vitalsData.vitalSigns.weight} kg`;
+            } else if (vitalsData.notes) {
+              const weightMatch = vitalsData.notes.match(/Weight:\s*([\d.]+)\s*kg/i);
+              if (weightMatch) {
+                weightFromVitals = `${weightMatch[1]} kg`;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[SAVE-PRESCRIPTION-PDF] Failed to fetch vitals from medical records:', err);
+      }
+
+      // Fetch provider/doctor info - try providerId first, then doctorId
       let doctorInfo = null;
-      if (prescription.doctorId) {
+      if (prescription.providerId) {
+        const provider = await storage.getUser(prescription.providerId, organizationId);
+        if (provider) {
+          doctorInfo = provider;
+        }
+      }
+      if (!doctorInfo && prescription.doctorId) {
         const doctor = await storage.getUser(prescription.doctorId, organizationId);
         if (doctor) {
           doctorInfo = doctor;
+        }
+      }
+      if (!doctorInfo && prescription.prescriptionCreatedBy) {
+        const creator = await storage.getUser(prescription.prescriptionCreatedBy, organizationId);
+        if (creator) {
+          doctorInfo = creator;
         }
       }
 
@@ -26161,12 +26280,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Patient name for header
       const patientName = `${patient.firstName || ""} ${patient.lastName || ""}`.trim();
 
-      let yPosition = height - 30;
       const logoSize = 60; // Logo size
       const logoMargin = 15; // Margin between logo and text
-      let textStartX = margin;
-
-      // Add clinic header with logo on left
+      
+      // Embed logo once to reuse across all pages
+      let logoImage = null;
       if (clinicHeader?.logoBase64) {
         try {
           // Extract base64 data
@@ -26179,7 +26297,6 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           const logoBytes = Uint8Array.from(Buffer.from(imageData, 'base64'));
 
           // Try to embed as PNG first, then JPG if that fails
-          let logoImage;
           try {
             logoImage = await pdfDoc.embedPng(logoBytes);
           } catch (pngErr) {
@@ -26189,123 +26306,208 @@ This treatment plan should be reviewed and adjusted based on individual patient 
               console.log('[SAVE-PRESCRIPTION-PDF] Could not embed logo as PNG or JPG:', jpgErr);
             }
           }
-
-          if (logoImage) {
-            // Scale logo to fit
-            const logoDims = logoImage.scaleToFit(logoSize, logoSize);
-            page.drawImage(logoImage, {
-              x: margin,
-              y: yPosition - logoDims.height,
-              width: logoDims.width,
-              height: logoDims.height,
-            });
-            textStartX = margin + logoDims.width + logoMargin;
-          }
         } catch (err) {
           console.log('[SAVE-PRESCRIPTION-PDF] Could not add logo:', err);
         }
       }
+      
+      // Helper function to add clinic header to any page
+      const addClinicHeader = (targetPage: any, startY: number = height - 30) => {
+        let yPos = startY;
+        let textStartX = margin;
+        
+        // Add clinic header with logo on left (using pre-embedded logo)
+        if (logoImage) {
+          // Scale logo to fit
+          const logoDims = logoImage.scaleToFit(logoSize, logoSize);
+          targetPage.drawImage(logoImage, {
+            x: margin,
+            y: yPos - logoDims.height,
+            width: logoDims.width,
+            height: logoDims.height,
+          });
+          textStartX = margin + logoDims.width + logoMargin;
+        }
 
-      // Clinic header text (to the right of logo)
-      const clinicName = clinicHeader?.clinicName || organizationName;
-      const clinicNameFontSize = parseInt(clinicHeader?.clinicNameFontSize?.replace('pt', '') || '16');
-      page.drawText(clinicName, {
-        x: textStartX,
-        y: yPosition,
-        size: Math.min(clinicNameFontSize, 16),
-        font: helveticaBoldFont,
-        color: rgb(0, 0, 0),
-      });
-
-      yPosition -= 15;
-
-      // Clinic address, phone, email, website
-      if (clinicHeader?.address) {
-        page.drawText(clinicHeader.address, {
+        // Clinic header text (to the right of logo)
+        const clinicName = clinicHeader?.clinicName || organizationName;
+        const clinicNameFontSize = parseInt(clinicHeader?.clinicNameFontSize?.replace('pt', '') || '16');
+        targetPage.drawText(clinicName, {
           x: textStartX,
-          y: yPosition,
-          size: smallFontSize,
-          font: helveticaFont,
+          y: yPos,
+          size: Math.min(clinicNameFontSize, 16),
+          font: helveticaBoldFont,
           color: rgb(0, 0, 0),
         });
-        yPosition -= 10;
-      }
 
-      if (clinicHeader?.phone) {
-        page.drawText(clinicHeader.phone, {
-          x: textStartX,
-          y: yPosition,
+        yPos -= 15;
+
+        // Clinic address, phone, email, website
+        if (clinicHeader?.address) {
+          targetPage.drawText(clinicHeader.address, {
+            x: textStartX,
+            y: yPos,
+            size: smallFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+          yPos -= 10;
+        }
+
+        if (clinicHeader?.phone) {
+          targetPage.drawText(clinicHeader.phone, {
+            x: textStartX,
+            y: yPos,
+            size: smallFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+          yPos -= 10;
+        }
+
+        if (clinicHeader?.email) {
+          targetPage.drawText(clinicHeader.email, {
+            x: textStartX,
+            y: yPos,
+            size: smallFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+          yPos -= 10;
+        }
+
+        if (clinicHeader?.website) {
+          targetPage.drawText(clinicHeader.website, {
+            x: textStartX,
+            y: yPos,
+            size: smallFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+          yPos -= 10;
+        }
+
+        // Prescription number and status (right side) - only on first page
+        if (targetPage === page) {
+          const prescriptionNum = prescription.prescriptionNumber || "N/A";
+          targetPage.drawText(`Prescription #: ${prescriptionNum}`, {
+            x: width - margin - 150,
+            y: height - 30,
+            size: smallFontSize,
+            font: helveticaFont,
+            color: rgb(0, 0, 0),
+          });
+
+          // ACTIVE status badge (right side)
+          const statusText = (prescription.status || "active").toUpperCase();
+          const statusWidth = helveticaBoldFont.widthOfTextAtSize(statusText, smallFontSize);
+          targetPage.drawRectangle({
+            x: width - margin - statusWidth - 10,
+            y: height - 50,
+            width: statusWidth + 10,
+            height: 15,
+            color: rgb(0.2, 0.8, 0.2),
+          });
+          targetPage.drawText(statusText, {
+            x: width - margin - statusWidth - 5,
+            y: height - 47,
+            size: smallFontSize,
+            font: helveticaBoldFont,
+            color: rgb(1, 1, 1),
+          });
+        }
+        
+        return yPos;
+      };
+
+      // Helper function to add clinic footer to any page
+      const addClinicFooter = (targetPage: any, pageNumber: number, totalPages: number) => {
+        const footerY = 30;
+
+        // Draw footer background if clinic footer has background color
+        if (clinicFooter?.backgroundColor) {
+          const footerBgColor = clinicFooter.backgroundColor;
+          // Parse hex color to RGB
+          const hex = footerBgColor.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16) / 255;
+          const g = parseInt(hex.substring(2, 4), 16) / 255;
+          const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+          targetPage.drawRectangle({
+            x: 0,
+            y: 0,
+            width: width,
+            height: 50,
+            color: rgb(r, g, b),
+          });
+        }
+
+        // Footer text from clinic_footers table
+        const footerText = clinicFooter?.footerText || `Pharmacy: ${prescription.pharmacy?.name || "Halo Health"} - ${prescription.pharmacy?.phone || "+44(0)121 827 5531"}`;
+        const footerTextColor = clinicFooter?.textColor || '#000000';
+        const hex = footerTextColor.replace('#', '');
+        const textR = parseInt(hex.substring(0, 2), 16) / 255;
+        const textG = parseInt(hex.substring(2, 4), 16) / 255;
+        const textB = parseInt(hex.substring(4, 6), 16) / 255;
+
+        const footerTextWidth = helveticaFont.widthOfTextAtSize(footerText, smallFontSize);
+        targetPage.drawText(footerText, {
+          x: (width - footerTextWidth) / 2,
+          y: footerY,
           size: smallFontSize,
           font: helveticaFont,
-          color: rgb(0, 0, 0),
+          color: rgb(textR, textG, textB),
         });
-        yPosition -= 10;
-      }
 
-      if (clinicHeader?.email) {
-        page.drawText(clinicHeader.email, {
-          x: textStartX,
-          y: yPosition,
+        // Page number (bottom right)
+        const pageNum = `${pageNumber}/${totalPages}`;
+        targetPage.drawText(pageNum, {
+          x: width - margin - helveticaFont.widthOfTextAtSize(pageNum, smallFontSize),
+          y: footerY,
           size: smallFontSize,
           font: helveticaFont,
-          color: rgb(0, 0, 0),
+          color: rgb(textR, textG, textB),
         });
-        yPosition -= 10;
-      }
+      };
 
-      if (clinicHeader?.website) {
-        page.drawText(clinicHeader.website, {
-          x: textStartX,
-          y: yPosition,
-          size: smallFontSize,
-          font: helveticaFont,
-          color: rgb(0, 0, 0),
-        });
-        yPosition -= 10;
-      }
+      let yPosition = height - 30;
+      let textStartX = margin;
 
-      // Prescription number and status (right side)
-      const prescriptionNum = prescription.prescriptionNumber || "N/A";
-      page.drawText(`Prescription #: ${prescriptionNum}`, {
-        x: width - margin - 150,
-        y: height - 30,
-        size: smallFontSize,
-        font: helveticaFont,
-        color: rgb(0, 0, 0),
-      });
+      // Add clinic header to first page
+      yPosition = addClinicHeader(page, yPosition);
 
-      // ACTIVE status badge (right side)
-      const statusText = (prescription.status || "active").toUpperCase();
-      const statusWidth = helveticaBoldFont.widthOfTextAtSize(statusText, smallFontSize);
-      page.drawRectangle({
-        x: width - margin - statusWidth - 10,
-        y: height - 50,
-        width: statusWidth + 10,
-        height: 15,
-        color: rgb(0.2, 0.8, 0.2),
-      });
-      page.drawText(statusText, {
-        x: width - margin - statusWidth - 5,
-        y: height - 47,
-        size: smallFontSize,
-        font: helveticaBoldFont,
-        color: rgb(1, 1, 1),
-      });
-
-      // Provider Section (Centered, below header)
+      // Prescription Title Section (Centered, below header)
       yPosition -= 30;
-      const providerName = doctorInfo
-        ? `${doctorInfo.firstName || ""} ${doctorInfo.lastName || ""}`.trim() || "Provider undefined"
-        : "Provider undefined";
-
-      const providerNameWidth = helveticaFont.widthOfTextAtSize(providerName, normalFontSize);
-      page.drawText(providerName, {
-        x: (width - providerNameWidth) / 2,
+      const prescriptionTitle = "Prescription";
+      const prescriptionTitleWidth = helveticaBoldFont.widthOfTextAtSize(prescriptionTitle, 20);
+      page.drawText(prescriptionTitle, {
+        x: (width - prescriptionTitleWidth) / 2,
         y: yPosition,
-        size: normalFontSize,
-        font: helveticaFont,
-        color: rgb(0, 0, 0),
+        size: 20,
+        font: helveticaBoldFont,
+        color: rgb(0.5, 0.5, 0.5), // Grey color
       });
+
+      // Format provider name with role prefix for use in Provider field
+      let providerName = "Provider undefined";
+      if (doctorInfo) {
+        const firstName = doctorInfo.firstName || "";
+        const lastName = doctorInfo.lastName || "";
+        const fullName = `${firstName} ${lastName}`.trim();
+        if (fullName) {
+          const role = (doctorInfo.role || "").toLowerCase();
+          // Remove any existing prefix from name
+          const cleanName = fullName.replace(/^(Dr\.|Nurse\.)\s*/i, "").trim();
+          // Add role prefix
+          if (role === "nurse") {
+            providerName = `Nurse. ${cleanName}`;
+          } else if (role === "doctor") {
+            providerName = `Dr. ${cleanName}`;
+          } else {
+            providerName = cleanName;
+          }
+        }
+      }
 
       yPosition -= 30;
 
@@ -26331,10 +26533,35 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         color: rgb(0, 0, 0),
       });
 
-      const patientAddress = patient.address || "";
-      const patientCountry = patient.country || "United Kingdom";
+      // Cast patient to any to access all properties
+      const patientData = patient as any;
+
+      // Format address properly
       const addressLabel = "Address: ";
-      const addressValue = `${patientAddress ? patientAddress + ", " : ""}${patientCountry}`;
+      let addressValue = "-";
+      const patientAddr = patientData.address;
+      const patientCountry = patientData.country;
+      if (patientAddr) {
+        // Handle address object or string
+        if (typeof patientAddr === 'object') {
+          const addrParts = [];
+          if (patientAddr.street) addrParts.push(patientAddr.street);
+          if (patientAddr.city) addrParts.push(patientAddr.city);
+          if (patientAddr.state) addrParts.push(patientAddr.state);
+          if (patientAddr.postcode) addrParts.push(patientAddr.postcode);
+          if (patientCountry) addrParts.push(patientCountry);
+          addressValue = addrParts.length > 0 ? addrParts.join(", ") : "-";
+        } else if (typeof patientAddr === 'string' && patientAddr.trim()) {
+          addressValue = patientAddr;
+          // Add country if not already in address string
+          if (patientCountry && !addressValue.includes(patientCountry)) {
+            addressValue += `, ${patientCountry}`;
+          }
+        }
+      } else if (patientCountry) {
+        addressValue = patientCountry;
+      }
+      
       page.drawText(addressLabel, {
         x: leftColumnX,
         y: yPosition - 15,
@@ -26350,7 +26577,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         color: rgb(0, 0, 0),
       });
 
-      const allergies = patient.allergies || "-";
+      // Get allergies from medical history
+      let allergiesText = "-";
+      if (patientData.medicalHistory?.allergies && Array.isArray(patientData.medicalHistory.allergies) && patientData.medicalHistory.allergies.length > 0) {
+        allergiesText = patientData.medicalHistory.allergies.join(", ");
+      } else if (patientData.allergies && Array.isArray(patientData.allergies) && patientData.allergies.length > 0) {
+        allergiesText = patientData.allergies.join(", ");
+      } else if (typeof patientData.allergies === 'string' && patientData.allergies.trim()) {
+        allergiesText = patientData.allergies;
+      }
       const allergiesLabel = "Allergies: ";
       page.drawText(allergiesLabel, {
         x: leftColumnX,
@@ -26359,7 +26594,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         font: helveticaBoldFont,
         color: rgb(0, 0, 0),
       });
-      page.drawText(allergies, {
+      page.drawText(allergiesText, {
         x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(allergiesLabel, normalFontSize),
         y: yPosition - 30,
         size: normalFontSize,
@@ -26367,7 +26602,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         color: rgb(0, 0, 0),
       });
 
-      const weight = patient.weight || "-";
+      // Get weight from vitals, then fallback to patient weight
+      const weightText = weightFromVitals || (patientData.weight ? `${patientData.weight} kg` : "-");
       const weightLabel = "Weight: ";
       page.drawText(weightLabel, {
         x: leftColumnX,
@@ -26376,7 +26612,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         font: helveticaBoldFont,
         color: rgb(0, 0, 0),
       });
-      page.drawText(weight, {
+      page.drawText(weightText, {
         x: leftColumnX + helveticaBoldFont.widthOfTextAtSize(weightLabel, normalFontSize),
         y: yPosition - 45,
         size: normalFontSize,
@@ -26447,7 +26683,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         });
       }
 
-      const gender = patient.genderAtBirth || "Not specified";
+      // Get gender - check multiple fields
+      const gender = patientData.gender || patientData.genderAtBirth || patientData.sex || "Not specified";
       const sexLabel = "Sex: ";
       page.drawText(sexLabel, {
         x: rightColumnX,
@@ -26490,38 +26727,69 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       yPosition -= 90;
 
-      // Medications Section
+      // Medications Section - Display all medications with proper pagination
       if (prescription.medications && prescription.medications.length > 0) {
-        for (const med of prescription.medications) {
-          if (yPosition < 200) {
+        // Add section title
+        if (yPosition < 250) {
+          const newPage = pdfDoc.addPage([595, 842]);
+          page = newPage;
+          yPosition = height - 30;
+          
+          // Add clinic header to new page
+          yPosition = addClinicHeader(page, yPosition);
+          yPosition -= 20; // Add spacing after header
+        }
+
+        for (let index = 0; index < prescription.medications.length; index++) {
+          const med = prescription.medications[index];
+          
+          // Check if we need a new page (leave at least 120 points for medication details)
+          if (yPosition < 120) {
             const newPage = pdfDoc.addPage([595, 842]);
             page = newPage;
-            yPosition = height - 100;
+            yPosition = height - 30;
+            
+            // Add clinic header to new page
+            yPosition = addClinicHeader(page, yPosition);
+            yPosition -= 20; // Add spacing after header
+            
+            // Add watermark to new page
+            const watermarkText = "HHC";
+            const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
+            page.drawText(watermarkText, {
+              x: (width - watermarkWidth) / 2,
+              y: height / 2,
+              size: 100,
+              font: helveticaBoldFont,
+              color: rgb(0.85, 0.85, 0.85),
+              opacity: 0.15,
+            });
           }
 
+          // Medication number and name
           const medName = med.name || "Unknown Medication";
-          page.drawText(medName, {
+          const medTitle = `Medication ${index + 1}: ${medName}`;
+          page.drawText(medTitle, {
             x: margin,
             y: yPosition,
             size: normalFontSize,
             font: helveticaBoldFont,
             color: rgb(0, 0, 0),
           });
+          yPosition -= 18;
 
-          yPosition -= 20;
-
-          // Sig (Instructions)
-          if (med.instructions) {
-            const sigLabel = "Sig: ";
-            page.drawText(sigLabel, {
+          // Dosage
+          if (med.dosage) {
+            const dosageLabel = "Dosage: ";
+            page.drawText(dosageLabel, {
               x: margin,
               y: yPosition,
               size: normalFontSize,
               font: helveticaBoldFont,
               color: rgb(0, 0, 0),
             });
-            page.drawText(med.instructions, {
-              x: margin + helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize),
+            page.drawText(med.dosage, {
+              x: margin + helveticaBoldFont.widthOfTextAtSize(dosageLabel, normalFontSize),
               y: yPosition,
               size: normalFontSize,
               font: helveticaFont,
@@ -26530,46 +26798,187 @@ This treatment plan should be reviewed and adjusted based on individual patient 
             yPosition -= 15;
           }
 
-          // Disp (Quantity and Duration)
-          const quantity = med.quantity || 0;
-          const duration = med.duration || "";
-          const dispLabel = "Disp: ";
-          const dispValue = `${quantity}${duration ? ` (${duration})` : ""}`;
-          page.drawText(dispLabel, {
-            x: margin,
-            y: yPosition,
-            size: normalFontSize,
-            font: helveticaBoldFont,
-            color: rgb(0, 0, 0),
-          });
-          page.drawText(dispValue, {
-            x: margin + helveticaBoldFont.widthOfTextAtSize(dispLabel, normalFontSize),
-            y: yPosition,
-            size: normalFontSize,
-            font: helveticaFont,
-            color: rgb(0, 0, 0),
-          });
-          yPosition -= 15;
+          // Frequency
+          if (med.frequency) {
+            const frequencyLabel = "Frequency: ";
+            page.drawText(frequencyLabel, {
+              x: margin,
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaBoldFont,
+              color: rgb(0, 0, 0),
+            });
+            page.drawText(med.frequency, {
+              x: margin + helveticaBoldFont.widthOfTextAtSize(frequencyLabel, normalFontSize),
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaFont,
+              color: rgb(0, 0, 0),
+            });
+            yPosition -= 15;
+          }
+
+          // Duration
+          if (med.duration) {
+            const durationLabel = "Duration: ";
+            page.drawText(durationLabel, {
+              x: margin,
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaBoldFont,
+              color: rgb(0, 0, 0),
+            });
+            page.drawText(med.duration, {
+              x: margin + helveticaBoldFont.widthOfTextAtSize(durationLabel, normalFontSize),
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaFont,
+              color: rgb(0, 0, 0),
+            });
+            yPosition -= 15;
+          }
+
+          // Quantity
+          if (med.quantity !== undefined && med.quantity !== null) {
+            const quantityLabel = "Quantity: ";
+            page.drawText(quantityLabel, {
+              x: margin,
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaBoldFont,
+              color: rgb(0, 0, 0),
+            });
+            page.drawText(String(med.quantity), {
+              x: margin + helveticaBoldFont.widthOfTextAtSize(quantityLabel, normalFontSize),
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaFont,
+              color: rgb(0, 0, 0),
+            });
+            yPosition -= 15;
+          }
 
           // Refills
-          const refills = med.refills || 0;
-          const refillsLabel = "Refills: ";
-          page.drawText(refillsLabel, {
-            x: margin,
-            y: yPosition,
-            size: normalFontSize,
-            font: helveticaBoldFont,
-            color: rgb(0, 0, 0),
-          });
-          page.drawText(String(refills), {
-            x: margin + helveticaBoldFont.widthOfTextAtSize(refillsLabel, normalFontSize),
-            y: yPosition,
-            size: normalFontSize,
-            font: helveticaFont,
-            color: rgb(0, 0, 0),
-          });
+          if (med.refills !== undefined && med.refills !== null) {
+            const refillsLabel = "Refills: ";
+            page.drawText(refillsLabel, {
+              x: margin,
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaBoldFont,
+              color: rgb(0, 0, 0),
+            });
+            page.drawText(String(med.refills), {
+              x: margin + helveticaBoldFont.widthOfTextAtSize(refillsLabel, normalFontSize),
+              y: yPosition,
+              size: normalFontSize,
+              font: helveticaFont,
+              color: rgb(0, 0, 0),
+            });
+            yPosition -= 15;
+          }
 
-          yPosition -= 25;
+          // Instructions (Sig)
+          if (med.instructions) {
+            const sigLabel = "Instructions: ";
+            // Handle long instructions that might need wrapping
+            const instructionsText = med.instructions;
+            const maxWidth = width - 2 * margin - helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize);
+            
+            // Simple text wrapping - split by words and fit within maxWidth
+            const words = instructionsText.split(' ');
+            let currentLine = '';
+            let firstLine = true;
+            
+            for (const word of words) {
+              const testLine = currentLine ? `${currentLine} ${word}` : word;
+              const testWidth = helveticaFont.widthOfTextAtSize(testLine, normalFontSize);
+              
+              if (testWidth > maxWidth && currentLine) {
+                // Draw current line
+                if (firstLine) {
+                  page.drawText(sigLabel, {
+                    x: margin,
+                    y: yPosition,
+                    size: normalFontSize,
+                    font: helveticaBoldFont,
+                    color: rgb(0, 0, 0),
+                  });
+                  page.drawText(currentLine, {
+                    x: margin + helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize),
+                    y: yPosition,
+                    size: normalFontSize,
+                    font: helveticaFont,
+                    color: rgb(0, 0, 0),
+                  });
+                  firstLine = false;
+                } else {
+                  page.drawText(currentLine, {
+                    x: margin + helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize),
+                    y: yPosition,
+                    size: normalFontSize,
+                    font: helveticaFont,
+                    color: rgb(0, 0, 0),
+                  });
+                }
+                yPosition -= 15;
+                currentLine = word;
+                
+                // Check if we need a new page
+                if (yPosition < 50) {
+                  const newPage = pdfDoc.addPage([595, 842]);
+                  page = newPage;
+                  yPosition = height - 100;
+                  
+                  // Add watermark to new page
+                  const watermarkText = "HHC";
+                  const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
+                  page.drawText(watermarkText, {
+                    x: (width - watermarkWidth) / 2,
+                    y: height / 2,
+                    size: 100,
+                    font: helveticaBoldFont,
+                    color: rgb(0.85, 0.85, 0.85),
+                    opacity: 0.15,
+                  });
+                }
+              } else {
+                currentLine = testLine;
+              }
+            }
+            
+            // Draw remaining line
+            if (currentLine) {
+              if (firstLine) {
+                page.drawText(sigLabel, {
+                  x: margin,
+                  y: yPosition,
+                  size: normalFontSize,
+                  font: helveticaBoldFont,
+                  color: rgb(0, 0, 0),
+                });
+                page.drawText(currentLine, {
+                  x: margin + helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize),
+                  y: yPosition,
+                  size: normalFontSize,
+                  font: helveticaFont,
+                  color: rgb(0, 0, 0),
+                });
+              } else {
+                page.drawText(currentLine, {
+                  x: margin + helveticaBoldFont.widthOfTextAtSize(sigLabel, normalFontSize),
+                  y: yPosition,
+                  size: normalFontSize,
+                  font: helveticaFont,
+                  color: rgb(0, 0, 0),
+                });
+              }
+              yPosition -= 15;
+            }
+          }
+
+          // Add spacing between medications
+          yPosition -= 10;
         }
       }
 
@@ -26578,7 +26987,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         if (yPosition < 150) {
           const newPage = pdfDoc.addPage([595, 842]);
           page = newPage;
-          yPosition = height - 100;
+          yPosition = height - 30;
+          
+          // Add clinic header to new page
+          yPosition = addClinicHeader(page, yPosition);
+          yPosition -= 20; // Add spacing after header
         }
 
         const diagnosisLabel = "Diagnosis: ";
@@ -26603,7 +27016,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (yPosition < 150) {
         const newPage = pdfDoc.addPage([595, 842]);
         page = newPage;
-        yPosition = height - 100;
+        yPosition = height - 30;
+        
+        // Add clinic header to new page
+        yPosition = addClinicHeader(page, yPosition);
+        yPosition -= 20; // Add spacing after header
+        
         // Add watermark to new page
         const watermarkText = "HHC";
         const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
@@ -26765,10 +27183,13 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         opacity: 0.15,
       });
 
-      // Add watermark to all pages
+      // Add watermark and footer to all pages
+      const totalPages = pdfDoc.getPageCount();
       const pages = pdfDoc.getPages();
       for (let i = 0; i < pages.length; i++) {
         const currentPage = pages[i];
+        
+        // Add watermark to page
         const watermarkText = "HHC";
         const watermarkWidth = helveticaBoldFont.widthOfTextAtSize(watermarkText, 100);
         currentPage.drawText(watermarkText, {
@@ -26779,56 +27200,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           color: rgb(0.85, 0.85, 0.85),
           opacity: 0.15,
         });
+        
+        // Add footer to page
+        addClinicFooter(currentPage, i + 1, totalPages);
       }
-
-      // Footer - Clinic footer and page number
-      const lastPage = pdfDoc.getPages()[pdfDoc.getPageCount() - 1];
-      const footerY = 30;
-
-      // Draw footer background if clinic footer has background color
-      if (clinicFooter?.backgroundColor) {
-        const footerBgColor = clinicFooter.backgroundColor;
-        // Parse hex color to RGB
-        const hex = footerBgColor.replace('#', '');
-        const r = parseInt(hex.substring(0, 2), 16) / 255;
-        const g = parseInt(hex.substring(2, 4), 16) / 255;
-        const b = parseInt(hex.substring(4, 6), 16) / 255;
-
-        lastPage.drawRectangle({
-          x: 0,
-          y: 0,
-          width: width,
-          height: 50,
-          color: rgb(r, g, b),
-        });
-      }
-
-      // Footer text from clinic_footers table
-      const footerText = clinicFooter?.footerText || `Pharmacy: ${prescription.pharmacy?.name || "Halo Health"} - ${prescription.pharmacy?.phone || "+44(0)121 827 5531"}`;
-      const footerTextColor = clinicFooter?.textColor || '#000000';
-      const hex = footerTextColor.replace('#', '');
-      const textR = parseInt(hex.substring(0, 2), 16) / 255;
-      const textG = parseInt(hex.substring(2, 4), 16) / 255;
-      const textB = parseInt(hex.substring(4, 6), 16) / 255;
-
-      const footerTextWidth = helveticaFont.widthOfTextAtSize(footerText, smallFontSize);
-      lastPage.drawText(footerText, {
-        x: (width - footerTextWidth) / 2,
-        y: footerY,
-        size: smallFontSize,
-        font: helveticaFont,
-        color: rgb(textR, textG, textB),
-      });
-
-      // Page number (bottom right)
-      const pageNum = `1/${pdfDoc.getPageCount()}`;
-      lastPage.drawText(pageNum, {
-        x: width - margin - helveticaFont.widthOfTextAtSize(pageNum, smallFontSize),
-        y: footerY,
-        size: smallFontSize,
-        font: helveticaFont,
-        color: rgb(textR, textG, textB),
-      });
 
       // Save PDF to directory structure: uploads/Prescriptions/{organization_id}/patients/{patient_id}/{user_id}/All_docs_prescriptions/{prescriptionNumber}.pdf
       const prescriptionsDir = path.resolve(
@@ -26854,21 +27229,31 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       // Save file path to database
       const relativePath = `/uploads/Prescriptions/${organizationId}/patients/${prescription.patientId}/${userId}/All_docs_prescriptions/${sanitizedFileName}`;
 
-      // Update prescription record with saved PDF path
+      // Update prescription record with saved PDF path using local time
+      // Using local time components directly to ensure database stores exactly what system time shows
       try {
-        await db
-          .update(schema.prescriptions)
-          .set({
-            savedPdfPath: relativePath,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(schema.prescriptions.id, prescriptionId),
-              eq(schema.prescriptions.organizationId, organizationId)
-            )
-          );
-        console.log(`[SAVE-PRESCRIPTION-PDF] Updated prescription ${prescriptionId} with saved_pdf_path: ${relativePath}`);
+        // Format current local time as a string for PostgreSQL
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+        const localTimeString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+        
+        console.log(`[SAVE-PRESCRIPTION-PDF] Local time components - Year: ${year}, Month: ${month}, Day: ${day}, Time: ${hours}:${minutes}:${seconds}.${milliseconds}`);
+        console.log(`[SAVE-PRESCRIPTION-PDF] Formatted local time string for updated_at: ${localTimeString}`);
+        
+        await db.execute(sql`
+          UPDATE prescriptions
+          SET saved_pdf_path = ${relativePath},
+              updated_at = ${localTimeString}::timestamp
+          WHERE id = ${prescriptionId} AND organization_id = ${organizationId}
+        `);
+        console.log(`[SAVE-PRESCRIPTION-PDF] ✅ Updated prescription ${prescriptionId} with saved_pdf_path: ${relativePath}`);
+        console.log(`[SAVE-PRESCRIPTION-PDF] ✅ Updated updated_at to local time: ${localTimeString}`);
       } catch (dbError) {
         console.error(`[SAVE-PRESCRIPTION-PDF] Error updating database:`, dbError);
         // Continue even if database update fails
@@ -26883,9 +27268,12 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         fileName: sanitizedFileName,
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("[SAVE-PRESCRIPTION-PDF] Error:", error);
-      res.status(500).json({ error: "Failed to save prescription PDF" });
+      console.error("[SAVE-PRESCRIPTION-PDF] Error stack:", error?.stack);
+      console.error("[SAVE-PRESCRIPTION-PDF] Error message:", error?.message);
+      const errorMessage = error?.message || "Failed to save prescription PDF";
+      res.status(500).json({ error: errorMessage, details: error?.stack });
     }
   });
 
@@ -28778,7 +29166,56 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       };
 
       const items = await inventoryService.getItems(req.tenant!.id, filters);
-      res.json(items);
+      
+      // Format timestamps to ISO format with 'Z' (UTC indicator) for consistent frontend parsing
+      const formatTimestamp = (dateValue: any): string | null => {
+        if (!dateValue) return null;
+        if (dateValue instanceof Date) {
+          return dateValue.toISOString();
+        }
+        if (typeof dateValue === 'string') {
+          // If already has timezone indicator, return as-is
+          if (dateValue.includes('Z') || dateValue.match(/[+-]\d{2}:\d{2}$/)) {
+            return dateValue;
+          }
+          // If no timezone (timestamp without time zone from PostgreSQL), treat as UTC
+          // PostgreSQL returns "2026-03-14 10:41:34" format, we need to convert to ISO with Z
+          try {
+            // Convert space to 'T' and append 'Z' to indicate UTC
+            // "2026-03-14 10:41:34" -> "2026-03-14T10:41:34Z"
+            let utcString = dateValue;
+            if (utcString.includes(' ') && !utcString.includes('T')) {
+              utcString = utcString.replace(' ', 'T') + 'Z';
+            } else if (!utcString.endsWith('Z') && !utcString.match(/[+-]\d{2}:\d{2}$/)) {
+              utcString = utcString + 'Z';
+            }
+            const date = new Date(utcString);
+            if (!isNaN(date.getTime())) {
+              return date.toISOString();
+            }
+          } catch {
+            // If parsing fails, try to convert the original value
+            try {
+              const date2 = new Date(dateValue);
+              if (!isNaN(date2.getTime())) {
+                return date2.toISOString();
+              }
+            } catch {
+              // If all parsing fails, return original
+              return dateValue;
+            }
+          }
+        }
+        return null;
+      };
+      
+      const formattedItems = items.map((item: any) => ({
+        ...item,
+        createdAt: formatTimestamp(item.createdAt) || item.createdAt,
+        updatedAt: formatTimestamp(item.updatedAt) || item.updatedAt,
+      }));
+      
+      res.json(formattedItems);
     } catch (error) {
       console.error("Error fetching inventory items:", error);
       res.status(500).json({ error: "Failed to fetch items" });
@@ -28961,6 +29398,55 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
+  // Warehouses
+  app.get("/api/inventory/warehouses", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
+    try {
+      const warehouses = await inventoryService.getWarehouses(req.tenant!.id);
+      res.json(warehouses);
+    } catch (error) {
+      console.error("Error fetching warehouses:", error);
+      res.status(500).json({ error: "Failed to fetch warehouses" });
+    }
+  });
+
+  app.post("/api/inventory/warehouses", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
+    try {
+      if (!req.tenant?.id) {
+        return res.status(401).json({ error: "Unauthorized: No tenant context" });
+      }
+
+      const warehouseData = z.object({
+        warehouseName: z.string().min(1, "Warehouse name is required"),
+        location: z.string().optional().transform(val => val && val.trim() !== "" ? val.trim() : undefined),
+        status: z.enum(["active", "inactive"]).default("active")
+      }).parse(req.body);
+
+      const warehouse = await inventoryService.createWarehouse({
+        warehouseName: warehouseData.warehouseName.trim(),
+        location: warehouseData.location || null,
+        status: warehouseData.status,
+        organizationId: req.tenant.id
+      });
+
+      res.status(201).json(warehouse);
+    } catch (error: any) {
+      console.error("Error creating warehouse:", error);
+      console.error("Error details:", {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        body: req.body
+      });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: error.errors[0]?.message || "Validation error",
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: error.message || "Failed to create warehouse" });
+    }
+  });
+
   // Get item names
   app.get("/api/inventory/item-names", authMiddleware, requireRole(["admin", "doctor", "nurse", "receptionist", "pharmacist"]), async (req: TenantRequest, res) => {
     try {
@@ -28991,6 +29477,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const itemNameData = z.object({
         name: z.string().min(1),
         description: z.string().optional(),
+        brandName: z.string().optional(),
+        manufacturer: z.string().optional(),
+        unitOfMeasurement: z.string().optional(),
       }).parse(req.body);
 
       const itemName = await inventoryService.createItemName({
@@ -29038,6 +29527,9 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         itemNameData = z.object({
           name: z.string().min(1).optional(),
           description: z.string().optional(),
+          brandName: z.string().optional(),
+          manufacturer: z.string().optional(),
+          unitOfMeasurement: z.string().optional(),
           isActive: z.boolean().optional(),
         }).parse(req.body);
       } catch (parseError) {
@@ -29196,6 +29688,31 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Delete Purchase Order
+  app.patch("/api/inventory/purchase-orders/:id", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
+    try {
+      const purchaseOrderId = parseInt(req.params.id);
+      const updates = z.object({
+        status: z.enum(["pending", "sent", "received", "cancelled"]).optional(),
+        expectedDeliveryDate: z.string().optional(),
+        notes: z.string().optional(),
+      }).parse(req.body);
+
+      const updatedOrder = await inventoryService.updatePurchaseOrder(
+        purchaseOrderId,
+        req.tenant!.id,
+        {
+          ...updates,
+          expectedDeliveryDate: updates.expectedDeliveryDate ? new Date(updates.expectedDeliveryDate) : undefined,
+        }
+      );
+
+      res.json(updatedOrder);
+    } catch (error: any) {
+      console.error("Error updating purchase order:", error);
+      res.status(500).json({ error: error.message || "Failed to update purchase order" });
+    }
+  });
+
   app.delete("/api/inventory/purchase-orders/:id", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
     try {
       const purchaseOrderId = parseInt(req.params.id);
@@ -30137,6 +30654,102 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error fetching batches:", error);
       res.status(500).json({ error: "Failed to fetch batches" });
+    }
+  });
+
+  // Create inventory batch
+  app.post("/api/inventory/batches", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
+    console.log("[POST /api/inventory/batches] Route hit!");
+    console.log("[POST /api/inventory/batches] Method:", req.method);
+    console.log("[POST /api/inventory/batches] URL:", req.url);
+    console.log("[POST /api/inventory/batches] Headers:", req.headers);
+    try {
+      const {
+        itemId,
+        batchNumber,
+        quantity,
+        expiryDate,
+        manufactureDate,
+        purchasePrice,
+        receivedDate,
+        supplierId,
+        warehouseId,
+        purchaseOrderId,
+      } = req.body;
+
+      console.log("[POST /api/inventory/batches] Request body:", req.body);
+      console.log("[POST /api/inventory/batches] Tenant ID:", req.tenant?.id);
+
+      if (!itemId || !quantity || !purchasePrice || !receivedDate || !warehouseId) {
+        console.log("[POST /api/inventory/batches] Missing required fields");
+        return res.status(400).json({ error: "Missing required fields: itemId, quantity, purchasePrice, receivedDate, warehouseId" });
+      }
+
+      if (!req.tenant?.id) {
+        console.log("[POST /api/inventory/batches] No tenant ID");
+        return res.status(401).json({ error: "Unauthorized: No tenant context" });
+      }
+
+      const batch = await inventoryService.createBatch(req.tenant!.id, {
+        itemId: parseInt(itemId),
+        batchNumber: batchNumber && batchNumber.trim() ? batchNumber.trim() : undefined,
+        quantity: parseFloat(quantity),
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
+        purchasePrice: String(purchasePrice),
+        receivedDate: new Date(receivedDate),
+        supplierId: supplierId ? parseInt(supplierId) : null,
+        warehouseId: warehouseId ? parseInt(warehouseId) : null,
+        purchaseOrderId: purchaseOrderId ? parseInt(purchaseOrderId) : null,
+      });
+
+      res.json(batch);
+    } catch (error: any) {
+      console.error("Error creating batch:", error);
+      res.status(500).json({ error: error.message || "Failed to create batch" });
+    }
+  });
+
+  // Update inventory batch
+  app.patch("/api/inventory/batches/:id", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
+    try {
+      const batchId = parseInt(req.params.id);
+      if (Number.isNaN(batchId)) {
+        return res.status(400).json({ error: "Invalid batch ID" });
+      }
+
+      const updates: any = {};
+      if (req.body.batchNumber !== undefined) updates.batchNumber = req.body.batchNumber;
+      if (req.body.remainingQuantity !== undefined) updates.remainingQuantity = parseFloat(req.body.remainingQuantity);
+      if (req.body.expiryDate !== undefined) updates.expiryDate = req.body.expiryDate ? new Date(req.body.expiryDate) : null;
+      if (req.body.manufactureDate !== undefined) updates.manufactureDate = req.body.manufactureDate ? new Date(req.body.manufactureDate) : null;
+      if (req.body.purchasePrice !== undefined) updates.purchasePrice = String(req.body.purchasePrice);
+      if (req.body.receivedDate !== undefined) updates.receivedDate = new Date(req.body.receivedDate);
+      if (req.body.supplierId !== undefined) updates.supplierId = req.body.supplierId ? parseInt(req.body.supplierId) : null;
+      if (req.body.warehouseId !== undefined) updates.warehouseId = req.body.warehouseId ? parseInt(req.body.warehouseId) : null;
+      if (req.body.status !== undefined) updates.status = req.body.status;
+
+      const updated = await inventoryService.updateBatch(batchId, req.tenant!.id, updates);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating batch:", error);
+      res.status(500).json({ error: error.message || "Failed to update batch" });
+    }
+  });
+
+  // Delete inventory batch
+  app.delete("/api/inventory/batches/:id", authMiddleware, requireRole(["admin", "doctor", "nurse"]), async (req: TenantRequest, res) => {
+    try {
+      const batchId = parseInt(req.params.id);
+      if (Number.isNaN(batchId)) {
+        return res.status(400).json({ error: "Invalid batch ID" });
+      }
+
+      await inventoryService.deleteBatch(batchId, req.tenant!.id);
+      res.json({ success: true, message: "Batch deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting batch:", error);
+      res.status(500).json({ error: error.message || "Failed to delete batch" });
     }
   });
 
@@ -32663,9 +33276,9 @@ Cura EMR Team
     console.log('[Socket.IO] Client connected:', socket.id);
 
     // Handle user registration
-    socket.on('add_user', (data: { userId: string; deviceId?: string }) => {
-      const { userId, deviceId } = data;
-      console.log('[Socket.IO] User registered:', userId, 'Socket:', socket.id);
+    socket.on('add_user', (data: { userId: string; deviceId?: string; organizationId?: number }) => {
+      const { userId, deviceId, organizationId } = data;
+      console.log('[Socket.IO] User registered:', userId, 'Socket:', socket.id, 'Organization:', organizationId);
 
       // Add user to online users map
       if (!onlineUsers.has(userId)) {
@@ -32673,9 +33286,20 @@ Cura EMR Team
       }
       onlineUsers.get(userId)!.add(socket.id);
 
-      // Store userId on socket for easy lookup
+      // Store userId and organizationId on socket for easy lookup
       socket.data.userId = userId;
       socket.data.deviceId = deviceId;
+      socket.data.organizationId = organizationId;
+
+      // Join organization room for targeted currency updates
+      if (organizationId) {
+        const roomName = `org:${organizationId}`;
+        socket.join(roomName);
+        const roomSize = io.sockets.adapter.rooms.get(roomName)?.size || 0;
+        console.log(`[Socket.IO] ✅ Socket ${socket.id} joined organization room: ${roomName} (${roomSize} clients in room)`);
+      } else {
+        console.warn(`[Socket.IO] ⚠️ User ${userId} registered without organizationId - will not receive room-based currency updates`);
+      }
 
       // Broadcast updated online users list
       const onlineUserIds = Array.from(onlineUsers.keys());

@@ -5,13 +5,42 @@ import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { useTenant } from "@/hooks/use-tenant";
+import { useCurrency } from "@/hooks/use-currency";
 import { useQuery } from "@tanstack/react-query";
 import { Globe } from "lucide-react";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { AccessRestricted } from "@/components/access-restricted";
 import { getFirstAccessiblePage } from "@/lib/get-first-accessible-page";
+
+// Currency and Country Display Component
+// Automatically updates when currency changes in organizations table
+function CurrencyCountryDisplay() {
+  const { currencySymbol, countryName, _version } = useCurrency();
+  // Use state to force re-render when currency changes
+  const [displayCurrency, setDisplayCurrency] = useState(currencySymbol);
+  const [displayCountry, setDisplayCountry] = useState(countryName);
+  
+  // Update whenever currency or country changes
+  useEffect(() => {
+    setDisplayCurrency(currencySymbol);
+    setDisplayCountry(countryName);
+  }, [currencySymbol, countryName, _version]);
+  
+  return (
+    <div 
+      className="hidden sm:flex items-center space-x-1 bg-neutral-50 dark:bg-neutral-800 px-2 py-1 rounded-lg"
+    >
+      <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+        {displayCurrency}
+      </span>
+      <span className="text-[10px] uppercase font-bold text-neutral-700 dark:text-neutral-300">
+        {displayCountry}
+      </span>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -202,6 +231,9 @@ export default function Dashboard() {
         />
 
         <div className="flex items-center gap-2">
+          {/* Currency and Country */}
+          <CurrencyCountryDisplay />
+          
           {/* AI Status Indicator */}
           {tenant?.settings?.features?.aiEnabled && (
             <div className="hidden md:flex items-center space-x-2 bg-green-50 dark:bg-green-900 px-2 py-1 rounded-lg">

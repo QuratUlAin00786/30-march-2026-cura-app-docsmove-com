@@ -144,6 +144,166 @@ const formatTimestampWithAmPm = (
   return format(date, pattern);
 };
 
+// Format date in UK format (DD/MM/YYYY)
+// Parses timestamp string directly to avoid timezone conversion issues
+const formatDateUK = (timestamp?: string | null) => {
+  if (!timestamp) return "N/A";
+
+  try {
+    // Parse the timestamp string directly (format: "YYYY-MM-DD HH:MM:SS.mmm" or ISO string)
+    let dateStr = timestamp;
+    
+    // If it's an ISO string, extract the date part before T or Z
+    if (timestamp.includes('T')) {
+      dateStr = timestamp.split('T')[0];
+    } else if (timestamp.includes(' ')) {
+      dateStr = timestamp.split(' ')[0];
+    }
+    
+    // Remove timezone info if present
+    if (dateStr.includes('Z')) {
+      dateStr = dateStr.split('Z')[0];
+    }
+    if (dateStr.includes('+')) {
+      dateStr = dateStr.split('+')[0];
+    }
+    
+    // Parse YYYY-MM-DD format
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const year = parts[0];
+      const month = parts[1];
+      const day = parts[2];
+      return `${day}/${month}/${year}`;
+    }
+    
+    // Fallback to Date parsing if format is different
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "N/A";
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    return `${day}/${month}/${year}`;
+  } catch {
+    return "N/A";
+  }
+};
+
+// Format date for tooltip (e.g., "14 March 2026, 22:01:12")
+// Parses timestamp string directly to avoid timezone conversion issues
+const formatDateTooltip = (timestamp?: string | null) => {
+  if (!timestamp) return "N/A";
+
+  try {
+    // Parse the timestamp string directly (format: "YYYY-MM-DD HH:MM:SS.mmm")
+    let dateStr = timestamp;
+    let timeStr = '';
+    
+    // Handle ISO format (remove timezone indicators)
+    if (timestamp.includes('T')) {
+      const parts = timestamp.split('T');
+      dateStr = parts[0];
+      timeStr = parts[1].split('.')[0]; // Remove milliseconds
+      // Remove timezone info (Z, +HH:MM, -HH:MM)
+      if (timeStr.includes('Z')) {
+        timeStr = timeStr.split('Z')[0];
+      }
+      if (timeStr.includes('+')) {
+        timeStr = timeStr.split('+')[0];
+      }
+      if (timeStr.includes('-') && timeStr.match(/\d{2}:\d{2}:\d{2}-\d{2}:\d{2}/)) {
+        timeStr = timeStr.split('-').slice(0, -1).join('-');
+      }
+    } else if (timestamp.includes(' ')) {
+      const parts = timestamp.split(' ');
+      dateStr = parts[0];
+      timeStr = parts[1] ? parts[1].split('.')[0] : ''; // Remove milliseconds
+    }
+    
+    // Parse date part (YYYY-MM-DD)
+    const dateParts = dateStr.split('-');
+    if (dateParts.length === 3 && timeStr) {
+      const year = parseInt(dateParts[0], 10);
+      const month = parseInt(dateParts[1], 10) - 1; // Month is 0-indexed for monthNames array
+      const day = parseInt(dateParts[2], 10);
+      
+      // Parse time part (HH:MM:SS)
+      const timeParts = timeStr.split(':');
+      const hours = parseInt(timeParts[0], 10);
+      const minutes = parseInt(timeParts[1] || '0', 10);
+      const seconds = parseInt(timeParts[2] || '0', 10);
+      
+      const monthNames = ["January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"];
+      const monthName = monthNames[month];
+      
+      return `${day} ${monthName} ${year}, ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    
+    // Fallback to Date parsing if format is different
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "N/A";
+
+    const day = date.getDate();
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
+  } catch {
+    return "N/A";
+  }
+};
+
+// Format date in UK format (DD/MM/YYYY) in UTC
+const formatDateUKUTC = (timestamp?: string | null) => {
+  if (!timestamp) return "N/A";
+
+  try {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "N/A";
+
+    // Get UTC date components
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const year = date.getUTCFullYear();
+
+    return `${day}/${month}/${year}`;
+  } catch {
+    return "N/A";
+  }
+};
+
+// Format date for tooltip in UTC (e.g., "14 March 2026, 22:01:12")
+const formatDateTooltipUTC = (timestamp?: string | null) => {
+  if (!timestamp) return "N/A";
+
+  try {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "N/A";
+
+    // Get UTC date components
+    const day = date.getUTCDate();
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    const month = monthNames[date.getUTCMonth()];
+    const year = date.getUTCFullYear();
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+
+    return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
+  } catch {
+    return "N/A";
+  }
+};
+
 interface Prescription {
   id: string;
   patientId: string;
@@ -1402,6 +1562,60 @@ export default function PrescriptionsPage() {
           const { jsPDF } = await import("jspdf");
           const pdf = new jsPDF();
 
+          // Get patient data with medical history for allergies
+          let patientData = null;
+          if (prescriptionData.patientId) {
+            try {
+              const patientResponse = await apiRequest(
+                "GET",
+                `/api/patients/${prescriptionData.patientId}`
+              );
+              if (patientResponse.ok) {
+                patientData = await patientResponse.json();
+                // Attach patient data to prescriptionData for PDF generation
+                prescriptionData.patient = patientData;
+              }
+            } catch (err) {
+              console.error("Failed to fetch patient data for PDF:", err);
+            }
+          }
+
+          // Fetch weight from vitals in medical records
+          let weightFromVitals = null;
+          if (prescriptionData.patientId) {
+            try {
+              const recordsResponse = await apiRequest(
+                "GET",
+                `/api/patients/${prescriptionData.patientId}/records`
+              );
+              if (recordsResponse.ok) {
+                const records = await recordsResponse.json();
+                // Find the most recent vitals record
+                const vitalsRecords = records.filter((r: any) => r.type === 'vitals' || (r.notes && r.notes.includes('Weight:')));
+                if (vitalsRecords.length > 0) {
+                  // Sort by date, most recent first
+                  vitalsRecords.sort((a: any, b: any) => {
+                    const dateA = new Date(a.visitDate || a.createdAt || 0);
+                    const dateB = new Date(b.visitDate || b.createdAt || 0);
+                    return dateB.getTime() - dateA.getTime();
+                  });
+                  const latestVitals = vitalsRecords[0];
+                  // Extract weight from notes or vitalSigns
+                  if (latestVitals.vitalSigns?.weight) {
+                    weightFromVitals = `${latestVitals.vitalSigns.weight} kg`;
+                  } else if (latestVitals.notes) {
+                    const weightMatch = latestVitals.notes.match(/Weight:\s*([\d.]+)\s*kg/i);
+                    if (weightMatch) {
+                      weightFromVitals = `${weightMatch[1]} kg`;
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Failed to fetch vitals from medical records:", err);
+            }
+          }
+
           // Get doctor information from loaded users data
           const doctorId =
             prescriptionData.prescriptionCreatedBy || prescriptionData.doctorId;
@@ -1427,177 +1641,174 @@ export default function PrescriptionsPage() {
           const fontStyle =
             (clinicHeader as any)?.fontStyle === "italic" ? "italic" : "normal";
 
-          let yPosition = 30;
-
-          // Logo handling - if center, place beside text; if left/right, place above
-          if ((clinicHeader as any)?.logoBase64) {
-            try {
-              const logoPosition = (clinicHeader as any)?.logoPosition || "center";
-
-              if (logoPosition === "center") {
-                // Two-column layout: Logo on left, clinic info on right
-                const logoX = 20;
+          // Helper function to add clinic header to any page
+          const addClinicHeaderToPage = (pageNum: number = 1) => {
+            let headerY = 20;
+            let textStartX = 20;
+            const logoPosition = (clinicHeader as any)?.logoPosition || "center";
+            
+            // Add logo if available
+            if ((clinicHeader as any)?.logoBase64) {
+              try {
                 const logoSize = 30;
-                const textX = logoX + logoSize + 10;
                 
-                // Add logo in left column
-                pdf.addImage(
-                  (clinicHeader as any)?.logoBase64,
-                  "PNG",
-                  logoX,
-                  yPosition,
-                  logoSize,
-                  logoSize,
-                );
-
-                // Clinic info in right column - left aligned
-                let textY = yPosition + 2;
-                pdf.setFontSize(clinicNameSize);
-                pdf.setFont("helvetica", fontWeight);
-                pdf.text(clinicName, textX, textY, { align: "left" });
-
-                textY += 7;
-                pdf.setFontSize(contentSize);
-                pdf.setFont("helvetica", fontStyle);
-                pdf.text(clinicAddress, textX, textY, { align: "left" });
-
-                textY += 5;
-                pdf.text(clinicPhone, textX, textY, { align: "left" });
-
-                if (clinicEmail) {
-                  textY += 5;
-                  pdf.text(clinicEmail, textX, textY, { align: "left" });
+                if (logoPosition === "center") {
+                  pdf.addImage(
+                    (clinicHeader as any)?.logoBase64,
+                    "PNG",
+                    20,
+                    headerY,
+                    logoSize,
+                    logoSize,
+                  );
+                  textStartX = 20 + logoSize + 10;
+                  headerY += 2;
+                } else {
+                  const xPos = logoPosition === "left" ? 20 : 170;
+                  pdf.addImage(
+                    (clinicHeader as any)?.logoBase64,
+                    "PNG",
+                    xPos,
+                    headerY,
+                    logoSize,
+                    logoSize,
+                  );
+                  headerY += 35;
+                  textStartX = logoPosition === "left" ? 20 : 190;
                 }
-
-                if (clinicWebsite) {
-                  textY += 5;
-                  pdf.text(clinicWebsite, textX, textY, { align: "left" });
-                }
-
-                // Update yPosition to be after the tallest column
-                yPosition = Math.max(yPosition + logoSize, textY) + 5;
-              } else {
-                // Left or right positioning - logo above text
-                const textAlign = logoPosition === "left" ? "left" : "right";
-                const xPosition = logoPosition === "left" ? 20 : 170;
-                const textXPosition = logoPosition === "left" ? 20 : 190;
-                pdf.addImage(
-                  (clinicHeader as any)?.logoBase64,
-                  "PNG",
-                  xPosition,
-                  yPosition,
-                  30,
-                  30,
-                );
-                yPosition += 35;
-
-                // Clinic info aligned based on logo position
-                pdf.setFontSize(clinicNameSize);
-                pdf.setFont("helvetica", fontWeight);
-                pdf.text(clinicName, textXPosition, yPosition, {
-                  align: textAlign,
-                });
-
-                yPosition += 6;
-                pdf.setFontSize(contentSize);
-                pdf.setFont("helvetica", fontStyle);
-                pdf.text(clinicAddress, textXPosition, yPosition, {
-                  align: textAlign,
-                });
-                yPosition += 6;
-                pdf.text(clinicPhone, textXPosition, yPosition, {
-                  align: textAlign,
-                });
-
-                if (clinicEmail) {
-                  yPosition += 6;
-                  pdf.text(clinicEmail, textXPosition, yPosition, {
-                    align: textAlign,
-                  });
-                }
-
-                if (clinicWebsite) {
-                  yPosition += 6;
-                  pdf.text(clinicWebsite, textXPosition, yPosition, {
-                    align: textAlign,
-                  });
-                }
+              } catch (err) {
+                console.error("Failed to add logo to PDF:", err);
               }
-            } catch (err) {
-              console.error("Failed to add logo to PDF:", err);
             }
-          } else {
-            // No logo - just centered text
+
+            // Clinic name
             pdf.setFontSize(clinicNameSize);
             pdf.setFont("helvetica", fontWeight);
-            pdf.text(clinicName, 105, yPosition, { align: "center" });
+            const alignValue = logoPosition === "center" ? "left" : (logoPosition === "left" ? "left" : "right");
+            pdf.text(clinicName, textStartX, headerY, { align: alignValue });
+            headerY += 6;
 
-            yPosition += 6;
+            // Clinic details
             pdf.setFontSize(contentSize);
             pdf.setFont("helvetica", fontStyle);
-            pdf.text(clinicAddress, 105, yPosition, { align: "center" });
-            yPosition += 6;
-            pdf.text(clinicPhone, 105, yPosition, { align: "center" });
-
+            pdf.text(clinicAddress, textStartX, headerY, { align: alignValue });
+            headerY += 6;
+            pdf.text(clinicPhone, textStartX, headerY, { align: alignValue });
+            headerY += 6;
+            
             if (clinicEmail) {
-              yPosition += 6;
-              pdf.text(clinicEmail, 105, yPosition, { align: "center" });
+              pdf.text(clinicEmail, textStartX, headerY, { align: alignValue });
+              headerY += 6;
             }
-
+            
             if (clinicWebsite) {
-              yPosition += 6;
-              pdf.text(clinicWebsite, 105, yPosition, { align: "center" });
+              pdf.text(clinicWebsite, textStartX, headerY, { align: alignValue });
+              headerY += 6;
             }
-          }
 
-          // Horizontal line separator
-          pdf.setDrawColor(200, 200, 200);
-          pdf.line(20, 85, 190, 85);
+            // Prescription number and date on first page only
+            if (pageNum === 1) {
+              // Horizontal line separator
+              pdf.setDrawColor(200, 200, 200);
+              pdf.line(20, headerY + 5, 190, headerY + 5);
+              
+              pdf.setFontSize(11);
+              pdf.setFont("helvetica", "bold");
+              pdf.text(`Prescription No: ${prescriptionNumber}`, 20, headerY + 12);
 
-          // Prescription Number - Prominent Display
-          pdf.setFontSize(11);
-          pdf.setFont("helvetica", "bold");
-          pdf.text(`Prescription No: ${prescriptionNumber}`, 20, 92);
+              // Date
+              const prescriptionDate =
+                prescriptionData.issuedDate || prescriptionData.date || new Date();
+              pdf.setFont("helvetica", "normal");
+              pdf.text(
+                `Date: ${new Date(prescriptionDate).toLocaleDateString("en-GB")}`,
+                20,
+                headerY + 18,
+              );
+              headerY += 25;
+            }
 
-          // Date
-          const prescriptionDate =
-            prescriptionData.issuedDate || prescriptionData.date || new Date();
-          pdf.setFont("helvetica", "normal");
-          pdf.text(
-            `Date: ${new Date(prescriptionDate).toLocaleDateString("en-GB")}`,
-            20,
-            98,
-          );
+            return headerY;
+          };
+
+          // Helper function to add clinic footer to any page
+          const addClinicFooterToPage = (pageNum: number, totalPages: number) => {
+            const footerY = 275;
+            pdf.setDrawColor(200, 200, 200);
+            pdf.line(20, footerY, 190, footerY);
+
+            pdf.setFontSize(8);
+            pdf.setTextColor(80, 80, 80);
+            
+            if ((clinicFooter as any)?.footerText) {
+              pdf.text(
+                (clinicFooter as any)?.footerText,
+                105,
+                footerY + 6,
+                { align: "center" },
+              );
+            }
+            
+            // Page number
+            pdf.text(
+              `Page ${pageNum} of ${totalPages}`,
+              190,
+              footerY + 6,
+              { align: "right" },
+            );
+          };
+
+          // Add header to first page
+          let yPosition = addClinicHeaderToPage(1);
 
           // Patient Information
           pdf.setFontSize(11);
           pdf.setFont("helvetica", "bold");
-          pdf.text("PATIENT INFORMATION", 20, 108);
+          pdf.text("PATIENT INFORMATION", 20, yPosition);
 
           pdf.setFontSize(10);
           pdf.setFont("helvetica", "normal");
-          pdf.text(`Name: ${prescriptionData.patientName || "N/A"}`, 20, 115);
+          pdf.text(`Name: ${prescriptionData.patientName || "N/A"}`, 20, yPosition + 7);
           pdf.text(
             `Sex: ${prescriptionData.patientSex || "Not specified"}`,
             20,
-            121,
+            yPosition + 13,
           );
+          
+          // Add Allergies if available
+          const patientAllergies = prescriptionData.patient?.medicalHistory?.allergies || 
+                                   prescriptionData.patientAllergies || 
+                                   (prescriptionData.patient && Array.isArray(prescriptionData.patient.allergies) ? prescriptionData.patient.allergies : []);
+          const allergiesText = Array.isArray(patientAllergies) && patientAllergies.length > 0 
+            ? patientAllergies.join(", ") 
+            : (typeof patientAllergies === 'string' ? patientAllergies : "-");
+          pdf.text(`Allergies: ${allergiesText}`, 20, yPosition + 19);
+          
+          // Add Weight if available (prioritize weight from vitals)
+          const patientWeight = weightFromVitals || prescriptionData.patientWeight || prescriptionData.patient?.weight || "-";
+          pdf.text(`Weight: ${patientWeight}`, 20, yPosition + 25);
 
           // Provider Information
           pdf.setFontSize(11);
           pdf.setFont("helvetica", "bold");
-          pdf.text("PRESCRIBING PROVIDER", 20, 131);
+          pdf.text("PRESCRIBING PROVIDER", 20, yPosition + 31);
 
           pdf.setFontSize(10);
           pdf.setFont("helvetica", "normal");
-      
-          // Medication Details - Iterate through medications array
-          pdf.setFontSize(12);
-          pdf.setFont("helvetica", "bold");
-          pdf.text("MEDICATIONS PRESCRIBED", 20, 153);
+          
+          // Add provider name if available
+          if (doctorInfo) {
+            const providerName = doctorInfo.name || doctorInfo.fullName || "N/A";
+            pdf.text(`Name: ${providerName}`, 20, yPosition + 37);
+          }
 
-          let medicationY = 162;
+          // Medication Details - Iterate through medications array with proper pagination
+          let medicationY = yPosition + 50; // Start after patient/provider info (increased spacing to prevent overlap)
+
           const medications = prescriptionData.medications || [];
+          const pageHeight = 297; // A4 height in mm
+          const bottomMargin = 30; // Space for footer
+          const minSpaceForMedication = 60; // Minimum space needed for one medication
           
           if (medications.length === 0) {
             // Fallback for old format with single medication fields
@@ -1618,31 +1829,108 @@ export default function PrescriptionsPage() {
               pdf.text(`Refills: ${prescriptionData.refills}`, 20, 188);
             }
           } else {
-            // New format with medications array
-            medications.forEach((med: any, index: number) => {
-              const boxHeight = 48;
-              pdf.setFillColor(240, 245, 255);
-              pdf.rect(15, medicationY - 12, 180, boxHeight, "F");
+            // New format with medications array - handle pagination properly
+            for (let index = 0; index < medications.length; index++) {
+              const med = medications[index];
+              
+              // Calculate required height for this medication (including instructions if present)
+              let medicationBoxHeight = 48; // Base height
+              if (med.instructions) {
+                // Estimate height for instructions (roughly 4mm per line)
+                const instructionLines = pdf.splitTextToSize(med.instructions || "", 160);
+                medicationBoxHeight += (instructionLines.length * 4) + 6;
+              }
+              
+              // Check if we need a new page
+              // jsPDF page height is 297mm, but we work in mm units
+              // Leave space for footer (30mm) and some margin
+              const maxY = pageHeight - bottomMargin;
+              
+              if (medicationY + medicationBoxHeight > maxY) {
+                // Add new page (footer will be added at the end to all pages)
+                pdf.addPage();
+                const newPageNum = pdf.internal.getNumberOfPages();
+                
+                // Add header to new page
+                medicationY = addClinicHeaderToPage(newPageNum);
+                medicationY += 20; // Add spacing after header
+              }
 
+              // Draw medication box
+              pdf.setFillColor(240, 245, 255);
+              pdf.rect(15, medicationY - 12, 180, medicationBoxHeight, "F");
+
+              // Medication number and name
               pdf.setFontSize(10);
               pdf.setFont("helvetica", "bold");
               pdf.text(`Medication ${index + 1}`, 20, medicationY - 6);
 
               pdf.setFontSize(10);
               pdf.setFont("helvetica", "normal");
-              pdf.text(`Medication Name: ${med.name || "N/A"}`, 20, medicationY);
-              pdf.text(`Dosage: ${med.dosage || "N/A"}`, 20, medicationY + 6);
-              pdf.text(`Frequency: ${med.frequency || "N/A"}`, 20, medicationY + 12);
-              pdf.text(`Duration: ${med.duration || "N/A"}`, 20, medicationY + 18);
-              pdf.text(`Quantity: ${med.quantity || "N/A"}`, 20, medicationY + 24);
-              pdf.text(`Refills: ${med.refills || "0"}`, 20, medicationY + 30);
+              let lineY = medicationY;
+              
+              // Medication Name
+              pdf.text(`Medication Name: ${med.name || "N/A"}`, 20, lineY);
+              lineY += 6;
+              
+              // Dosage
+              if (med.dosage) {
+                pdf.text(`Dosage: ${med.dosage}`, 20, lineY);
+                lineY += 6;
+              }
+              
+              // Frequency
+              if (med.frequency) {
+                pdf.text(`Frequency: ${med.frequency}`, 20, lineY);
+                lineY += 6;
+              }
+              
+              // Duration
+              if (med.duration) {
+                pdf.text(`Duration: ${med.duration}`, 20, lineY);
+                lineY += 6;
+              }
+              
+              // Quantity
+              if (med.quantity !== undefined && med.quantity !== null) {
+                pdf.text(`Quantity: ${med.quantity}`, 20, lineY);
+                lineY += 6;
+              }
+              
+              // Refills
+              if (med.refills !== undefined && med.refills !== null) {
+                pdf.text(`Refills: ${med.refills}`, 20, lineY);
+                lineY += 6;
+              }
+              
+              // Instructions (if present) - handle wrapping
+              if (med.instructions) {
+                lineY += 3;
+                pdf.setFont("helvetica", "bold");
+                pdf.text("Instructions:", 20, lineY);
+                lineY += 6;
+                pdf.setFont("helvetica", "normal");
+                const instructionLines = pdf.splitTextToSize(med.instructions, 160);
+                pdf.text(instructionLines, 20, lineY);
+                lineY += instructionLines.length * 4;
+              }
 
-              medicationY += boxHeight + 8;
-            });
+              medicationY = lineY + 8; // Add spacing after medication
+            }
           }
 
-          // Instructions Section
+          // Instructions Section (general prescription instructions, not per-medication)
           let currentY = medications.length > 0 ? medicationY + 6 : 206;
+          
+          // Check if we need a new page for instructions
+          if (currentY > pageHeight - bottomMargin - 20) {
+            // Add new page (footer will be added at the end to all pages)
+            pdf.addPage();
+            const newPageNum = pdf.internal.getNumberOfPages();
+            currentY = addClinicHeaderToPage(newPageNum);
+            currentY += 20;
+          }
+          
           if (prescriptionData.instructions) {
             pdf.setFontSize(11);
             pdf.setFont("helvetica", "bold");
@@ -1657,6 +1945,25 @@ export default function PrescriptionsPage() {
             pdf.text(splitInstructions, 20, currentY + 6);
             currentY += 6 + splitInstructions.length * 4;
           }
+          
+          // Diagnosis Section
+          if (prescriptionData.diagnosis) {
+            // Check if we need a new page for diagnosis
+            if (currentY > pageHeight - bottomMargin - 15) {
+              // Add new page (footer will be added at the end to all pages)
+              pdf.addPage();
+              const newPageNum = pdf.internal.getNumberOfPages();
+              currentY = addClinicHeaderToPage(newPageNum);
+              currentY += 20;
+            }
+            
+            pdf.setFontSize(11);
+            pdf.setFont("helvetica", "bold");
+            pdf.text("Diagnosis:", 20, currentY);
+            pdf.setFont("helvetica", "normal");
+            pdf.text(prescriptionData.diagnosis, 20, currentY + 6);
+            currentY += 12;
+          }
 
           // E-Signature Section (if exists)
           console.log("[PDF GENERATION] Checking for signature:", {
@@ -1665,10 +1972,13 @@ export default function PrescriptionsPage() {
           });
 
           if (prescriptionData.signature) {
-            // Ensure we have enough space for signature (stop at Y=230 max to avoid footer overlap)
-            if (currentY > 230) {
+            // Ensure we have enough space for signature (need at least 50mm)
+            if (currentY > pageHeight - bottomMargin - 50) {
+              // Add new page (footer will be added at the end to all pages)
               pdf.addPage();
-              currentY = 20;
+              const newPageNum = pdf.internal.getNumberOfPages();
+              currentY = addClinicHeaderToPage(newPageNum);
+              currentY += 20;
             }
             
             currentY += 4;
@@ -1734,42 +2044,15 @@ export default function PrescriptionsPage() {
             );
           }
 
-          // Footer - Professional with clinic footer data
-          const footerY = 275;
-          pdf.setDrawColor(200, 200, 200);
-          pdf.line(20, footerY, 190, footerY);
-
-          // Add clinic footer text if available
-          pdf.setFontSize(8);
-          pdf.setTextColor(80, 80, 80);
-          
-          if ((clinicFooter as any)?.footerText) {
-            pdf.text(
-              (clinicFooter as any)?.footerText,
-              105,
-              footerY + 6,
-              { align: "center" },
-            );
-            pdf.text(
-              "This prescription has been electronically generated and verified",
-              105,
-              footerY + 11,
-              { align: "center" },
-            );
-          } else {
-            pdf.text(
-              "This prescription has been electronically generated and verified",
-              105,
-              footerY + 6,
-              { align: "center" },
-            );
-            pdf.text(
-              "Cura EMR Platform - Electronic Prescription System",
-              105,
-              footerY + 11,
-              { align: "center" },
-            );
+          // Add footer to all pages
+          const totalPages = pdf.internal.getNumberOfPages();
+          for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            pdf.setPage(pageNum);
+            addClinicFooterToPage(pageNum, totalPages);
           }
+          
+          // Set back to last page for any additional content
+          pdf.setPage(totalPages);
 
           // Convert PDF to Blob and then to File
           const pdfBlob = pdf.output("blob");
@@ -2072,6 +2355,7 @@ export default function PrescriptionsPage() {
     const newIndex = formData.medications.length;
     const globalInventoryChecked = Object.values(useInventoryItems).some(v => v);
     
+    // Use functional updates to prevent unnecessary re-renders and maintain dialog state
     setFormData((prev) => ({
       ...prev,
       medications: [
@@ -2815,8 +3099,59 @@ export default function PrescriptionsPage() {
   const proceedWithPrint = async (prescription: any) => {
 
     // Get patient details
-    const patient = patients.find((p) => p.id === prescription.patientId);
+    let patient = patients.find((p) => p.id === prescription.patientId);
     const provider = providers.find((p) => p.id === prescription.providerId);
+    
+    // Fetch full patient data with medical history if not already loaded
+    if (prescription.patientId && (!patient || !patient.medicalHistory)) {
+      try {
+        const patientResponse = await apiRequest(
+          "GET",
+          `/api/patients/${prescription.patientId}`
+        );
+        if (patientResponse.ok) {
+          patient = await patientResponse.json();
+        }
+      } catch (err) {
+        console.error("Failed to fetch patient data:", err);
+      }
+    }
+    
+    // Fetch weight from vitals in medical records
+    let weightFromVitals = null;
+    if (prescription.patientId) {
+      try {
+        const recordsResponse = await apiRequest(
+          "GET",
+          `/api/patients/${prescription.patientId}/records`
+        );
+        if (recordsResponse.ok) {
+          const records = await recordsResponse.json();
+          // Find the most recent vitals record
+          const vitalsRecords = records.filter((r: any) => r.type === 'vitals' || (r.notes && r.notes.includes('Weight:')));
+          if (vitalsRecords.length > 0) {
+            // Sort by date, most recent first
+            vitalsRecords.sort((a: any, b: any) => {
+              const dateA = new Date(a.visitDate || a.createdAt || 0);
+              const dateB = new Date(b.visitDate || b.createdAt || 0);
+              return dateB.getTime() - dateA.getTime();
+            });
+            const latestVitals = vitalsRecords[0];
+            // Extract weight from notes or vitalSigns
+            if (latestVitals.vitalSigns?.weight) {
+              weightFromVitals = `${latestVitals.vitalSigns.weight} kg`;
+            } else if (latestVitals.notes) {
+              const weightMatch = latestVitals.notes.match(/Weight:\s*([\d.]+)\s*kg/i);
+              if (weightMatch) {
+                weightFromVitals = `${weightMatch[1]} kg`;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch vitals from medical records:", err);
+      }
+    }
 
     // Fetch clinic header and footer
     let clinicHeader = null;
@@ -2971,20 +3306,41 @@ export default function PrescriptionsPage() {
     // Get first medication for main prescription details
     const firstMed = prescription.medications[0] || {};
 
-    // Format provider name with role
+    // Format provider name with role prefix
     const formatProviderName = (userInfo: any) => {
       if (!userInfo) return "N/A";
       const firstName = userInfo.firstName || "";
       const lastName = userInfo.lastName || "";
       const fullName = `${firstName} ${lastName}`.trim();
       if (!fullName) return "N/A";
-      const role = userInfo.role || "";
-      const roleLabel = role ? formatRoleLabel(role) : "";
-      const alreadyHasDr = fullName.toLowerCase().startsWith("dr.");
-      const prefix = (role?.toLowerCase() === "doctor" && !alreadyHasDr) ? "Dr. " : "";
-      return `${prefix}${fullName}${roleLabel ? ` (${roleLabel})` : ""}`;
+      const role = (userInfo.role || "").toLowerCase();
+      
+      // Remove any existing prefix from name
+      const cleanName = fullName.replace(/^(Dr\.|Nurse\.)\s*/i, "").trim();
+      
+      // Add role prefix
+      if (role === "nurse") {
+        return `Nurse. ${cleanName}`;
+      } else if (role === "doctor") {
+        return `Dr. ${cleanName}`;
+      }
+      
+      return cleanName;
     };
 
+    // If doctorInfo not found, try to get from providers array or use the provider variable
+    if (!doctorInfo) {
+      if (provider) {
+        doctorInfo = provider;
+      } else if (prescription.providerId) {
+        doctorInfo = providers.find((p: any) => p.id === prescription.providerId);
+      } else if (prescription.doctorId) {
+        doctorInfo = providers.find((p: any) => p.id === prescription.doctorId);
+      } else if (prescription.prescriptionCreatedBy) {
+        doctorInfo = providers.find((p: any) => p.id === prescription.prescriptionCreatedBy);
+      }
+    }
+    
     const providerDisplayName = formatProviderName(doctorInfo);
     const creatorDisplayName = creatorInfo ? formatProviderName(creatorInfo) : null;
 
@@ -3131,7 +3487,6 @@ export default function PrescriptionsPage() {
                 position: relative;
                 z-index: 2;
                 background-color: transparent; /* important: removes white box effect */
-                page-break-inside: avoid;
               }
               
               .medication-name {
@@ -3145,6 +3500,11 @@ export default function PrescriptionsPage() {
                 margin: 8px 0;
                 font-size: 10px;
                 line-height: 1.4;
+              }
+              
+              .medication-item {
+                page-break-inside: avoid;
+                break-inside: avoid;
               }
               
               .diagnosis-section {
@@ -3266,6 +3626,13 @@ export default function PrescriptionsPage() {
                   size: A4;
                   margin: 10mm;
                 }
+                /* Ensure header and footer appear on each printed page */
+                .header, .provider-section {
+                  page-break-after: avoid;
+                }
+                .footer {
+                  page-break-before: avoid;
+                }
               }
             </style>
           </head>
@@ -3362,10 +3729,10 @@ export default function PrescriptionsPage() {
                     <span class="info-label">Address:</span> ${patient?.address ? `${patient.address.street || ""}, ${patient.address.city || ""}, ${patient.address.postcode || ""}, ${patient.address.country || ""}`.replace(/, ,/g, ",").replace(/^,\s*|,\s*$/g, "") : "-"}
                   </div>
                   <div class="info-line">
-                    <span class="info-label">Allergies:</span> ${patient?.medicalHistory?.allergies?.length > 0 ? patient.medicalHistory.allergies.join(", ") : "-"}
+                    <span class="info-label">Allergies:</span> ${patient?.medicalHistory?.allergies?.length > 0 ? patient.medicalHistory.allergies.join(", ") : (patient?.allergies?.length > 0 ? patient.allergies.join(", ") : "-")}
                   </div>
                   <div class="info-line">
-                    <span class="info-label">Weight:</span> ${prescription.patientWeight || "-"}
+                    <span class="info-label">Weight:</span> ${weightFromVitals || prescription.patientWeight || (patient?.weight ? `${patient.weight} kg` : "-")}
                   </div>
                 </div>
                 <div class="patient-right">
@@ -3376,7 +3743,7 @@ export default function PrescriptionsPage() {
                     <span class="info-label">Age:</span> ${patient?.dateOfBirth ? calculateAge(patient.dateOfBirth) : "39"}
                   </div>
                   <div class="info-line">
-                    <span class="info-label">Sex:</span> ${patient?.genderAtBirth || "Not specified"}
+                    <span class="info-label">Sex:</span> ${patient?.gender || patient?.genderAtBirth || patient?.sex || "Not specified"}
                   </div>
                   <div class="info-line">
                     <span class="info-label">Date:</span> ${formatDate(prescription.prescribedAt || prescription.issuedDate || prescription.createdAt)}
@@ -3399,14 +3766,37 @@ export default function PrescriptionsPage() {
               <!-- Watermark -->
               <div class="watermark">HHC</div>
               
-              <!-- Prescription Details -->
+              <!-- Prescription Details - All Medications -->
               <div class="prescription-details">
-                <div class="medication-name">${firstMed.name || "Neuberal 10"}</div>
-                <div class="prescription-instructions">
-                  Sig: ${firstMed.instructions || "Please visit the doctor after 15 days."}<br>
-                  Disp: ${firstMed.quantity || "30"} (${firstMed.duration || "30 days"})<br>
-                  Refills: ${firstMed.refills || "1"}
-                </div>
+                ${(prescription.medications && prescription.medications.length > 0 
+                  ? prescription.medications.map((med: any, index: number) => `
+                    <div class="medication-item" style="margin-bottom: 20px; page-break-inside: avoid; padding: 10px; background: #f8f9fa; border-radius: 5px; border-left: 3px solid #4A7DFF;">
+                      <div class="medication-name" style="font-size: 14px; font-weight: bold; color: #2c3e50; margin-bottom: 8px;">
+                        Medication ${index + 1}: ${med.name || "N/A"}
+                      </div>
+                      <div class="prescription-instructions" style="font-size: 10px; line-height: 1.6; color: #495057;">
+                        <div style="margin-bottom: 4px;"><strong>Dosage:</strong> ${med.dosage || "N/A"}</div>
+                        <div style="margin-bottom: 4px;"><strong>Frequency:</strong> ${med.frequency || "N/A"}</div>
+                        <div style="margin-bottom: 4px;"><strong>Duration:</strong> ${med.duration || "N/A"}</div>
+                        <div style="margin-bottom: 4px;"><strong>Quantity:</strong> ${med.quantity || "N/A"}</div>
+                        <div style="margin-bottom: 4px;"><strong>Refills:</strong> ${med.refills || "0"}</div>
+                        ${med.instructions ? `<div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #dee2e6;"><strong>Instructions:</strong> ${med.instructions}</div>` : ""}
+                      </div>
+                    </div>
+                  `).join('')
+                  : `
+                    <div class="medication-item" style="margin-bottom: 20px; page-break-inside: avoid; padding: 10px; background: #f8f9fa; border-radius: 5px; border-left: 3px solid #4A7DFF;">
+                      <div class="medication-name" style="font-size: 14px; font-weight: bold; color: #2c3e50; margin-bottom: 8px;">
+                        ${firstMed.name || "Neuberal 10"}
+                      </div>
+                      <div class="prescription-instructions" style="font-size: 10px; line-height: 1.6; color: #495057;">
+                        <div style="margin-bottom: 4px;"><strong>Sig:</strong> ${firstMed.instructions || "Please visit the doctor after 15 days."}</div>
+                        <div style="margin-bottom: 4px;"><strong>Disp:</strong> ${firstMed.quantity || "30"} (${firstMed.duration || "30 days"})</div>
+                        <div style="margin-bottom: 4px;"><strong>Refills:</strong> ${firstMed.refills || "1"}</div>
+                      </div>
+                    </div>
+                  `
+                )}
               </div>
               
               <!-- Diagnosis -->
@@ -4759,7 +5149,8 @@ export default function PrescriptionsPage() {
 
                   {user?.role !== "patient" && canCreate('prescriptions') && (
                       <Button
-                        className="bg-medical-blue hover:bg-blue-700 flex justify-end ml-auto"
+                        variant="default"
+                        className="flex justify-end ml-auto"
                         onClick={() => {
                           setSelectedPrescription(null);
 
@@ -6208,29 +6599,29 @@ export default function PrescriptionsPage() {
           ) : (
             <div className="space-y-2">
               {displayPrescriptions.length > 0 && (
-                <div className="border-b-2 border-gray-300 dark:border-gray-600 flex items-center gap-2 py-2 font-semibold text-sm text-gray-700 dark:text-gray-300">
+                <div className="border-b-2 border-gray-300 dark:border-gray-600 flex items-center gap-2 py-2 text-[10px] text-black dark:text-black">
                   <div className={`flex-1 grid ${user?.role === "nurse" || user?.role === "doctor" ? "grid-cols-8" : "grid-cols-9"} gap-4 items-center`}>
-                    <div>Prescription ID</div>
-                    <div>Patient Name</div>
-                    <div>Provider Name</div>
-                    <div>Created At</div>
-                    <div>Updated At</div>
-                    <div>Status</div>
-                    <div className="text-center">.</div>
-                    <div>signed?</div>
+                    <div className="text-[10px]">Prescription ID</div>
+                    <div className="text-[10px]">Patient Name</div>
+                    <div className="text-[10px]">Provider Name</div>
+                    <div className="text-[10px]">Created At</div>
+                    <div className="text-[10px]">Updated At</div>
+                    <div className="text-[10px]">Status</div>
+                    <div className="text-center text-[10px]">&nbsp;</div>
+                    <div className="text-[10px]">signed?</div>
                     {user?.role !== "nurse" && user?.role !== "doctor" && (
-                      <div>Created By</div>
+                      <div className="text-[10px]">Created By</div>
                     )}
                   </div>
                   {user?.role !== 'patient' ? (
-                    <div className="text-center px-1">Save/Print/file</div>
+                    <div className="text-center px-1 text-[10px]">Save/Print/file</div>
                   ) : (
-                    <div className="text-center px-1">file</div>
+                    <div className="text-center px-1 text-[10px]">file</div>
                   )}
                   {user?.role !== 'patient' && (
-                    <div className="text-center px-1">Sign/Share/log</div>
+                    <div className="text-center px-1 text-[10px]">Sign/Share/log</div>
                   )}
-                  <div className="text-center px-1">Actions</div>
+                  <div className="text-center px-1 text-[10px]">Actions</div>
                 </div>
               )}
               {displayPrescriptions.map((prescription: any) => (
@@ -6279,30 +6670,52 @@ export default function PrescriptionsPage() {
                       </div>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
-                      <div className="truncate" title={prescription.clientCreatedAt
-                        ? formatTimestampFromSystem(prescription.clientCreatedAt)
-                        : prescription.createdAt
-                        ? formatTimestampFromSystem(prescription.createdAt)
-                        : "N/A"}>
-                      {prescription.clientCreatedAt
-                        ? formatTimestampFromSystem(prescription.clientCreatedAt)
-                        : prescription.createdAt
-                        ? formatTimestampFromSystem(prescription.createdAt)
-                        : "N/A"}
-                      </div>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="truncate cursor-help">
+                              {prescription.clientCreatedAt
+                                ? formatDateUKUTC(prescription.clientCreatedAt)
+                                : prescription.createdAt
+                                ? formatDateUKUTC(prescription.createdAt)
+                                : "N/A"}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>
+                              {prescription.clientCreatedAt
+                                ? formatDateTooltipUTC(prescription.clientCreatedAt)
+                                : prescription.createdAt
+                                ? formatDateTooltipUTC(prescription.createdAt)
+                                : "N/A"}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     </div>
                     <div className="text-gray-600 dark:text-gray-400 min-w-0">
-                      <div className="truncate" title={prescription.clientUpdatedAt
-                        ? formatTimestampFromSystem(prescription.clientUpdatedAt)
-                        : prescription.updatedAt
-                        ? formatTimestampFromSystem(prescription.updatedAt)
-                        : "N/A"}>
-                      {prescription.clientUpdatedAt
-                        ? formatTimestampFromSystem(prescription.clientUpdatedAt)
-                        : prescription.updatedAt
-                        ? formatTimestampFromSystem(prescription.updatedAt)
-                        : "N/A"}
-                      </div>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="truncate cursor-help">
+                              {prescription.clientUpdatedAt
+                                ? formatDateUKUTC(prescription.clientUpdatedAt)
+                                : prescription.updatedAt
+                                ? formatDateUKUTC(prescription.updatedAt)
+                                : "N/A"}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>
+                              {prescription.clientUpdatedAt
+                                ? formatDateTooltipUTC(prescription.clientUpdatedAt)
+                                : prescription.updatedAt
+                                ? formatDateTooltipUTC(prescription.updatedAt)
+                                : "N/A"}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     </div>
                     <div className="min-w-0 max-w-full">
                       <Badge className={getStatusColor(prescription.status)}>
@@ -6569,16 +6982,27 @@ export default function PrescriptionsPage() {
       <Dialog
         open={showNewPrescription}
         onOpenChange={(open) => {
-          setShowNewPrescription(open);
+          // Only allow closing via close button, not outside click
           if (!open) {
             // Clear inventory state when dialog closes
             setUseInventoryItems({});
             setSelectedInventoryItems({});
             setInventorySearchOpen({});
+            setShowNewPrescription(false);
           }
         }}
       >
-                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700">
+                  <DialogContent 
+                    className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:border-gray-700"
+                    onInteractOutside={(e) => {
+                      // Prevent closing on outside click
+                      e.preventDefault();
+                    }}
+                    onEscapeKeyDown={(e) => {
+                      // Prevent closing on Escape key
+                      e.preventDefault();
+                    }}
+                  >
                     <DialogHeader>
                       <DialogTitle className="dark:text-gray-100">
                         {selectedPrescription
@@ -6931,7 +7355,11 @@ export default function PrescriptionsPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={addMedication}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              addMedication();
+                            }}
                             data-testid="button-add-medication"
                             className="flex items-center gap-2"
                           >
@@ -6940,6 +7368,7 @@ export default function PrescriptionsPage() {
                           </Button>
                         </div>
 
+                        <div className="max-h-[400px] overflow-y-auto pr-2 space-y-4">
                         {formData.medications.map((medication, index) => (
                           <div
                             key={index}
@@ -7506,6 +7935,7 @@ export default function PrescriptionsPage() {
                             </div>
                           </div>
                         ))}
+                        </div>
                       </div>
 
                       {/* Pharmacy Information Section */}

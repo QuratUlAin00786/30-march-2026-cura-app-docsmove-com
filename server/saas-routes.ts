@@ -241,9 +241,20 @@ interface SaaSRequest extends Request {
 }
 
 const verifySaaSToken = async (req: SaaSRequest, res: Response, next: any) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.replace("Bearer ", "");
+
+  console.log('🔐 verifySaaSToken check:', {
+    hasAuthHeader: !!authHeader,
+    authHeaderPreview: authHeader ? `${authHeader.substring(0, 20)}...` : 'none',
+    hasToken: !!token,
+    tokenLength: token?.length || 0,
+    method: req.method,
+    path: req.path
+  });
 
   if (!token) {
+    console.error('❌ No token provided in request headers');
     return res.status(401).json({ message: "No token provided" });
   }
 
@@ -310,6 +321,80 @@ async function testEmailConnection() {
   } catch (error) {
     console.error("📧 ❌ EMAIL SERVICE FAILED:", error);
     return false;
+  }
+}
+
+/**
+ * Broadcast currency update to all connected clients for a specific organization
+ * Uses Socket.IO rooms for efficient broadcasting
+ */
+function broadcastCurrencyUpdate(
+  app: Express,
+  organizationId: number,
+  currencyData: {
+    organizationId: number;
+    organizationSubdomain?: string;
+    countryCode?: string | null;
+    countryName?: string | null;
+    currencyCode?: string | null;
+    currencySymbol?: string | null;
+  }
+) {
+  try {
+    const io = app.get('io') as any; // Socket.IO instance
+    if (!io) {
+      console.warn('[Currency Broadcast] Socket.IO not available, skipping broadcast');
+      return;
+    }
+
+    const updateEvent = {
+      type: 'currency-updated',
+      organizationId: organizationId,
+      organizationSubdomain: currencyData.organizationSubdomain,
+      countryCode: currencyData.countryCode,
+      countryName: currencyData.countryName,
+      currencyCode: currencyData.currencyCode,
+      currencySymbol: currencyData.currencySymbol,
+      currencyUpdated: true, // Flag to indicate currency was updated
+      timestamp: Date.now(),
+    };
+
+    // Broadcast to all clients in the organization's room
+    // Room name format: `org:${organizationId}`
+    const roomName = `org:${organizationId}`;
+    
+    // Get room size for logging
+    const room = io.sockets.adapter.rooms.get(roomName);
+    const roomSize = room ? room.size : 0;
+    
+    console.log(`[Currency Broadcast] 📡 Broadcasting to room ${roomName} (${roomSize} clients)`, {
+      organizationId,
+      currencyCode: currencyData.currencyCode,
+      currencySymbol: currencyData.currencySymbol,
+      countryCode: currencyData.countryCode,
+      countryName: currencyData.countryName,
+      roomSize
+    });
+    
+    io.to(roomName).emit('currency-updated', updateEvent);
+    
+    // Also broadcast globally for clients that haven't joined the room yet
+    // They can filter by organizationId on the client side
+    const totalClients = io.sockets.sockets.size;
+    console.log(`[Currency Broadcast] 📡 Also broadcasting globally to ${totalClients} total clients`);
+    io.emit('organization-currency-updated', updateEvent);
+    
+    console.log(`[Currency Broadcast] ✅ Successfully broadcasted currency update for organization ${organizationId}`, {
+      roomName,
+      roomSize,
+      totalClients,
+      currencyCode: currencyData.currencyCode,
+      currencySymbol: currencyData.currencySymbol,
+      countryCode: currencyData.countryCode,
+      countryName: currencyData.countryName
+    });
+  } catch (error) {
+    console.error('[Currency Broadcast] ❌ Error broadcasting currency update:', error);
   }
 }
 
@@ -1487,6 +1572,25 @@ The Cura EMR Team`,
             .json({ message: "Name, subdomain, and admin email are required" });
         }
 
+        // Validate and auto-populate country data
+        if (customerData.country_code) {
+          const { getCountryData, isCountrySupported } = await import('./lib/country-data.js');
+          
+          if (!isCountrySupported(customerData.country_code)) {
+            return res
+              .status(400)
+              .json({ message: `Invalid or unsupported country code: ${customerData.country_code}` });
+          }
+
+          const countryData = getCountryData(customerData.country_code);
+          if (countryData) {
+            // Auto-populate currency and language if not already provided
+            customerData.currency_code = customerData.currency_code || countryData.currency_code;
+            customerData.currency_symbol = customerData.currency_symbol || countryData.currency_symbol;
+            customerData.language_code = customerData.language_code || countryData.language_code;
+          }
+        }
+
         // Check if subdomain already exists
         const existingOrg = await storage.getOrganizationBySubdomain(
           customerData.subdomain,
@@ -1522,7 +1626,13 @@ The Cura EMR Team`,
         // Return success response with email status
         return res.json({ ...result, emailSent });
       } catch (error: any) {
-        console.error("Error creating customer:", error);
+        console.error("❌ Error creating customer:", {
+          message: error.message,
+          code: error.code,
+          detail: error.detail,
+          hint: error.hint,
+          stack: error.stack
+        });
 
         // Handle specific errors with appropriate status codes
         if (
@@ -1530,6 +1640,15 @@ The Cura EMR Team`,
           error.message?.includes("already in use")
         ) {
           return res.status(400).json({ message: error.message });
+        }
+
+        // Handle database schema errors
+        if (error.message?.includes("Database schema error") || 
+            error.message?.includes("column") && error.message?.includes("does not exist")) {
+          return res.status(500).json({ 
+            message: error.message || "Database schema error. Please run the migration script.",
+            error: "SCHEMA_ERROR"
+          });
         }
 
         // Handle specific database errors
@@ -1541,7 +1660,12 @@ The Cura EMR Team`,
             });
         }
 
-        res.status(500).json({ message: "Failed to create customer" });
+        // Return more detailed error message
+        const errorMessage = error.message || "Failed to create customer";
+        res.status(500).json({ 
+          message: errorMessage,
+          error: error.code || "UNKNOWN_ERROR"
+        });
       }
     },
   );
@@ -1570,14 +1694,77 @@ The Cura EMR Team`,
           return res.json(result);
         }
 
+        // Validate and auto-populate country data if country_code is provided
+        if (customerData.country_code) {
+          const { getCountryData, isCountrySupported } = await import('./lib/country-data.js');
+          
+          if (!isCountrySupported(customerData.country_code)) {
+            return res
+              .status(400)
+              .json({ message: `Invalid or unsupported country code: ${customerData.country_code}` });
+          }
+
+          const countryData = getCountryData(customerData.country_code);
+          if (countryData) {
+            // Auto-populate currency and language if not already provided
+            customerData.currency_code = customerData.currency_code || countryData.currency_code;
+            customerData.currency_symbol = customerData.currency_symbol || countryData.currency_symbol;
+            customerData.language_code = customerData.language_code || countryData.language_code;
+          }
+        }
+
         const result = await storage.updateCustomerOrganization(
           customerId,
           customerData,
         );
+        
+        // Broadcast currency update via Socket.IO if currency-related fields were updated
+        if (result?.organization && (
+          customerData.country_code || 
+          customerData.currency_code || 
+          customerData.currency_symbol
+        )) {
+          const org = result.organization;
+          
+          // Get country name if country code is available
+          let countryName = null;
+          if (org.country_code) {
+            try {
+              const { getCountryData } = await import('./lib/country-data.js');
+              const countryData = getCountryData(org.country_code);
+              countryName = countryData?.country_name || org.country_code;
+            } catch (err) {
+              console.warn('[Currency Broadcast] Could not get country name:', err);
+            }
+          }
+          
+          // Broadcast currency update to all connected clients
+          broadcastCurrencyUpdate(app, customerId, {
+            organizationId: customerId,
+            organizationSubdomain: org.subdomain,
+            countryCode: org.country_code,
+            countryName: countryName,
+            currencyCode: org.currency_code,
+            currencySymbol: org.currency_symbol,
+          });
+        }
+        
         res.json(result);
-      } catch (error) {
-        console.error("Error updating customer:", error);
-        res.status(500).json({ message: "Failed to update customer" });
+      } catch (error: any) {
+        console.error("❌ Error updating customer:", {
+          message: error.message,
+          code: error.code,
+          detail: error.detail,
+          hint: error.hint,
+          stack: error.stack
+        });
+        
+        // Return more detailed error message
+        const errorMessage = error.message || "Failed to update customer";
+        res.status(500).json({ 
+          message: errorMessage,
+          error: error.code || "UNKNOWN_ERROR"
+        });
       }
     },
   );

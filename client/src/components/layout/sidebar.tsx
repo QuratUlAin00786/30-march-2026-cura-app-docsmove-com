@@ -35,6 +35,7 @@ import {
   PoundSterling,
 } from "lucide-react";
 import { useTenant } from "@/hooks/use-tenant";
+import { useCurrency } from "@/hooks/use-currency";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useRolePermissions, UserRole } from "@/hooks/use-role-permissions";
@@ -43,6 +44,7 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Avatar, AvatarContent, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { CurrencyIcon } from "@/components/ui/currency-icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -164,6 +166,7 @@ const ADMIN_NAVIGATION = [
 export function Sidebar() {
   const [location] = useLocation();
   const { tenant } = useTenant();
+  const { currencySymbol } = useCurrency();
   const { user, logout, loading: authLoading } = useAuth();
   const { canAccess, getUserRole, isLoading: permissionsLoading } = useRolePermissions();
   const [isRoleDataReady, setIsRoleDataReady] = useState(false);
@@ -328,6 +331,11 @@ export function Sidebar() {
               const isActive =
                 location === prefixedHref || location === item.href;
               
+              // For Billing item, use CurrencyIcon instead of PoundSterling
+              const IconComponent = item.name === "Billing" && item.icon === PoundSterling 
+                ? CurrencyIcon 
+                : item.icon;
+              
               return (
                 <Link
                   key={item.name}
@@ -335,7 +343,11 @@ export function Sidebar() {
                   className={cn("sidebar-nav-item", isActive && "active")}
                   onClick={isMobile ? closeMobileMenu : undefined}
                 >
-                  <item.icon className="h-5 w-5" />
+                  {item.name === "Billing" && item.icon === PoundSterling ? (
+                    <CurrencyIcon className="h-5 w-5 flex items-center justify-center" />
+                  ) : (
+                    <item.icon className="h-5 w-5" />
+                  )}
                   <span>{item.name}</span>
                 </Link>
               );
@@ -359,6 +371,7 @@ export function Sidebar() {
                     const prefixedHref = `/${subdomain}${item.href}`;
                     const isActive =
                       location === prefixedHref || location === item.href;
+                    // For Billing item, use CurrencyIcon instead of PoundSterling
                     return (
                       <Link
                         key={item.name}
@@ -366,7 +379,11 @@ export function Sidebar() {
                         className={cn("sidebar-nav-item", isActive && "active")}
                         onClick={isMobile ? closeMobileMenu : undefined}
                       >
-                        <item.icon className="h-5 w-5" />
+                        {item.name === "Billing" && item.icon === PoundSterling ? (
+                          <CurrencyIcon className="h-5 w-5 flex items-center justify-center" />
+                        ) : (
+                          <item.icon className="h-5 w-5" />
+                        )}
                         <span>{item.name}</span>
                       </Link>
                     );

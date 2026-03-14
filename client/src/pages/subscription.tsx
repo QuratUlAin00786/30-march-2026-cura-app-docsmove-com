@@ -14,6 +14,7 @@ import { getTenantSubdomain, queryClient, apiRequest } from "@/lib/queryClient";
 import InvoiceTemplate from "@/pages/saas/components/InvoiceTemplate";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/hooks/use-theme";
+import { useCurrency } from "@/hooks/use-currency";
 import type { Subscription } from "@/types";
 import type { SaaSPackage } from "@shared/schema";
 
@@ -197,6 +198,7 @@ function safeSessionLabel(val: unknown): string {
 }
 
 export default function Subscription() {
+  const { currencySymbol } = useCurrency();
   const { toast } = useToast();
   const { theme } = useTheme();
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
@@ -1571,7 +1573,7 @@ export default function Subscription() {
                     </p>
                     {subscription.monthlyPrice && (
                       <p className="text-sm text-muted-foreground">
-                        <span className="text-lg font-semibold text-foreground">£{subscription.monthlyPrice}</span>/month
+                        <span className="text-lg font-semibold text-foreground">{currencySymbol}{subscription.monthlyPrice}</span>/month
                       </p>
                     )}
                   </div>
@@ -1717,7 +1719,7 @@ export default function Subscription() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">Monthly Recurring</p>
-                    <p className="text-lg font-semibold">£{subscription.monthlyPrice || "0"}</p>
+                    <p className="text-lg font-semibold">{currencySymbol}{subscription.monthlyPrice || "0"}</p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">Expires at</p>
@@ -1785,7 +1787,7 @@ export default function Subscription() {
                     <div className="space-y-2">
                       <div>
                         <span className="text-4xl font-bold">
-                          £{plan.price}
+                          {currencySymbol}{plan.price}
                         </span>
                         <span className="text-muted-foreground ml-2">/month</span>
                       </div>
@@ -2210,7 +2212,7 @@ export default function Subscription() {
                             <IconComponent className="h-5 w-5 text-primary" />
                           </div>
                           <div className="text-right">
-                            <span className="text-2xl font-bold">£{pkg.price}</span>
+                            <span className="text-2xl font-bold">{currencySymbol}{pkg.price}</span>
                             <span className="text-sm text-muted-foreground">/mo</span>
                           </div>
                         </div>
@@ -2379,7 +2381,7 @@ export default function Subscription() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{currentPlanData.name}</h3>
                   <div className="text-right">
-                    <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">£{currentPlanData.price}</div>
+                    <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{currencySymbol}{currentPlanData.price}</div>
                     <div className="text-sm text-gray-500 dark:text-gray-400">/month</div>
                   </div>
                 </div>
@@ -2430,7 +2432,7 @@ export default function Subscription() {
                     className="w-full"
                     data-testid="button-pay-ryft"
                   >
-                    Pay £{currentPlanData.price}/month with Ryft
+                    Pay {currencySymbol}{currentPlanData.price}/month with Ryft
                   </Button>
                 </TabsContent>
 
@@ -2461,7 +2463,7 @@ export default function Subscription() {
                     className="w-full"
                     data-testid="button-pay-paypal"
                   >
-                    Pay £{currentPlanData.price}/month with PayPal
+                    Pay {currencySymbol}{currentPlanData.price}/month with PayPal
                   </Button>
                 </TabsContent>
 
@@ -2492,7 +2494,7 @@ export default function Subscription() {
                     className="w-full"
                     data-testid="button-pay-stripe"
                   >
-                    Pay £{currentPlanData.price}/month with Stripe
+                    Pay {currencySymbol}{currentPlanData.price}/month with Stripe
                   </Button>
                 </TabsContent>
               </Tabs>
@@ -3064,7 +3066,7 @@ export default function Subscription() {
               <>
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
-                    You are upgrading from <strong>{upgradeDetails.currentPlanName}</strong> (£{upgradeDetails.currentPlanPrice.toFixed(2)}/month) to <strong>{upgradeDetails.newPlanName}</strong> (£{upgradeDetails.newPlanPrice.toFixed(2)}/month).
+                    You are upgrading from <strong>{upgradeDetails.currentPlanName}</strong> ({currencySymbol}{upgradeDetails.currentPlanPrice.toFixed(2)}/month) to <strong>{upgradeDetails.newPlanName}</strong> ({currencySymbol}{upgradeDetails.newPlanPrice.toFixed(2)}/month).
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Your current billing cycle has <strong>{upgradeDetails.daysRemaining} days</strong> remaining.
@@ -3076,19 +3078,19 @@ export default function Subscription() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Current Plan:</span>
-                      <span>£{upgradeDetails.currentPlanPrice.toFixed(2)}/month</span>
+                      <span>{currencySymbol}{upgradeDetails.currentPlanPrice.toFixed(2)}/month</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Remaining Credit:</span>
-                      <span>£{upgradeDetails.remainingCredit.toFixed(2)}</span>
+                      <span>{currencySymbol}{upgradeDetails.remainingCredit.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">New Plan Price:</span>
-                      <span>£{upgradeDetails.newPlanPrice.toFixed(2)}/month</span>
+                      <span>{currencySymbol}{upgradeDetails.newPlanPrice.toFixed(2)}/month</span>
                     </div>
                     <div className="flex justify-between font-semibold border-t border-gray-200 dark:border-gray-700 pt-2">
                       <span>Amount Due Today:</span>
-                      <span>£{upgradeDetails.amountDueToday.toFixed(2)}</span>
+                      <span>{currencySymbol}{upgradeDetails.amountDueToday.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>

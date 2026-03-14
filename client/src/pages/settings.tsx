@@ -1968,7 +1968,7 @@ export default function Settings() {
                     <Button
                       disabled={Boolean(clinicLogoError)}
                       onClick={handleSaveHeader}
-                      className="bg-green-600 hover:bg-green-700 text-white"
+                      variant="default"
                       data-testid="button-save-header"
                     >
                       Save Header
@@ -2117,7 +2117,7 @@ export default function Settings() {
                       <div className="flex justify-end gap-3 pt-4 border-t mt-6">
                         <Button
                           onClick={handleSaveFooter}
-                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                          variant="default"
                           data-testid="button-save-footer"
                         >
                           <Save className="h-4 w-4 mr-2" />
@@ -2359,38 +2359,40 @@ export default function Settings() {
             </DialogContent>
           </Dialog>
 
-          {/* Regional Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Globe className="h-5 w-5" />
-                <span>Regional Settings</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="region">Operating Region</Label>
-                <Select 
-                  value={settings.region} 
-                  onValueChange={(value) => handleInputChange('region', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select region" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {regions.map((region) => (
-                      <SelectItem key={region.value} value={region.value}>
-                        {region.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-neutral-600 dark:text-gray-400">
-                  This determines compliance requirements and data residency rules.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Regional Settings - Hidden */}
+          {false && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Globe className="h-5 w-5" />
+                  <span>Regional Settings</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="region">Operating Region</Label>
+                  <Select 
+                    value={settings.region} 
+                    onValueChange={(value) => handleInputChange('region', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select region" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {regions.map((region) => (
+                        <SelectItem key={region.value} value={region.value}>
+                          {region.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-neutral-600 dark:text-gray-400">
+                    This determines compliance requirements and data residency rules.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Compliance Settings */}
           <Card>

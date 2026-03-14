@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useCurrency } from "@/hooks/use-currency";
 import { Plus, Trash2, Check } from "lucide-react";
 import SimpleAddItem from "./simple-add-item";
 import AddSupplierDialog from "./add-supplier-dialog";
@@ -46,6 +47,7 @@ interface Supplier {
 
 export default function PurchaseOrderDialog({ open, onOpenChange, items, onPurchaseOrderCreated }: PurchaseOrderDialogProps) {
   const { toast } = useToast();
+  const { currencySymbol } = useCurrency();
   const queryClient = useQueryClient();
   
   // Fetch suppliers from API
@@ -377,8 +379,8 @@ export default function PurchaseOrderDialog({ open, onOpenChange, items, onPurch
                       <TableRow key={index}>
                         <TableCell style={{ fontSize: '12px', padding: '8px' }}>{item.itemName}</TableCell>
                         <TableCell style={{ fontSize: '12px', padding: '8px' }}>{item.quantity}</TableCell>
-                        <TableCell style={{ fontSize: '12px', padding: '8px' }}>£{item.unitPrice}</TableCell>
-                        <TableCell style={{ fontSize: '12px', padding: '8px' }}>£{item.totalPrice}</TableCell>
+                        <TableCell style={{ fontSize: '12px', padding: '8px' }}>{currencySymbol}{item.unitPrice}</TableCell>
+                        <TableCell style={{ fontSize: '12px', padding: '8px' }}>{currencySymbol}{item.totalPrice}</TableCell>
                         <TableCell style={{ fontSize: '12px', padding: '8px' }}>
                           <Button variant="ghost" size="sm" onClick={() => removeItem(index)} className="h-7 w-7 p-0">
                             <Trash2 className="h-4 w-4 text-red-600" />
@@ -418,7 +420,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, items, onPurch
             </div>
             <div>
               <Label style={{ fontSize: '12px', marginBottom: '4px' }}>Total Amount</Label>
-              <Input value={`£${calculateTotalAmount()}`} disabled className="h-9" style={{ fontSize: '12px' }} />
+              <Input value={`${currencySymbol}${calculateTotalAmount()}`} disabled className="h-9" style={{ fontSize: '12px' }} />
             </div>
           </div>
 

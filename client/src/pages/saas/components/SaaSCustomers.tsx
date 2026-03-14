@@ -30,6 +30,10 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { saasApiRequest } from '@/lib/saasQueryClient';
 import { useToast } from '@/hooks/use-toast';
+import { getCountryData, getAllCountries, getFilteredCountriesForOrganization, type CountryGroup } from '@/lib/country-data';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command';
 import {
   Search, 
   Building2, 
@@ -42,7 +46,9 @@ import {
   Settings,
   Trash2,
   CheckCircle,
-  MoreVertical
+  MoreVertical,
+  Pencil,
+  Check
 } from 'lucide-react';
 
 const formatLocalDateTime = (date: Date) => {
@@ -126,6 +132,9 @@ export default function SaaSCustomers() {
   const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [editingCountryCustomerId, setEditingCountryCustomerId] = useState<number | null>(null);
+  const [countrySearchOpen, setCountrySearchOpen] = useState<Record<number, boolean>>({});
+  const [addOrgCountryOpen, setAddOrgCountryOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState<any>(null);
   const [deletePreviewData, setDeletePreviewData] = useState<Record<string, number> | null>(null);
@@ -137,6 +146,7 @@ export default function SaaSCustomers() {
   const [isDeleteSuccessModalOpen, setIsDeleteSuccessModalOpen] = useState(false);
   const [subdomainError, setSubdomainError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [countryError, setCountryError] = useState('');
   const [selectedPackageDetails, setSelectedPackageDetails] = useState<any>(null);
   const [newCustomer, setNewCustomer] = useState({
     name: '',
@@ -151,6 +161,10 @@ export default function SaaSCustomers() {
     paymentStatus: 'paid',
     details: '',
     expiresAt: '',
+    country_code: '',
+    currency_code: '',
+    currency_symbol: '',
+    language_code: '',
     features: {
       maxUsers: 10,
       maxPatients: 100,
@@ -164,6 +178,8 @@ export default function SaaSCustomers() {
   const queryClient = useQueryClient();
   const [originalCustomerValues, setOriginalCustomerValues] = useState<any>(null);
   const [showUpdateSuccessModal, setShowUpdateSuccessModal] = useState(false);
+  const [showCountryUpdateSuccessModal, setShowCountryUpdateSuccessModal] = useState(false);
+  const [countryUpdateMessage, setCountryUpdateMessage] = useState('');
   const [updateSuccessMessage, setUpdateSuccessMessage] = useState('');
   const [viewingCustomer, setViewingCustomer] = useState<any>(null);
   const [isViewCustomerLoading, setIsViewCustomerLoading] = useState(false);
@@ -212,6 +228,7 @@ export default function SaaSCustomers() {
     isSuccessModalOpen ||
     isErrorModalOpen ||
     showUpdateSuccessModal ||
+    showCountryUpdateSuccessModal ||
     isDeleteDialogOpen ||
     isDeleteSuccessModalOpen ||
     Boolean(editingCustomer);
@@ -369,8 +386,38 @@ export default function SaaSCustomers() {
     queryKey: ['/api/saas/packages'],
   });
 
+  // Check token on component mount and warn if missing
+  useEffect(() => {
+    const token = localStorage.getItem('saasToken');
+    if (!token) {
+      console.warn('⚠️ SaaSCustomers: No saasToken found in localStorage. User may need to log in.');
+    } else {
+      console.log('✅ SaaSCustomers: Token found in localStorage');
+    }
+  }, []);
+
   const createCustomerMutation = useMutation({
     mutationFn: async (customerData: any) => {
+      // Check if token exists before making request
+      const token = localStorage.getItem('saasToken');
+      console.log('🔑 Token check before API request:', {
+        hasToken: !!token,
+        tokenLength: token?.length || 0,
+        tokenPreview: token ? `${token.substring(0, 20)}...` : 'none'
+      });
+      
+      if (!token) {
+        console.error('❌ No token found in localStorage');
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
+      console.log('📤 Sending create customer request with data:', {
+        name: customerData.name,
+        subdomain: customerData.subdomain,
+        country_code: customerData.country_code,
+        hasToken: !!token
+      });
+      
       const response = await saasApiRequest('POST', '/api/saas/customers', customerData);
       return response.json();
     },
@@ -388,6 +435,7 @@ export default function SaaSCustomers() {
         adminFirstName: '', adminLastName: '', accessLevel: 'full', billingPackageId: '',
         status: 'active', paymentStatus: 'paid',
         details: '', expiresAt: '',
+        country_code: '', currency_code: '', currency_symbol: '', language_code: '',
         features: {
           maxUsers: 10, maxPatients: 100, aiEnabled: true, 
           telemedicineEnabled: true, billingEnabled: true, analyticsEnabled: true
@@ -403,6 +451,18 @@ export default function SaaSCustomers() {
     },
     onError: (error: any) => {
       let errMsg = error.message || "Failed to create organization";
+      
+      // Check for authentication errors
+      if (errMsg.includes('Authentication required') || errMsg.includes('No token provided') || errMsg.includes('Invalid token')) {
+        errMsg = 'Your session has expired. Please log in again.';
+        // Clear invalid token
+        localStorage.removeItem('saasToken');
+        localStorage.removeItem('saas_owner');
+        // Redirect to login after a short delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      }
       
       // Parse JSON error message if present
       try {
@@ -420,6 +480,20 @@ export default function SaaSCustomers() {
   });
 
   const handleCreateCustomer = () => {
+    // Validate country is selected
+    if (!newCustomer.country_code) {
+      setCountryError('Please select country');
+      toast({
+        title: "Validation Error",
+        description: "Please select a country",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Clear country error if validation passes
+    setCountryError('');
+
     const normalizedExpiresAt = newCustomer.expiresAt
       ? ensureFutureOrNow(newCustomer.expiresAt)
       : '';
@@ -500,22 +574,145 @@ export default function SaaSCustomers() {
 
   const updateCustomerMutation = useMutation({
     mutationFn: async (customerData: any) => {
+      console.log('📤 Updating customer with data:', customerData);
       const response = await saasApiRequest('PATCH', `/api/saas/customers/${customerData.id}`, customerData);
       return response.json();
     },
-    onSuccess: () => {
-      const current = editingCustomer;
-      const orgName = current?.name || 'organization';
-      setUpdateSuccessMessage(`your organization ${orgName} has been updated successfully.`);
-      setShowUpdateSuccessModal(true);
-      queryClient.invalidateQueries({ queryKey: ['/api/saas/customers'] });
+    onSuccess: (data, variables) => {
+      // If updating country, show success modal with green tick
+      if (variables.country_code) {
+        const countryData = getCountryData(variables.country_code);
+        const countryName = countryData?.country_name || variables.country_code;
+        setCountryUpdateMessage(`Country updated to ${countryName} successfully.`);
+        setShowCountryUpdateSuccessModal(true);
+      } else {
+        // For other updates, show the existing success modal
+        const current = editingCustomer;
+        const orgName = current?.name || 'organization';
+        setUpdateSuccessMessage(`your organization ${orgName} has been updated successfully.`);
+        setShowUpdateSuccessModal(true);
+      }
+      
+      // Close the edit dialog after successful update
       setOriginalCustomerValues(null);
       setEditingCustomer(null);
+      
+      // Always invalidate queries to refresh the table
+      queryClient.invalidateQueries({ queryKey: ['/api/saas/customers'] });
+      
+      // Dispatch event to notify all components about currency/organization update
+      // Use response data (data.organization) to get actual saved currency values from database
+      // This ensures we use the currency values that were actually saved, not just what was sent
+      const updatedOrg = data?.organization || data;
+      const hasCurrencyUpdate = variables.country_code || variables.currency_code || variables.currency_symbol ||
+                                updatedOrg?.country_code || updatedOrg?.currency_code || updatedOrg?.currency_symbol;
+      
+      if (hasCurrencyUpdate) {
+        // Use actual organization ID from response, or fallback to variables.id
+        const orgId = updatedOrg?.id || variables.id;
+        
+        // Fetch the organization's subdomain if available (needed for proper currency fetching)
+        const orgSubdomain = updatedOrg?.subdomain || null;
+        
+        // Use currency values from response (actual database values) or fallback to variables
+        // Ensure we always have values - if response doesn't have them, use variables
+        const currencyCode = updatedOrg?.currency_code || variables.currency_code || null;
+        const currencySymbol = updatedOrg?.currency_symbol || variables.currency_symbol || null;
+        const countryCode = updatedOrg?.country_code || variables.country_code || null;
+        
+        // Get country name from country data if country code is available
+        let countryName = null;
+        if (countryCode) {
+          const countryData = getCountryData(countryCode);
+          countryName = countryData?.country_name || countryCode;
+        }
+        
+        console.log('🔄 Dispatching currency update event with actual database values...', {
+          organizationId: orgId,
+          currencyCode,
+          currencySymbol,
+          countryCode,
+          countryName,
+          orgSubdomain,
+          fromResponse: !!updatedOrg?.currency_code,
+          responseData: updatedOrg,
+          variables: variables,
+          hasCurrencyInResponse: !!(updatedOrg?.currency_code || updatedOrg?.currency_symbol || updatedOrg?.country_code)
+        });
+        
+        // Always dispatch event with organization ID, even if currency values are null
+        // The receiving components will fetch fresh data if needed
+        const eventData = {
+          organizationId: orgId,
+          organizationSubdomain: orgSubdomain, // Include subdomain for proper fetching
+          countryCode: countryCode,
+          countryName: countryName, // Include country name for display
+          currencyCode: currencyCode,
+          currencySymbol: currencySymbol,
+          // Include a flag to indicate currency was updated
+          currencyUpdated: true,
+          timestamp: Date.now()
+        };
+        
+        // Dispatch window events for same-tab updates
+        window.dispatchEvent(new CustomEvent('currency-updated', { 
+          detail: eventData
+        }));
+        window.dispatchEvent(new CustomEvent('organization-updated', { 
+          detail: { 
+            organizationId: orgId,
+            currencyUpdated: true,
+            timestamp: Date.now()
+          } 
+        }));
+        
+        // Also use localStorage event for cross-tab communication
+        // This ensures currency updates work even if user has multiple tabs open
+        try {
+          const storageData = {
+            organizationId: orgId,
+            organizationSubdomain: orgSubdomain,
+            countryCode: countryCode,
+            countryName: countryName,
+            currencyCode: currencyCode,
+            currencySymbol: currencySymbol,
+            currencyUpdated: true,
+            timestamp: Date.now()
+          };
+          
+          localStorage.setItem('currency-update-trigger', JSON.stringify(storageData));
+          console.log('💾 Currency update saved to localStorage for cross-tab sync:', storageData);
+          
+          // Note: StorageEvent is only fired in OTHER tabs/windows, not the current one
+          // So we manually dispatch it for same-tab listeners
+          window.dispatchEvent(new StorageEvent('storage', {
+            key: 'currency-update-trigger',
+            newValue: JSON.stringify(storageData),
+            oldValue: null,
+            storageArea: localStorage
+          }));
+        } catch (err) {
+          console.warn('⚠️ Could not set localStorage for currency update:', err);
+        }
+      }
     },
     onError: (error: any) => {
+      console.error('❌ Update customer error:', error);
+      let errorMessage = error.message || "Failed to update customer";
+      
+      // Try to parse JSON error message
+      try {
+        if (errorMessage.startsWith('{') && errorMessage.includes('"message"')) {
+          const parsed = JSON.parse(errorMessage);
+          errorMessage = parsed.message || errorMessage;
+        }
+      } catch (e) {
+        // If parsing fails, use the original message
+      }
+      
       toast({
         title: "Update Failed",
-        description: error.message || "Failed to update customer",
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -757,10 +954,10 @@ export default function SaaSCustomers() {
   return (
     <div className="space-y-3">
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-2 px-3 sm:px-4 pt-3 sm:pt-4">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2">
-              <Building2 className="h-5 w-5 text-blue-600" />
+            <CardTitle className="flex items-center space-x-2 text-base sm:text-lg">
+              <Building2 className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
               <span>Organization Management</span>
             </CardTitle>
             <div className="flex items-center space-x-2">
@@ -772,11 +969,14 @@ export default function SaaSCustomers() {
                 if (!open) {
                   setSubdomainError('');
                   setEmailError('');
+                  setCountryError('');
+                  setAddOrgCountryOpen(false);
                   setNewCustomer({
                     name: '', brandName: '', subdomain: '', adminEmail: '', 
                     adminFirstName: '', adminLastName: '', accessLevel: 'full', billingPackageId: '',
                     status: 'active', paymentStatus: 'paid',
                     details: '', expiresAt: '',
+                    country_code: '', currency_code: '', currency_symbol: '', language_code: '',
                     features: {
                       maxUsers: 10, maxPatients: 100, aiEnabled: true, 
                       telemedicineEnabled: true, billingEnabled: true, analyticsEnabled: true
@@ -823,6 +1023,83 @@ export default function SaaSCustomers() {
                             onChange={(e) => setNewCustomer({...newCustomer, brandName: e.target.value})}
                           />
                         </div>
+                      </div>
+                      <div>
+                        <Label htmlFor="country">Country *</Label>
+                        <Popover open={addOrgCountryOpen} onOpenChange={setAddOrgCountryOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={`w-full justify-start text-left font-normal ${countryError ? 'border-red-500' : ''}`}
+                            >
+                              {newCustomer.country_code ? (
+                                <span>
+                                  {getCountryData(newCustomer.country_code)?.country_name || newCustomer.country_code}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">Select country</span>
+                              )}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0 z-[10000]" align="start">
+                            <Command>
+                              <CommandInput placeholder="Search country..." className="h-9" />
+                              <CommandList className="max-h-[400px] overflow-y-auto">
+                                <CommandEmpty>No country found.</CommandEmpty>
+                                {getFilteredCountriesForOrganization().map((group: CountryGroup, groupIndex: number) => (
+                                  <CommandGroup key={group.label} heading={group.label}>
+                                    {group.countries.map((country) => (
+                                      <CommandItem
+                                        key={country.country_code}
+                                        value={`${country.country_name} ${country.country_code}`}
+                                        onSelect={() => {
+                                          setCountryError(''); // Clear error when country is selected
+                                          const countryData = getCountryData(country.country_code);
+                                          if (countryData) {
+                                            setNewCustomer({
+                                              ...newCustomer,
+                                              country_code: countryData.country_code,
+                                              currency_code: countryData.currency_code,
+                                              currency_symbol: countryData.currency_symbol,
+                                              language_code: countryData.language_code,
+                                            });
+                                            setAddOrgCountryOpen(false); // Close popover after selection
+                                          }
+                                        }}
+                                      >
+                                        <div className="flex flex-col w-full">
+                                          <span className="font-medium">{country.country_name}</span>
+                                          <span className="text-xs text-gray-500">
+                                            {country.currency_symbol} ({country.currency_code}) • {country.language_name || country.language_code}
+                                          </span>
+                                        </div>
+                                      </CommandItem>
+                                    ))}
+                                    {groupIndex < getFilteredCountriesForOrganization().length - 1 && <CommandSeparator />}
+                                  </CommandGroup>
+                                ))}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {countryError && (
+                          <p className="text-xs text-red-600 mt-1 font-medium">
+                            {countryError}
+                          </p>
+                        )}
+                        {newCustomer.country_code && (() => {
+                          const countryData = getCountryData(newCustomer.country_code);
+                          return (
+                            <div className="mt-2 space-y-1">
+                              <Label className="text-sm font-medium text-green-600 dark:text-green-400">
+                                Currency: {newCustomer.currency_symbol} ({newCustomer.currency_code})
+                              </Label>
+                              <Label className="text-sm font-medium text-green-600 dark:text-green-400 block">
+                                Language: {countryData?.language_name || newCustomer.language_code}
+                              </Label>
+                            </div>
+                          );
+                        })()}
                       </div>
                       {newCustomer.subdomain && (
                         <div>
@@ -985,7 +1262,7 @@ export default function SaaSCustomers() {
                           <option value="">Select a billing package (optional)</option>
                           {Array.isArray(billingPackages) && billingPackages.map((pkg: any) => (
                             <option key={pkg.id} value={pkg.id}>
-                              {pkg.name} - £{pkg.price}/{pkg.billingCycle}
+                              {pkg.name} - {newCustomer.currency_symbol || '£'}{pkg.price}/{pkg.billingCycle}
                             </option>
                           ))}
                         </select>
@@ -1003,7 +1280,7 @@ export default function SaaSCustomers() {
                                 </span>
                                 {selectedPackageDetails.price && (
                                   <span className="text-sm text-gray-600 ml-2">
-                                    - £{selectedPackageDetails.price}/{selectedPackageDetails.billingCycle}
+                                    - {newCustomer.currency_symbol || '£'}{selectedPackageDetails.price}/{selectedPackageDetails.billingCycle}
                                   </span>
                                 )}
                               </div>
@@ -1262,17 +1539,17 @@ export default function SaaSCustomers() {
           </div>
         </CardHeader>
         
-        <CardContent className="space-y-3 overflow-x-hidden p-4">
+        <CardContent className="space-y-2 p-2">
           {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-3 items-end">
-            <form onSubmit={handleSearchSubmit} className="flex-1 flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-2 items-end">
+            <form onSubmit={handleSearchSubmit} className="flex-1 flex gap-2">
               <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                   placeholder="Type name, domain, or email and hit Enter"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  className="pl-10 pr-10"
+                  className="pl-8 pr-8 h-9 text-sm"
                 />
                 {(searchTerm || searchInput) && (
                   <button
@@ -1280,7 +1557,7 @@ export default function SaaSCustomers() {
                       setSearchTerm('');
                       setSearchInput('');
                     }}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 hover:text-gray-600"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 hover:text-gray-600"
                     style={{ backgroundColor: 'transparent', border: 'none', cursor: 'pointer' }}
                     type="button"
                   >
@@ -1291,18 +1568,18 @@ export default function SaaSCustomers() {
               <Button
                 size="sm"
                 variant="outline"
-                className="flex items-center gap-2"
+                className="flex items-center gap-1.5 h-9 px-3 text-sm"
                 type="submit"
                 disabled={!searchInput.trim()}
               >
-                <Search className="h-4 w-4" />
+                <Search className="h-3.5 w-3.5" />
                 Search
               </Button>
             </form>
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm h-9"
             >
               <option value="all">All Statuses</option>
               <option value="trial">Trial</option>
@@ -1313,88 +1590,174 @@ export default function SaaSCustomers() {
           </div>
 
           {/* Customers Table */}
-          <div className="border rounded-lg overflow-hidden relative w-full">
+          <div className="border rounded-lg relative w-full overflow-hidden">
             {isLoading && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90">
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 dark:bg-gray-800/90">
                 <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
               </div>
             )}
             <div className="w-full">
               <Table className="w-full">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[200px]">Organization</TableHead>
-                    <TableHead className="hidden lg:table-cell w-[100px]">Title</TableHead>
-                    <TableHead className="w-[70px]">Users</TableHead>
-                    <TableHead className="w-[100px]">Status</TableHead>
-                    <TableHead className="hidden xl:table-cell w-[90px]">Org Pay</TableHead>
-                    <TableHead className="hidden md:table-cell w-[130px]">Package</TableHead>
-                    <TableHead className="hidden 2xl:table-cell w-[150px]">Start</TableHead>
-                    <TableHead className="hidden xl:table-cell w-[150px]">Expires</TableHead>
-                    <TableHead className="hidden lg:table-cell w-[100px]">Days</TableHead>
-                    <TableHead className="w-[140px]">Actions</TableHead>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="px-2 py-1.5 text-xs font-semibold whitespace-nowrap">Organization</TableHead>
+                    <TableHead className="px-1.5 py-1.5 text-xs font-semibold whitespace-nowrap">Title</TableHead>
+                    <TableHead className="px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Country</TableHead>
+                    <TableHead className="px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Users</TableHead>
+                    <TableHead className="px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Status</TableHead>
+                    <TableHead className="hidden xl:table-cell px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Org Pay</TableHead>
+                    <TableHead className="hidden md:table-cell px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Package</TableHead>
+                    <TableHead className="hidden 2xl:table-cell px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Start</TableHead>
+                    <TableHead className="hidden xl:table-cell px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Expires</TableHead>
+                    <TableHead className="hidden lg:table-cell px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Days</TableHead>
+                    <TableHead className="px-1 py-1.5 text-xs font-semibold whitespace-nowrap">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {customers?.map((customer: any) => (
-                    <TableRow key={customer.id}>
-                    <TableCell className="w-[200px]">
-                      <div>
-                        <div className="font-medium truncate">{customer.name}</div>
-                        <div className="text-xs text-gray-500 truncate">{customer.brandName}</div>
+                    <TableRow key={customer.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                    <TableCell className="px-2 py-1.5">
+                      <div className="space-y-0.5 min-w-[120px]">
+                        <div className="font-medium truncate text-xs">{customer.name}</div>
+                        <div className="text-[10px] text-gray-500 truncate">{customer.brandName}</div>
                         <div className="hidden lg:block">
                           {customer.adminEmail && (
-                            <div className="text-xs text-gray-400 truncate">{customer.adminEmail}</div>
+                            <div className="text-[10px] text-gray-400 truncate">{customer.adminEmail}</div>
                           )}
-                          <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded mt-1 inline-block truncate max-w-full">
-                            {customer.subdomain}
-                          </code>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell w-[100px]">
-                      <code className="text-sm bg-gray-100 px-2 py-1 rounded truncate block">
+                    <TableCell className="px-1.5 py-1.5">
+                      <code className="text-[10px] bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded truncate block min-w-[60px]">
                         {customer.subdomain}
                       </code>
                     </TableCell>
-                    <TableCell className="w-[70px]">
-                      <div className="flex items-center space-x-1">
-                        <Users className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                        <span className="text-sm">{customer.userCount || 0}</span>
+                    <TableCell className="px-1 py-1.5">
+                      <div className="min-w-[140px]">
+                        <Popover 
+                          open={countrySearchOpen[customer.id] || false}
+                          onOpenChange={(open: boolean) => {
+                            setCountrySearchOpen((prev: Record<number, boolean>) => ({ ...prev, [customer.id]: open }));
+                            if (!open) {
+                              setEditingCountryCustomerId(null);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs flex-1 truncate">
+                              {customer.country_code ? (
+                                getCountryData(customer.country_code)?.country_name || customer.country_code
+                              ) : (
+                                <span className="text-gray-400">Select country</span>
+                              )}
+                            </span>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 w-5 p-0 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                onClick={() => {
+                                  setEditingCountryCustomerId(customer.id);
+                                  setCountrySearchOpen((prev: Record<number, boolean>) => ({ ...prev, [customer.id]: true }));
+                                }}
+                              >
+                                <Pencil className="h-[3px] w-[3px]" />
+                              </Button>
+                            </PopoverTrigger>
+                          </div>
+                          <PopoverContent className="w-[400px] p-0 z-[10000]" align="start">
+                            <Command>
+                              <CommandInput placeholder="Search country..." className="h-9" />
+                              <CommandList className="max-h-[400px] overflow-y-auto">
+                                <CommandEmpty>No country found.</CommandEmpty>
+                                {getFilteredCountriesForOrganization().map((group: CountryGroup, groupIndex: number) => (
+                                  <CommandGroup key={group.label} heading={group.label}>
+                                    {group.countries.map((country) => {
+                                      const isSelected = customer.country_code === country.country_code;
+                                      return (
+                                        <CommandItem
+                                          key={country.country_code}
+                                          value={`${country.country_name} ${country.country_code}`}
+                                          onSelect={() => {
+                                            const countryData = getCountryData(country.country_code);
+                                            if (countryData) {
+                                              // Update customer immediately
+                                              updateCustomerMutation.mutate({
+                                                id: customer.id,
+                                                country_code: countryData.country_code,
+                                                currency_code: countryData.currency_code,
+                                                currency_symbol: countryData.currency_symbol,
+                                                language_code: countryData.language_code,
+                                              });
+                                            }
+                                            setCountrySearchOpen((prev: Record<number, boolean>) => ({ ...prev, [customer.id]: false }));
+                                          }}
+                                          className={isSelected ? "bg-accent" : ""}
+                                        >
+                                          <Check
+                                            className={`mr-2 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`}
+                                          />
+                                          <div className="flex flex-col w-full">
+                                            <span className="font-medium">{country.country_name}</span>
+                                            <span className="text-xs text-gray-500">
+                                              {country.currency_symbol} ({country.currency_code}) • {country.language_name || country.language_code}
+                                            </span>
+                                          </div>
+                                        </CommandItem>
+                                      );
+                                    })}
+                                    {groupIndex < getFilteredCountriesForOrganization().length - 1 && <CommandSeparator />}
+                                  </CommandGroup>
+                                ))}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {customer.country_code && (
+                          <div className="mt-1 text-[10px] text-gray-500">
+                            {customer.currency_symbol} ({customer.currency_code}) • {customer.language_code}
+                          </div>
+                        )}
                       </div>
                     </TableCell>
-                    <TableCell className="w-[100px]">
-                      <Badge className={`${getStatusBadgeColor(customer.computedSubscriptionStatus || customer.subscriptionStatus)} text-xs`}>
+                    <TableCell className="px-1 py-1.5">
+                      <div className="flex items-center space-x-0.5 min-w-[40px]">
+                        <Users className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                        <span className="text-xs">{customer.userCount || 0}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-1 py-1.5">
+                      <Badge className={`${getStatusBadgeColor(customer.computedSubscriptionStatus || customer.subscriptionStatus)} text-[10px] px-1 py-0 whitespace-nowrap`}>
                         {customer.computedSubscriptionStatus || customer.subscriptionStatus}
                       </Badge>
                     </TableCell>
-                    <TableCell className="hidden xl:table-cell w-[90px]">
-                      <Badge className={`${getPaymentBadgeColor(customer.organizationPaymentStatus)} text-xs`}>
+                    <TableCell className="hidden xl:table-cell px-1 py-1.5">
+                      <Badge className={`${getPaymentBadgeColor(customer.organizationPaymentStatus)} text-[10px] px-1 py-0 whitespace-nowrap`}>
                         {customer.organizationPaymentStatus || 'trial'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell w-[130px] text-sm">
-                      <div className="truncate" title={customer.packageName || 'No Package'}>
+                    <TableCell className="hidden md:table-cell px-1 py-1.5">
+                      <div className="truncate text-[10px] min-w-[80px]" title={customer.packageName || 'No Package'}>
                         {customer.packageName || 'No Package'}
                       </div>
                     </TableCell>
-                    <TableCell className="hidden 2xl:table-cell w-[150px] text-xs">
-                      <div className="truncate">
+                    <TableCell className="hidden 2xl:table-cell px-1 py-1.5">
+                      <div className="truncate text-[10px] min-w-[90px]">
                         {formatDateTime(customer.subscriptionStart)}
                       </div>
                     </TableCell>
-                    <TableCell className="hidden xl:table-cell w-[150px] text-xs">
-                      <div className="truncate">
+                    <TableCell className="hidden xl:table-cell px-1 py-1.5">
+                      <div className="truncate text-[10px] min-w-[90px]">
                         {formatDateTime(customer.expiresAt)}
                       </div>
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell w-[100px] text-sm">
-                      <div className="flex flex-col gap-1">
-                        <span>{formatDaysActive(customer.daysActive)}</span>
+                    <TableCell className="hidden lg:table-cell px-1 py-1.5">
+                      <div className="flex flex-col gap-0.5 min-w-[50px]">
+                        <span className="text-[10px]">{formatDaysActive(customer.daysActive)}</span>
                         {getExpiryAlertBadge(customer.expiryAlertLevel)}
                       </div>
                     </TableCell>
-                    <TableCell className="w-[140px]">
+                    <TableCell className="px-1 py-1.5">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -1685,6 +2048,10 @@ export default function SaaSCustomers() {
                                     packageFeatures: customerDetails.packageFeatures || customerDetails.features || {},
                                     details: customerDetails.details || '',
                                     expiresAt: customerDetails.expiresAt ? new Date(customerDetails.expiresAt).toISOString().slice(0, 16) : '',
+                                    country_code: customerDetails.country_code || '',
+                                    currency_code: customerDetails.currency_code || '',
+                                    currency_symbol: customerDetails.currency_symbol || '',
+                                    language_code: customerDetails.language_code || '',
                                     features: customerDetails.features ? (typeof customerDetails.features === 'string' ? JSON.parse(customerDetails.features) : customerDetails.features) : {
                                       maxUsers: 10,
                                       maxPatients: 100,
@@ -1733,7 +2100,7 @@ export default function SaaSCustomers() {
                                   <dt className="text-[11px] text-gray-500">Billing Package</dt>
                                   <dd className="font-semibold">
                                     {editingCustomer.packageName 
-                                      ? `${editingCustomer.packageName}${editingCustomer.packagePrice ? ` - £${editingCustomer.packagePrice}` : ''}${editingCustomer.packageBillingCycle ? `/${editingCustomer.packageBillingCycle}` : ''}`
+                                      ? `${editingCustomer.packageName}${editingCustomer.packagePrice ? ` - ${editingCustomer.currency_symbol || '£'}${editingCustomer.packagePrice}` : ''}${editingCustomer.packageBillingCycle ? `/${editingCustomer.packageBillingCycle}` : ''}`
                                       : 'No package assigned'}
                                   </dd>
                                 </div>
@@ -1800,6 +2167,83 @@ export default function SaaSCustomers() {
                                     </div>
                                     <p className="text-xs text-gray-500 mt-1">Title cannot be changed after creation</p>
                                   </div>
+                                  <div>
+                                    <Label htmlFor="edit-country">Country</Label>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          variant="outline"
+                                          className="w-full justify-start text-left font-normal"
+                                        >
+                                          {editingCustomer.country_code ? (
+                                            <span>
+                                              {getCountryData(editingCustomer.country_code)?.country_name || editingCustomer.country_code}
+                                            </span>
+                                          ) : (
+                                            <span className="text-gray-400">Select country</span>
+                                          )}
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-[400px] p-0 z-[10000]" align="start">
+                                        <Command>
+                                          <CommandInput placeholder="Search country..." className="h-9" />
+                                          <CommandList className="max-h-[400px] overflow-y-auto">
+                                            <CommandEmpty>No country found.</CommandEmpty>
+                                            {getFilteredCountriesForOrganization().map((group: CountryGroup, groupIndex: number) => (
+                                              <CommandGroup key={group.label} heading={group.label}>
+                                                {group.countries.map((country) => {
+                                                  const isSelected = editingCustomer.country_code === country.country_code;
+                                                  return (
+                                                    <CommandItem
+                                                      key={country.country_code}
+                                                      value={`${country.country_name} ${country.country_code}`}
+                                                      onSelect={() => {
+                                                        const countryData = getCountryData(country.country_code);
+                                                        if (countryData) {
+                                                          setEditingCustomer({
+                                                            ...editingCustomer,
+                                                            country_code: countryData.country_code,
+                                                            currency_code: countryData.currency_code,
+                                                            currency_symbol: countryData.currency_symbol,
+                                                            language_code: countryData.language_code,
+                                                          });
+                                                        }
+                                                      }}
+                                                      className={isSelected ? "bg-accent" : ""}
+                                                    >
+                                                      <Check
+                                                        className={`mr-2 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`}
+                                                      />
+                                                      <div className="flex flex-col w-full">
+                                                        <span className="font-medium">{country.country_name}</span>
+                                                        <span className="text-xs text-gray-500">
+                                                          {country.currency_symbol} ({country.currency_code}) • {country.language_name || country.language_code}
+                                                        </span>
+                                                      </div>
+                                                    </CommandItem>
+                                                  );
+                                                })}
+                                                {groupIndex < getFilteredCountriesForOrganization().length - 1 && <CommandSeparator />}
+                                              </CommandGroup>
+                                            ))}
+                                          </CommandList>
+                                        </Command>
+                                      </PopoverContent>
+                                    </Popover>
+                                    {editingCustomer.country_code && (() => {
+                                      const countryData = getCountryData(editingCustomer.country_code);
+                                      return (
+                                        <div className="mt-2 space-y-1">
+                                          <Label className="text-sm font-medium text-green-600 dark:text-green-400">
+                                            Currency: {editingCustomer.currency_symbol} ({editingCustomer.currency_code})
+                                          </Label>
+                                          <Label className="text-sm font-medium text-green-600 dark:text-green-400 block">
+                                            Language: {countryData?.language_name || editingCustomer.language_code}
+                                          </Label>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
 
                                 {/* Administrator Account */}
@@ -1842,7 +2286,7 @@ export default function SaaSCustomers() {
                                       value={editingCustomer.billingPackageId || ''}
                                       onChange={(e) => {
                                         const selectedPkgId = e.target.value;
-                                        const selectedPkg = billingPackages?.find((pkg: any) => String(pkg.id) === selectedPkgId);
+                                        const selectedPkg = Array.isArray(billingPackages) ? billingPackages.find((pkg: any) => String(pkg.id) === selectedPkgId) : null;
                                         
                                         // Calculate expiresAt based on billing cycle
                                         let expiresAt = editingCustomer.expiresAt; // Keep existing value if no package selected
@@ -1886,7 +2330,7 @@ export default function SaaSCustomers() {
                                       <option value="">Select a billing package (optional)</option>
                                       {Array.isArray(billingPackages) && billingPackages.map((pkg: any) => (
                                         <option key={pkg.id} value={String(pkg.id)}>
-                                          {pkg.name} - £{pkg.price}/{pkg.billingCycle}
+                                          {pkg.name} - {editingCustomer.currency_symbol || '£'}{pkg.price}/{pkg.billingCycle}
                                         </option>
                                       ))}
                                     </select>
@@ -1898,7 +2342,7 @@ export default function SaaSCustomers() {
                                     {editingCustomer.billingPackageId && editingCustomer.packageName && (
                                       <div className="mt-4 p-4 bg-white border border-gray-200 rounded-lg">
                                         <h4 className="font-semibold text-sm text-gray-900 mb-2">
-                                          {editingCustomer.packageName} - £{editingCustomer.packagePrice}/{editingCustomer.packageBillingCycle}
+                                          {editingCustomer.packageName} - {editingCustomer.currency_symbol || '£'}{editingCustomer.packagePrice}/{editingCustomer.packageBillingCycle}
                                         </h4>
                                         {editingCustomer.packageDescription && (
                                           <p className="text-xs text-gray-600 mb-3">{editingCustomer.packageDescription}</p>
@@ -1950,8 +2394,8 @@ export default function SaaSCustomers() {
                                       >
                                         {(() => {
                                           // Check if selected package is Trial package
-                                          const selectedPkg = editingCustomer.billingPackageId 
-                                            ? billingPackages?.find((pkg: any) => String(pkg.id) === String(editingCustomer.billingPackageId))
+                                          const selectedPkg = editingCustomer.billingPackageId && Array.isArray(billingPackages)
+                                            ? billingPackages.find((pkg: any) => String(pkg.id) === String(editingCustomer.billingPackageId))
                                             : null;
                                           const isTrialPackage = selectedPkg && 
                                             selectedPkg.name.toLowerCase().includes('trial') &&
@@ -1983,8 +2427,8 @@ export default function SaaSCustomers() {
                                       >
                                         {(() => {
                                           // Check if selected package is Trial package
-                                          const selectedPkg = editingCustomer.billingPackageId 
-                                            ? billingPackages?.find((pkg: any) => String(pkg.id) === String(editingCustomer.billingPackageId))
+                                          const selectedPkg = editingCustomer.billingPackageId && Array.isArray(billingPackages)
+                                            ? billingPackages.find((pkg: any) => String(pkg.id) === String(editingCustomer.billingPackageId))
                                             : null;
                                           const isTrialPackage = selectedPkg && 
                                             selectedPkg.name.toLowerCase().includes('trial') &&
@@ -2405,6 +2849,26 @@ export default function SaaSCustomers() {
       </div>
       <div className="pt-4 flex justify-end">
         <Button onClick={() => setShowUpdateSuccessModal(false)}>OK</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+
+  {/* Country Update Success Modal */}
+  <Dialog open={showCountryUpdateSuccessModal} onOpenChange={setShowCountryUpdateSuccessModal}>
+    <DialogContent className="max-w-sm z-[9999]">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <CheckCircle className="h-5 w-5 text-green-600" />
+          <span className="text-green-600">Country Updated</span>
+        </DialogTitle>
+      </DialogHeader>
+      <div className="space-y-3">
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          {countryUpdateMessage}
+        </p>
+      </div>
+      <div className="pt-4 flex justify-end">
+        <Button onClick={() => setShowCountryUpdateSuccessModal(false)}>OK</Button>
       </div>
     </DialogContent>
   </Dialog>

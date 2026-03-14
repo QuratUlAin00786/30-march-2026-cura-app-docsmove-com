@@ -181,6 +181,10 @@ export interface Organization {
   subscriptionStatus: "trial" | "active" | "suspended" | "cancelled";
   stripeAccountId?: string | null;
   stripeStatus?: string | null;
+  country_code?: string | null;
+  currency_code?: string | null;
+  currency_symbol?: string | null;
+  language_code?: string | null;
   createdAt: string;
 }
 
@@ -202,4 +206,8 @@ export interface TenantInfo {
   region: string;
   brandName: string;
   settings: any;
+  country_code?: string | null;
+  currency_code?: string | null;
+  currency_symbol?: string | null;
+  language_code?: string | null;
 }

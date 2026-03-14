@@ -1844,13 +1844,25 @@ export function DoctorList({
 
                   {/* Row 7: Action Buttons */}
                   <div className="flex items-center gap-2 pt-2 flex-wrap">
-                    {showAppointmentButton && user?.role !== 'doctor' && (
+                    {/* Show Book button: 
+                        - For admin/patient users viewing staff (original behavior)
+                        - For doctor/nurse users viewing patients (new requirement) */}
+                    {showAppointmentButton && (
+                      (user?.role !== 'doctor' && user?.role !== 'nurse') || 
+                      (isDoctorLike(user?.role) && item.role === 'patient')
+                    ) && (
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={(e) => {
                           e.stopPropagation();
-                          openBookingDialog(item);
+                          // For doctor/nurse viewing patients, navigate to calendar with patientId
+                          if (isDoctorLike(user?.role) && item.role === 'patient') {
+                            const subdomain = getTenantSubdomain();
+                            setLocation(`/${subdomain}/calendar?patientId=${item.id}`);
+                          } else {
+                            openBookingDialog(item);
+                          }
                         }}
                         className="flex-shrink-0"
                       >
@@ -2103,7 +2115,17 @@ export function DoctorList({
         >
           <DialogHeader>
             <DialogTitle>
-              Book Appointment with Dr. {selectedBookingDoctor ? `${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}` : 'John Smith'}
+              {isDoctorLike(user?.role) 
+                ? `Book Appointment with ${user?.role === 'nurse' ? 'Nurse' : 'Dr.'} ${user?.firstName || ''} ${user?.lastName || ''}`
+                : (() => {
+                    // Fix duplicate "Dr." prefix - check if doctor name already includes it
+                    const doctorName = selectedBookingDoctor 
+                      ? `${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}`
+                      : 'John Smith';
+                    // Remove any existing "Dr." prefix to avoid duplication
+                    const cleanName = doctorName.replace(/^Dr\.\s*/i, '');
+                    return `Book Appointment with Dr. ${cleanName}`;
+                  })()}
             </DialogTitle>
           </DialogHeader>
           {shiftWarning && (
@@ -2128,7 +2150,65 @@ export function DoctorList({
           </div>
 
           <div className="space-y-4">
-            {/* First Row - Appointment Details */}
+            {/* First Row - Title (optional) and Duration (minutes) */}
+            {user?.role !== "admin" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium">Title (optional)</Label>
+                  <Input
+                    type="text"
+                    placeholder="Enter appointment title"
+                    value={appointmentTitle}
+                    onChange={(e) => setAppointmentTitle(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Duration (minutes)</Label>
+                  <Select
+                    value={duration}
+                    onValueChange={setDuration}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select Duration" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15 minutes</SelectItem>
+                      <SelectItem value="30">30 minutes</SelectItem>
+                      <SelectItem value="60">60 minutes</SelectItem>
+                      <SelectItem value="90">90 minutes</SelectItem>
+                      <SelectItem value="120">120 minutes (2 hours)</SelectItem>
+                      <SelectItem value="180">180 minutes (3 hours)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* For admin users, show Duration in first row */}
+            {user?.role === "admin" && (
+              <div>
+                <Label className="text-sm font-medium">Duration (minutes)</Label>
+                <Select
+                  value={duration}
+                  onValueChange={setDuration}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select Duration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 minutes</SelectItem>
+                    <SelectItem value="30">30 minutes</SelectItem>
+                    <SelectItem value="60">60 minutes</SelectItem>
+                    <SelectItem value="90">90 minutes</SelectItem>
+                    <SelectItem value="120">120 minutes (2 hours)</SelectItem>
+                    <SelectItem value="180">180 minutes (3 hours)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Second Row - Appointment Type and Select Consultation */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label className="text-sm font-medium">Appointment Type</Label>
@@ -2156,28 +2236,6 @@ export function DoctorList({
                   <p className="text-red-500 text-xs mt-1">{appointmentTypeError}</p>
                 )}
               </div>
-              <div>
-                <Label className="text-sm font-medium">Duration (minutes)</Label>
-                <Select
-                  value={duration}
-                  onValueChange={setDuration}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select Duration" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="15">15 minutes</SelectItem>
-                    <SelectItem value="30">30 minutes</SelectItem>
-                    <SelectItem value="60">60 minutes</SelectItem>
-                    <SelectItem value="90">90 minutes</SelectItem>
-                    <SelectItem value="120">120 minutes (2 hours)</SelectItem>
-                    <SelectItem value="180">180 minutes (3 hours)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <div>
                 {appointmentType === "treatment" && (
                   <div>
@@ -2295,11 +2353,29 @@ export function DoctorList({
               </div>
             </div>
 
-            {/* Second Row - Doctor and Patient Information */}
-            <div className="grid grid-cols-2 gap-4">
-              {/* Doctor Information */}
+            {/* Third Row - Description */}
+            {user?.role !== "admin" && (
               <div>
-                <Label className="text-sm font-medium mb-1 block">Doctor Information</Label>
+                <Label className="text-sm font-medium">Description</Label>
+                <Input
+                  type="text"
+                  placeholder="Enter appointment description"
+                  value={appointmentDescription}
+                  onChange={(e) => setAppointmentDescription(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            )}
+
+            {/* Second Row - Doctor/Nurse and Patient Information */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* Doctor/Nurse Information */}
+              <div>
+                <Label className="text-sm font-medium mb-1 block">
+                  {isDoctorLike(user?.role) 
+                    ? (user?.role === 'nurse' ? 'Nurse Information' : 'Doctor Information')
+                    : 'Doctor Information'}
+                </Label>
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 h-40">
                   <div className="flex items-start gap-2">
                     <div className="w-8 h-8 bg-blue-100 dark:bg-blue-800 rounded-full flex items-center justify-center flex-shrink-0">
@@ -2307,21 +2383,43 @@ export function DoctorList({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-gray-900 dark:text-white mb-1">
-                        Dr. {selectedBookingDoctor ? `${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}` : 'John Smith'}
+                        {isDoctorLike(user?.role) 
+                          ? (user?.role === 'nurse' 
+                              ? `Nurse ${user?.firstName || ''} ${user?.lastName || ''}`
+                              : `Dr. ${user?.firstName || ''} ${user?.lastName || ''}`)
+                          : (() => {
+                              // Fix duplicate "Dr." prefix - remove any existing prefix from doctor name
+                              const doctorName = selectedBookingDoctor 
+                                ? `${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}`
+                                : 'John Smith';
+                              // Remove any existing "Dr." prefix to avoid duplication
+                              const cleanName = doctorName.replace(/^Dr\.\s*/i, '');
+                              return `Dr. ${cleanName}`;
+                            })()}
                       </div>
                       <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                        {selectedBookingDoctor?.medicalSpecialtyCategory || 'General & Primary Care'}
+                        {isDoctorLike(user?.role)
+                          ? (user?.medicalSpecialtyCategory || user?.department || 'General & Primary Care')
+                          : (selectedBookingDoctor?.medicalSpecialtyCategory || 'General & Primary Care')}
                       </div>
                       <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                        {selectedBookingDoctor?.subSpecialty || 'General Practitioner (GP) / Family Physician'}
+                        {isDoctorLike(user?.role)
+                          ? (user?.subSpecialty || 'General Practitioner (GP) / Family Physician')
+                          : (selectedBookingDoctor?.subSpecialty || 'General Practitioner (GP) / Family Physician')}
                       </div>
                       <div className="space-y-1">
                         <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
                           <span>📧</span>
-                          <span className="truncate">{selectedBookingDoctor?.email || 'doctor@cura.com'}</span>
+                          <span className="truncate">
+                            {isDoctorLike(user?.role)
+                              ? (user?.email || '')
+                              : (selectedBookingDoctor?.email || 'doctor@cura.com')}
+                          </span>
                         </div>
                         <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                          Doctor ID: {selectedBookingDoctor ? String(selectedBookingDoctor.id).padStart(6, '0') : '000041'}
+                          {isDoctorLike(user?.role)
+                            ? `${user?.role === 'nurse' ? 'Nurse' : 'Doctor'} ID: ${user?.id ? String(user.id).padStart(6, '0') : '000000'}`
+                            : `Doctor ID: ${selectedBookingDoctor ? String(selectedBookingDoctor.id).padStart(6, '0') : '000041'}`}
                         </div>
                       </div>
                     </div>
@@ -2498,36 +2596,6 @@ export function DoctorList({
               </Select>
             </div>
 
-            {/* Fourth Row - Title and Booking Summary */}
-            {user?.role !== "admin" && (
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  {/* Title Field */}
-                  <div>
-                    <Label className="text-sm font-medium">Title (optional)</Label>
-                    <Input
-                      type="text"
-                      placeholder="Enter appointment title"
-                      value={appointmentTitle}
-                      onChange={(e) => setAppointmentTitle(e.target.value)}
-                      className="mt-1"
-                    />
-                  </div>
-
-                  {/* Description */}
-                  <div>
-                    <Label className="text-sm font-medium">Description</Label>
-                    <Input
-                      type="text"
-                      placeholder="Enter appointment description"
-                      value={appointmentDescription}
-                      onChange={(e) => setAppointmentDescription(e.target.value)}
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Action Buttons */}

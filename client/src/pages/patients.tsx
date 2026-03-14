@@ -538,7 +538,7 @@ export default function Patients() {
           {canCreate('patients') && (
             <Button 
               onClick={() => setShowPatientModal(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-500 dark:text-white border-0"
+              variant="default"
               data-testid="button-add-patient"
             >
               <UserPlus className="h-4 w-4 mr-2" />

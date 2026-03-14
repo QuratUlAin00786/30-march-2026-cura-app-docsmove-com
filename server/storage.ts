@@ -677,6 +677,10 @@ export class DatabaseStorage implements IStorage {
         subscriptionStatus: organizations.subscriptionStatus,
         stripeAccountId: organizations.stripeAccountId,
         stripeStatus: organizations.stripeStatus,
+        country_code: organizations.country_code,
+        currency_code: organizations.currency_code,
+        currency_symbol: organizations.currency_symbol,
+        language_code: organizations.language_code,
         createdAt: organizations.createdAt,
         updatedAt: organizations.updatedAt,
       })
@@ -698,6 +702,10 @@ export class DatabaseStorage implements IStorage {
         features: organizations.features,
         accessLevel: organizations.accessLevel,
         subscriptionStatus: organizations.subscriptionStatus,
+        country_code: organizations.country_code,
+        currency_code: organizations.currency_code,
+        currency_symbol: organizations.currency_symbol,
+        language_code: organizations.language_code,
         createdAt: organizations.createdAt,
         updatedAt: organizations.updatedAt,
       })
@@ -4796,6 +4804,20 @@ export class DatabaseStorage implements IStorage {
       return `${day}${suffix} ${month} ${year}`;
     };
 
+    // Helper to format date as local time string (YYYY-MM-DD HH:MM:SS.mmm)
+    const formatDateAsLocalString = (date: Date | null | undefined): string | null => {
+      if (!date) return null;
+      const d = new Date(date);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const hours = String(d.getHours()).padStart(2, '0');
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      const seconds = String(d.getSeconds()).padStart(2, '0');
+      const milliseconds = String(d.getMilliseconds()).padStart(3, '0');
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+    };
+
     const formattedPrescriptions = allPrescriptions.map(item => {
       const prescription = item.prescription;
       const patient = item.patient;
@@ -4811,6 +4833,10 @@ export class DatabaseStorage implements IStorage {
       
       return {
         ...prescription,
+        // Format dates as local time strings to avoid timezone conversion
+        // Add as additional fields to preserve type compatibility
+        clientCreatedAt: formatDateAsLocalString(prescription.createdAt),
+        clientUpdatedAt: formatDateAsLocalString(prescription.updatedAt),
         patientName: patient ? `${patient.firstName} ${patient.lastName}` : 'Unknown Patient',
         patientDob: patient?.dateOfBirth ? formatDateWithSuffix(patient.dateOfBirth) : null,
         patientAge: patient?.dateOfBirth ? Math.floor((new Date().getTime() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null,
@@ -4818,7 +4844,7 @@ export class DatabaseStorage implements IStorage {
         patientAllergies,
         patientWeight: null,
         providerName: provider ? `Dr. ${provider.firstName} ${provider.lastName}` : 'Unknown Provider',
-      };
+      } as any;
     });
     
     return formattedPrescriptions;
@@ -4924,22 +4950,143 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(prescriptions.createdAt));
   }
 
+  // Helper function to format current local time as a string for PostgreSQL
+  private formatLocalTimeString(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+  }
+
   async createPrescription(prescription: InsertPrescription): Promise<Prescription> {
     console.log("Storage: Creating prescription with data:", prescription);
     console.log("Storage: Doctor ID being inserted:", prescription.doctorId);
-    const [newPrescription] = await db
-      .insert(prescriptions)
-      .values(prescription as any)
-      .returning();
+    
+    // Format current local time as a string for PostgreSQL
+    // Using local time components directly to ensure database stores exactly what system time shows
+    // Instead of using new Date() (which gets converted to UTC) or CURRENT_TIMESTAMP (which uses database server timezone),
+    // we format the local time components (hours, minutes, seconds) directly into a string
+    const localTimeString = this.formatLocalTimeString();
+    
+    console.log(`[STORAGE createPrescription] Creating prescription with local time: ${localTimeString}`);
+    
+    // Format validUntil if provided
+    let validUntilString: string | null = null;
+    if (prescription.validUntil) {
+      const validUntilDate = new Date(prescription.validUntil);
+      const year = validUntilDate.getFullYear();
+      const month = String(validUntilDate.getMonth() + 1).padStart(2, '0');
+      const day = String(validUntilDate.getDate()).padStart(2, '0');
+      const hours = String(validUntilDate.getHours()).padStart(2, '0');
+      const minutes = String(validUntilDate.getMinutes()).padStart(2, '0');
+      const seconds = String(validUntilDate.getSeconds()).padStart(2, '0');
+      const milliseconds = String(validUntilDate.getMilliseconds()).padStart(3, '0');
+      validUntilString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+    }
+    
+    // Use raw SQL to insert with formatted local time string for createdAt and updatedAt
+    // This ensures the database stores exactly what your system time shows, not UTC or database server timezone
+    const result = await db.execute(sql`
+      INSERT INTO prescriptions (
+        organization_id, patient_id, doctor_id, prescription_created_by, consultation_id,
+        prescription_number, status, diagnosis, medication_name, dosage, frequency, duration,
+        instructions, issued_date, medications, pharmacy, prescribed_at, valid_until,
+        notes, is_electronic, interactions, signature,
+        created_at, updated_at
+      ) VALUES (
+        ${prescription.organizationId}, ${prescription.patientId}, ${prescription.doctorId},
+        ${prescription.prescriptionCreatedBy || null}, ${prescription.consultationId || null},
+        ${prescription.prescriptionNumber || null}, ${prescription.status || 'active'},
+        ${prescription.diagnosis || null}, ${prescription.medicationName || 'Not specified'},
+        ${prescription.dosage || null}, ${prescription.frequency || null}, ${prescription.duration || null},
+        ${prescription.instructions || null}, ${localTimeString}::timestamp,
+        ${prescription.medications ? JSON.stringify(prescription.medications) : '[]'}::jsonb,
+        ${prescription.pharmacy ? JSON.stringify(prescription.pharmacy) : '{}'}::jsonb,
+        ${localTimeString}::timestamp, ${validUntilString ? sql`${validUntilString}::timestamp` : sql`NULL`},
+        ${prescription.notes || null}, ${prescription.isElectronic !== undefined ? prescription.isElectronic : true},
+        ${prescription.interactions ? JSON.stringify(prescription.interactions) : '[]'}::jsonb,
+        ${prescription.signature ? JSON.stringify(prescription.signature) : '{}'}::jsonb,
+        ${localTimeString}::timestamp, ${localTimeString}::timestamp
+      ) RETURNING *
+    `);
+    
+    console.log(`[STORAGE createPrescription] ✅ Prescription created with created_at and updated_at set to local time: ${localTimeString}`);
+    
+    const rawRow = result.rows[0] as any;
+    
+    // Map snake_case to camelCase to match the expected return type
+    const newPrescription: Prescription = {
+      id: rawRow.id,
+      organizationId: rawRow.organization_id,
+      patientId: rawRow.patient_id,
+      doctorId: rawRow.doctor_id,
+      prescriptionCreatedBy: rawRow.prescription_created_by,
+      consultationId: rawRow.consultation_id,
+      prescriptionNumber: rawRow.prescription_number,
+      status: rawRow.status,
+      diagnosis: rawRow.diagnosis,
+      medicationName: rawRow.medication_name,
+      dosage: rawRow.dosage,
+      frequency: rawRow.frequency,
+      duration: rawRow.duration,
+      instructions: rawRow.instructions,
+      issuedDate: rawRow.issued_date ? new Date(rawRow.issued_date) : null,
+      medications: rawRow.medications,
+      pharmacy: rawRow.pharmacy,
+      prescribedAt: rawRow.prescribed_at ? new Date(rawRow.prescribed_at) : new Date(),
+      validUntil: rawRow.valid_until ? new Date(rawRow.valid_until) : null,
+      notes: rawRow.notes,
+      isElectronic: rawRow.is_electronic,
+      interactions: rawRow.interactions,
+      signature: rawRow.signature,
+      createdAt: new Date(rawRow.created_at),
+      updatedAt: new Date(rawRow.updated_at),
+    };
+    
     return newPrescription;
   }
 
   async updatePrescription(id: number, organizationId: number, updates: Partial<InsertPrescription>): Promise<Prescription | undefined> {
+    // Format current local time as a string for PostgreSQL
+    // Using local time components directly to ensure database stores exactly what system time shows
+    const localTimeString = this.formatLocalTimeString();
+    
+    console.log(`[STORAGE updatePrescription] Updating prescription ${id} with local time: ${localTimeString}`);
+    
+    // Prepare update data, exclude updatedAt from regular updates
+    const { updatedAt, ...updateFields } = updates as any;
+    const updateData: any = { ...updateFields };
+    
+    // Use drizzle update for regular fields, then update updatedAt separately with raw SQL
+    if (Object.keys(updateData).length > 0) {
+      await db
+        .update(prescriptions)
+        .set(updateData as any)
+        .where(and(eq(prescriptions.id, id), eq(prescriptions.organizationId, organizationId)));
+    }
+    
+    // Always update updated_at with local time string using raw SQL
+    // This ensures the database stores exactly what your system time shows, not UTC or server timezone
+    await db.execute(sql`
+      UPDATE prescriptions
+      SET updated_at = ${localTimeString}::timestamp
+      WHERE id = ${id} AND organization_id = ${organizationId}
+    `);
+    
+    console.log(`[STORAGE updatePrescription] ✅ Updated prescription ${id} updated_at to local time: ${localTimeString}`);
+    
+    // Fetch and return the updated prescription
     const [updatedPrescription] = await db
-      .update(prescriptions)
-      .set(updates as any)
+      .select()
+      .from(prescriptions)
       .where(and(eq(prescriptions.id, id), eq(prescriptions.organizationId, organizationId)))
-      .returning();
+      .limit(1);
+    
     return updatedPrescription;
   }
 
@@ -6554,23 +6701,64 @@ export class DatabaseStorage implements IStorage {
       }
 
       // Create organization - match database column names (snake_case)
-      console.log('🏢 [CUSTOMER-CREATE] Creating organization...');
-      const [organization] = await db.insert(organizations)
-        .values({
-          name: customerData.name,
-          brandName: customerData.brandName || customerData.name,
-          subdomain: customerData.subdomain,
-          email: customerData.adminEmail, // Add the admin email to organization
-          region: 'UK',
-          subscriptionStatus: customerData.billingPackageId ? 'active' : 'trial',
-          features: customerData.features || {},
-          accessLevel: customerData.accessLevel || 'full',
-          stripeAccountId: stripeAccountId,
-          stripeStatus: stripeStatus
-        })
-        .returning();
+      console.log('🏢 [CUSTOMER-CREATE] Creating organization with data:', {
+        name: customerData.name,
+        subdomain: customerData.subdomain,
+        country_code: customerData.country_code,
+        currency_code: customerData.currency_code,
+        currency_symbol: customerData.currency_symbol,
+        language_code: customerData.language_code,
+      });
       
-      console.log('✅ [CUSTOMER-CREATE] Organization created with ID:', organization.id);
+      let organization;
+      try {
+        const result = await db.insert(organizations)
+          .values({
+            name: customerData.name,
+            brandName: customerData.brandName || customerData.name,
+            subdomain: customerData.subdomain,
+            email: customerData.adminEmail, // Add the admin email to organization
+            region: 'UK',
+            subscriptionStatus: customerData.billingPackageId ? 'active' : 'trial',
+            features: customerData.features || {},
+            accessLevel: customerData.accessLevel || 'full',
+            stripeAccountId: stripeAccountId,
+            stripeStatus: stripeStatus,
+            country_code: customerData.country_code || null,
+            currency_code: customerData.currency_code || null,
+            currency_symbol: customerData.currency_symbol || null,
+            language_code: customerData.language_code || null,
+          })
+          .returning();
+        
+        if (!result || result.length === 0) {
+          throw new Error('Failed to create organization - no result returned');
+        }
+        
+        organization = result[0];
+        console.log('✅ [CUSTOMER-CREATE] Organization created with ID:', organization.id);
+      } catch (dbError: any) {
+        console.error('❌ [CUSTOMER-CREATE] Database error creating organization:', {
+          message: dbError.message,
+          code: dbError.code,
+          detail: dbError.detail,
+          hint: dbError.hint,
+          stack: dbError.stack
+        });
+        
+        // Check if it's a column doesn't exist error
+        if (dbError.message?.includes('column') && dbError.message?.includes('does not exist')) {
+          throw new Error(`Database schema error: ${dbError.message}. Please run the migration script: migrations/add_country_currency_language_to_organizations.sql`);
+        }
+        
+        // Re-throw with more context
+        throw new Error(`Database error: ${dbError.message || 'Unknown database error'}`);
+      }
+      
+      // Verify organization was created
+      if (!organization) {
+        throw new Error('Failed to retrieve created organization');
+      }
 
       // Helper function to ensure all modules have view: true (only include specified modules)
       const ensureAllModulesView = (existingModules: any) => {
@@ -6845,6 +7033,20 @@ export class DatabaseStorage implements IStorage {
     if (customerData.paymentStatus) updateData.paymentStatus = customerData.paymentStatus;
     if (customerData.features) updateData.features = JSON.stringify(customerData.features);
     
+    // Handle country, currency, and language fields
+    if (customerData.country_code !== undefined) {
+      updateData.country_code = customerData.country_code || null;
+    }
+    if (customerData.currency_code !== undefined) {
+      updateData.currency_code = customerData.currency_code || null;
+    }
+    if (customerData.currency_symbol !== undefined) {
+      updateData.currency_symbol = customerData.currency_symbol || null;
+    }
+    if (customerData.language_code !== undefined) {
+      updateData.language_code = customerData.language_code || null;
+    }
+    
     // Handle billing package assignment/update
     if (customerData.billingPackageId !== undefined) {
       if (customerData.billingPackageId && customerData.billingPackageId !== '') {
@@ -6896,10 +7098,35 @@ export class DatabaseStorage implements IStorage {
       throw new Error('No valid fields to update');
     }
     
-    const [organization] = await db.update(organizations)
-      .set(updateData as any)
-      .where(eq(organizations.id, organizationId))
-      .returning();
+    let organization;
+    try {
+      const result = await db.update(organizations)
+        .set(updateData as any)
+        .where(eq(organizations.id, organizationId))
+        .returning();
+      
+      if (!result || result.length === 0) {
+        throw new Error('Organization not found or update failed');
+      }
+      
+      organization = result[0];
+      console.log('✅ Organization updated successfully:', organization.id);
+    } catch (dbError: any) {
+      console.error('❌ Database error updating organization:', {
+        message: dbError.message,
+        code: dbError.code,
+        detail: dbError.detail,
+        hint: dbError.hint,
+        stack: dbError.stack
+      });
+      
+      // Check if it's a column doesn't exist error
+      if (dbError.message?.includes('column') && dbError.message?.includes('does not exist')) {
+        throw new Error(`Database schema error: ${dbError.message}. Please run the migration script: migrations/add_country_currency_language_to_organizations.sql`);
+      }
+      
+      throw new Error(`Database error: ${dbError.message || 'Unknown database error'}`);
+    }
 
     if (!organization) {
       throw new Error('Organization not found');
@@ -7080,6 +7307,10 @@ export class DatabaseStorage implements IStorage {
       `.as('daysLeft'),
       stripeAccountId: organizations.stripeAccountId,
       stripeStatus: organizations.stripeStatus,
+      country_code: organizations.country_code,
+      currency_code: organizations.currency_code,
+      currency_symbol: organizations.currency_symbol,
+      language_code: organizations.language_code,
     })
     .from(organizations)
     .leftJoin(users, eq(organizations.id, users.organizationId))
@@ -7096,6 +7327,10 @@ export class DatabaseStorage implements IStorage {
       organizations.features,
       organizations.stripeAccountId,
       organizations.stripeStatus,
+      organizations.country_code,
+      organizations.currency_code,
+      organizations.currency_symbol,
+      organizations.language_code,
       saasSubscriptions.paymentStatus,
       saasSubscriptions.currentPeriodStart,
       saasSubscriptions.currentPeriodEnd,

@@ -9,9 +9,10 @@ import { RemoteParticipant, Track, RoomEvent } from "livekit-client";
 interface LiveKitVideoCallProps {
   roomName: string;
   participantName: string;
+  participantRole?: string;
   token?: string;
   serverUrl?: string;
-  onDisconnect?: () => void;
+  onDisconnect?: (disconnectedParticipant?: { name: string; role?: string }) => void;
   showControls?: boolean;
   audioEnabled?: boolean;
   videoEnabled?: boolean;
@@ -20,6 +21,7 @@ interface LiveKitVideoCallProps {
 export function LiveKitVideoCall({
   roomName,
   participantName,
+  participantRole,
   token,
   serverUrl,
   onDisconnect,
@@ -52,6 +54,7 @@ export function LiveKitVideoCall({
       connect({
         roomName,
         participantName,
+        participantRole,
         audioEnabled,
         videoEnabled,
         token,
@@ -67,6 +70,7 @@ export function LiveKitVideoCall({
   }, [
     roomName,
     participantName,
+    participantRole,
     token,
     serverUrl,
     audioEnabled,
@@ -124,9 +128,29 @@ export function LiveKitVideoCall({
   // When the other participant leaves the room (they ended the call), close the call UI
   useEffect(() => {
     if (!room || !onDisconnect) return;
-    const handleParticipantDisconnected = () => {
-      console.log("[LiveKitVideoCall] Remote participant left – ending call");
-      onDisconnect();
+    const handleParticipantDisconnected = (participant: RemoteParticipant) => {
+      console.log("[LiveKitVideoCall] Remote participant left – ending call", participant.identity);
+      
+      // Extract participant info from identity
+      let disconnectedParticipantName = '';
+      let disconnectedParticipantRole: string | undefined;
+      
+      const identityParts = participant.identity?.split(':') || [];
+      if (identityParts.length >= 5) {
+        disconnectedParticipantRole = identityParts[0];
+        const firstName = identityParts[2];
+        const lastName = identityParts[3];
+        if (firstName && lastName) {
+          disconnectedParticipantName = `${firstName} ${lastName}`;
+        }
+      } else {
+        disconnectedParticipantName = participant.name || participant.identity || 'Unknown';
+      }
+      
+      onDisconnect({
+        name: disconnectedParticipantName,
+        role: disconnectedParticipantRole,
+      });
     };
     room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
     return () => {
