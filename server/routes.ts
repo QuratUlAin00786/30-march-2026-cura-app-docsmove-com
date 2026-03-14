@@ -13660,10 +13660,16 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }, 'prescriptionCreatedBy');
 
       console.log("About to create prescription with data:", prescriptionToInsert);
-      // storage.createPrescription will use local time formatting for created_at and updated_at
-      // This ensures the database stores exactly what your system time shows, not UTC or database server timezone
-      console.log("[PRESCRIPTION POST] Creating prescription - created_at and updated_at will use local time");
-      const newPrescription = await storage.createPrescription(prescriptionToInsert);
+      // Use client's local time if provided, otherwise use server's local time
+      const clientLocalTime = prescriptionData.clientLocalTime;
+      if (clientLocalTime) {
+        console.log(`[PRESCRIPTION POST] Using client's local time: ${clientLocalTime}`);
+      } else {
+        console.log("[PRESCRIPTION POST] No client local time provided, will use server's local time");
+      }
+      // storage.createPrescription will use client's local time if provided, otherwise server's local time
+      // This ensures the database stores exactly what the user's system time shows, not UTC or database server timezone
+      const newPrescription = await storage.createPrescription(prescriptionToInsert, clientLocalTime);
       console.log("Prescription created successfully:", newPrescription.id);
 
       // Send notification to patient about new prescription

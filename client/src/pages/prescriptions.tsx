@@ -106,6 +106,19 @@ const formatTimestampFromSystem = (timestamp?: string | null) => {
   });
 };
 
+// Format client's local time as a string (YYYY-MM-DD HH:MM:SS.mmm) for backend
+const formatClientLocalTime = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+};
+
 // Format timestamp - displays without timezone conversion (as stored in database)
 const formatTimestampNoConversion = (timestamp?: string | null) => {
   if (!timestamp) return "N/A";
@@ -8114,6 +8127,10 @@ export default function PrescriptionsPage() {
                             );
                             const loggedInUserId = user?.id;
 
+                            // Format client's local time to send to backend
+                            const clientLocalTime = formatClientLocalTime();
+                            console.log(`[CLIENT] Client local time: ${clientLocalTime}`);
+                            
                             const prescriptionData = {
                               patientId: parseInt(formData.patientId),
                               providerId: selectedProviderId,
@@ -8126,6 +8143,7 @@ export default function PrescriptionsPage() {
                                 email: formData.pharmacyEmail.trim(),
                               },
                               medications: validMedications,
+                              clientLocalTime: clientLocalTime, // Send client's local time to backend
                             };
 
                             console.log("=== FRONTEND PRESCRIPTION DEBUG ===");

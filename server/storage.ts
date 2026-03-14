@@ -291,7 +291,7 @@ export interface IStorage {
   getPrescriptionsByPatient(patientId: number, organizationId: number): Promise<Prescription[]>;
   getPrescriptionsByProvider(providerId: number, organizationId: number): Promise<Prescription[]>;
   getPrescriptionsByStatus(patientId: number, organizationId: number, status: string): Promise<Prescription[]>;
-  createPrescription(prescription: InsertPrescription): Promise<Prescription>;
+  createPrescription(prescription: InsertPrescription, clientLocalTime?: string): Promise<Prescription>;
   updatePrescription(id: number, organizationId: number, updates: Partial<InsertPrescription>): Promise<Prescription | undefined>;
   deletePrescription(id: number, organizationId: number): Promise<Prescription | undefined>;
 
@@ -4960,20 +4960,39 @@ export class DatabaseStorage implements IStorage {
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
     const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+    const localTimeString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+    
+    // Log the exact time being formatted for debugging
+    console.log(`[formatLocalTimeString] Server local time - Date: ${now.toLocaleString()}, Formatted: ${localTimeString}`);
+    
+    return localTimeString;
   }
 
-  async createPrescription(prescription: InsertPrescription): Promise<Prescription> {
+  async createPrescription(prescription: InsertPrescription, clientLocalTime?: string): Promise<Prescription> {
     console.log("Storage: Creating prescription with data:", prescription);
     console.log("Storage: Doctor ID being inserted:", prescription.doctorId);
     
-    // Format current local time as a string for PostgreSQL
-    // Using local time components directly to ensure database stores exactly what system time shows
-    // Instead of using new Date() (which gets converted to UTC) or CURRENT_TIMESTAMP (which uses database server timezone),
-    // we format the local time components (hours, minutes, seconds) directly into a string
-    const localTimeString = this.formatLocalTimeString();
-    
-    console.log(`[STORAGE createPrescription] Creating prescription with local time: ${localTimeString}`);
+    // Use client's local time if provided, otherwise use server's local time
+    // This ensures the database stores exactly what the user's system time shows
+    let localTimeString: string;
+    if (clientLocalTime) {
+      // Validate the client's local time string format (YYYY-MM-DD HH:MM:SS.mmm)
+      const timePattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/;
+      if (timePattern.test(clientLocalTime)) {
+        localTimeString = clientLocalTime;
+        console.log(`[STORAGE createPrescription] Using client's local time: ${localTimeString}`);
+      } else {
+        console.warn(`[STORAGE createPrescription] Invalid client local time format: ${clientLocalTime}, falling back to server time`);
+        localTimeString = this.formatLocalTimeString();
+      }
+    } else {
+      // Format current server local time as a string for PostgreSQL
+      // Using local time components directly to ensure database stores exactly what system time shows
+      // Instead of using new Date() (which gets converted to UTC) or CURRENT_TIMESTAMP (which uses database server timezone),
+      // we format the local time components (hours, minutes, seconds) directly into a string
+      localTimeString = this.formatLocalTimeString();
+      console.log(`[STORAGE createPrescription] Using server's local time: ${localTimeString}`);
+    }
     
     // Format validUntil if provided
     let validUntilString: string | null = null;
@@ -4991,6 +5010,13 @@ export class DatabaseStorage implements IStorage {
     
     // Use raw SQL to insert with formatted local time string for createdAt and updatedAt
     // This ensures the database stores exactly what your system time shows, not UTC or database server timezone
+    // Explicitly cast as 'timestamp without time zone' to prevent any timezone conversion
+    const escapedLocalTimeString = localTimeString.replace(/'/g, "''");
+    const timestampCast = sql.raw(`'${escapedLocalTimeString}'::timestamp without time zone`);
+    const validUntilCast = validUntilString ? sql.raw(`'${validUntilString.replace(/'/g, "''")}'::timestamp without time zone`) : sql`NULL`;
+    
+    console.log(`[STORAGE createPrescription] Inserting timestamp string: '${escapedLocalTimeString}' as timestamp without time zone`);
+    
     const result = await db.execute(sql`
       INSERT INTO prescriptions (
         organization_id, patient_id, doctor_id, prescription_created_by, consultation_id,
@@ -5004,14 +5030,14 @@ export class DatabaseStorage implements IStorage {
         ${prescription.prescriptionNumber || null}, ${prescription.status || 'active'},
         ${prescription.diagnosis || null}, ${prescription.medicationName || 'Not specified'},
         ${prescription.dosage || null}, ${prescription.frequency || null}, ${prescription.duration || null},
-        ${prescription.instructions || null}, ${localTimeString}::timestamp,
+        ${prescription.instructions || null}, ${timestampCast},
         ${prescription.medications ? JSON.stringify(prescription.medications) : '[]'}::jsonb,
         ${prescription.pharmacy ? JSON.stringify(prescription.pharmacy) : '{}'}::jsonb,
-        ${localTimeString}::timestamp, ${validUntilString ? sql`${validUntilString}::timestamp` : sql`NULL`},
+        ${timestampCast}, ${validUntilCast},
         ${prescription.notes || null}, ${prescription.isElectronic !== undefined ? prescription.isElectronic : true},
         ${prescription.interactions ? JSON.stringify(prescription.interactions) : '[]'}::jsonb,
         ${prescription.signature ? JSON.stringify(prescription.signature) : '{}'}::jsonb,
-        ${localTimeString}::timestamp, ${localTimeString}::timestamp
+        ${timestampCast}, ${timestampCast}
       ) RETURNING *
     `);
     
