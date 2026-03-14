@@ -261,7 +261,7 @@ const formatDateTooltip = (timestamp?: string | null) => {
   }
 };
 
-// Format date in UK format (DD/MM/YYYY) in UTC
+// Format date and time in UK format (DD/MM/YYYY HH:MM:SS) in UTC
 const formatDateUKUTC = (timestamp?: string | null) => {
   if (!timestamp) return "N/A";
 
@@ -273,10 +273,38 @@ const formatDateUKUTC = (timestamp?: string | null) => {
     const day = String(date.getUTCDate()).padStart(2, '0');
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
     const year = date.getUTCFullYear();
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
 
-    return `${day}/${month}/${year}`;
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
   } catch {
     return "N/A";
+  }
+};
+
+// Format date and time separately for display with different font sizes
+const formatDateAndTimeUTC = (timestamp?: string | null) => {
+  if (!timestamp) return { date: "N/A", time: "" };
+
+  try {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return { date: "N/A", time: "" };
+
+    // Get UTC date components
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const year = date.getUTCFullYear();
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+
+    return {
+      date: `${day}/${month}/${year}`,
+      time: `${hours}:${minutes}:${seconds}`
+    };
+  } catch {
+    return { date: "N/A", time: "" };
   }
 };
 
@@ -6674,11 +6702,17 @@ export default function PrescriptionsPage() {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <div className="truncate cursor-help">
-                              {prescription.clientCreatedAt
-                                ? formatDateUKUTC(prescription.clientCreatedAt)
-                                : prescription.createdAt
-                                ? formatDateUKUTC(prescription.createdAt)
-                                : "N/A"}
+                              {(() => {
+                                const timestamp = prescription.clientCreatedAt || prescription.createdAt;
+                                if (!timestamp) return "N/A";
+                                const { date, time } = formatDateAndTimeUTC(timestamp);
+                                return (
+                                  <span>
+                                    {date}
+                                    {time && <span className="text-xs ml-1">{time}</span>}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -6698,11 +6732,17 @@ export default function PrescriptionsPage() {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <div className="truncate cursor-help">
-                              {prescription.clientUpdatedAt
-                                ? formatDateUKUTC(prescription.clientUpdatedAt)
-                                : prescription.updatedAt
-                                ? formatDateUKUTC(prescription.updatedAt)
-                                : "N/A"}
+                              {(() => {
+                                const timestamp = prescription.clientUpdatedAt || prescription.updatedAt;
+                                if (!timestamp) return "N/A";
+                                const { date, time } = formatDateAndTimeUTC(timestamp);
+                                return (
+                                  <span>
+                                    {date}
+                                    {time && <span className="text-xs ml-1">{time}</span>}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </TooltipTrigger>
                           <TooltipContent>
