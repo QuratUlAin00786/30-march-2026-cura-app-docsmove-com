@@ -138,6 +138,24 @@ export async function apiRequest(
   
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  } else {
+    console.warn('[API-REQUEST] No auth token found in localStorage for request:', method, url);
+  }
+
+  // Log request details for debugging
+  if (url.includes('/api/appointments')) {
+    console.log('[API-REQUEST] Appointment request:', {
+      method,
+      url,
+      hasToken: !!token,
+      tokenPreview: token ? `${token.substring(0, 20)}...` : 'missing',
+      tenantSubdomain: getTenantSubdomain(),
+      dataPreview: data ? {
+        patientId: (data as any).patientId,
+        patientIdType: typeof (data as any).patientId,
+        providerId: (data as any).providerId
+      } : null
+    });
   }
 
   const res = await fetch(buildUrl(url), {

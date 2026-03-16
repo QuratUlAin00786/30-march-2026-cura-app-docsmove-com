@@ -746,8 +746,47 @@ const getAppointmentTypeLabel = (appointment: any): string => {
 
   const loggedInPatientRecord = useMemo(() => {
     if (user?.role !== "patient") return null;
-    return patients.find((patient: any) => patient.email === user?.email) || null;
-  }, [user?.role, user?.email, patients]);
+    if (!user?.id && !user?.email) return null;
+    
+    // Try to find patient by userId first (most reliable)
+    if (user?.id) {
+      const byUserId = patients.find((patient: any) => 
+        patient.userId === user.id || 
+        patient.userId?.toString() === user.id?.toString()
+      );
+      if (byUserId) {
+        console.log('[CALENDAR] Found patient record by userId:', { 
+          userId: user.id, 
+          patientId: byUserId.id, 
+          email: byUserId.email 
+        });
+        return byUserId;
+      }
+    }
+    
+    // Fallback: try to find by email (case-insensitive)
+    if (user?.email) {
+      const byEmail = patients.find((patient: any) => 
+        patient.email?.toLowerCase() === user.email?.toLowerCase()
+      );
+      if (byEmail) {
+        console.log('[CALENDAR] Found patient record by email:', { 
+          email: user.email, 
+          patientId: byEmail.id, 
+          userId: byEmail.userId 
+        });
+        return byEmail;
+      }
+    }
+    
+    console.warn('[CALENDAR] No patient record found for logged-in patient user:', {
+      userId: user?.id,
+      userEmail: user?.email,
+      patientsCount: patients.length,
+      availablePatientUserIds: patients.map((p: any) => ({ id: p.id, userId: p.userId, email: p.email }))
+    });
+    return null;
+  }, [user?.role, user?.id, user?.email, patients]);
 
   const pendingAppointmentPatient = useMemo(() => {
     if (!pendingAppointmentData) return null;
@@ -2012,6 +2051,15 @@ const getAppointmentTypeLabel = (appointment: any): string => {
   // Combined mutation to create both appointment and invoice
   const createAppointmentAndInvoiceMutation = useMutation({
     mutationFn: async ({ appointmentData, invoiceData }: { appointmentData: any; invoiceData: any }) => {
+      console.log('[CALENDAR-MUTATION] Creating appointment with data:', {
+        patientId: appointmentData.patientId,
+        patientIdType: typeof appointmentData.patientId,
+        providerId: appointmentData.providerId,
+        scheduledAt: appointmentData.scheduledAt,
+        user: user ? { id: user.id, role: user.role, email: user.email } : null,
+        authToken: localStorage.getItem('auth_token') ? 'present' : 'missing'
+      });
+      
       // Create appointment first
       const appointmentResponse = await apiRequest("POST", "/api/appointments", {
         ...appointmentData,
@@ -2169,27 +2217,39 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     },
     onError: (error) => {
       console.error("Creation error:", error);
-      let errorMessage = "Failed to create appointment and invoice. Please try again.";
+      let errorMessage = "We couldn't complete your booking. Please try again.";
+      let errorTitle = "Booking Error";
       
       if (error.message && error.message.includes("Patient not found")) {
-        errorMessage = "Patient not found. Please use a valid patient ID.";
+        errorTitle = "Patient Record Issue";
+        errorMessage = "We couldn't find your patient record. Please contact support or try logging out and back in.";
+      } else if (error.message && error.message.includes("Authentication required")) {
+        errorTitle = "Session Expired";
+        errorMessage = "Your session has expired. Please log out and log back in to continue.";
       } else if (error.message && error.message.includes("already scheduled at this time")) {
-        errorMessage = "This time slot is already booked. Please select a different time slot.";
+        errorTitle = "Time Slot Unavailable";
+        errorMessage = "This time slot is already booked. Please select a different time.";
       } else if (error.message && error.message.includes("Doctor is already scheduled")) {
+        errorTitle = "Doctor Unavailable";
         errorMessage = "The selected doctor is not available at this time. Please choose a different time slot.";
+      } else if (error.message && error.message.includes("Patient ID is required")) {
+        errorTitle = "Missing Information";
+        errorMessage = "Patient information is missing. Please try again or contact support if the issue persists.";
       }
       
-      const detailedMessage =
-        error?.message && error.message !== errorMessage
-          ? `${errorMessage} (${error.message})`
-          : errorMessage;
-      
-      setBookingErrorMessage(detailedMessage);
+      setBookingErrorMessage(errorMessage);
       setShowBookingErrorModal(true);
       setShowInvoiceModal(false);
       setShowInvoiceSummary(false);
       setShowConfirmationModal(false);
       setShowNewAppointmentModal(false);
+      
+      // Also show a toast for immediate feedback
+      toast({
+        title: errorTitle,
+        description: errorMessage,
+        variant: "destructive",
+      });
     },
   });
 
@@ -2238,18 +2298,104 @@ const getAppointmentTypeLabel = (appointment: any): string => {
   });
 
   const handleBookAppointment = () => {
-    const patientRecord = patients.find((p: any) => 
-      p.userId === user?.id ||
-      p.email?.toLowerCase() === user?.email?.toLowerCase() ||
-      p.patientId === bookingForm.patientId ||
-      p.id.toString() === bookingForm.patientId
-    );
-    const resolvedPatientId =
-      patientRecord?.patientId ||
-      bookingForm.patientId ||
-      loggedInPatientRecord?.patientId ||
-      "";
-    if (!selectedDoctor || !resolvedPatientId || !bookingForm.scheduledAt) {
+    console.log('[CALENDAR] handleBookAppointment called:', {
+      userRole: user?.role,
+      userEmail: user?.email,
+      userId: user?.id,
+      loggedInPatientRecord: loggedInPatientRecord ? { 
+        id: loggedInPatientRecord.id, 
+        patientId: loggedInPatientRecord.patientId,
+        email: loggedInPatientRecord.email,
+        userId: loggedInPatientRecord.userId
+      } : null,
+      patientsCount: patients?.length || 0,
+      bookingFormPatientId: bookingForm.patientId
+    });
+    
+    // For patient users, always use loggedInPatientRecord first
+    let patientRecord: any = null;
+    if (user?.role === 'patient') {
+      // Use loggedInPatientRecord if available (it already checks userId and email)
+      patientRecord = loggedInPatientRecord;
+      
+      // If still not found, try additional fallback searches
+      if (!patientRecord && user?.id) {
+        console.log('[CALENDAR] loggedInPatientRecord not found, trying additional search by userId:', user.id);
+        patientRecord = patients.find((p: any) => 
+          p.userId === user.id || 
+          p.userId?.toString() === user.id?.toString() ||
+          p.id === user.id ||
+          p.id?.toString() === user.id?.toString()
+        );
+      }
+      
+      // If still not found, try by email (case-insensitive)
+      if (!patientRecord && user?.email) {
+        console.log('[CALENDAR] Patient not found by userId, trying by email:', user.email);
+        patientRecord = patients.find((p: any) => 
+          p.email?.toLowerCase() === user.email?.toLowerCase()
+        );
+      }
+      
+      if (!patientRecord) {
+        console.error('[CALENDAR] CRITICAL: No patient record found for logged-in patient user!', {
+          userEmail: user?.email,
+          userId: user?.id,
+          userRole: user?.role,
+          patientsCount: patients.length,
+          patientsAvailable: patients.slice(0, 5).map((p: any) => ({ 
+            id: p.id, 
+            email: p.email, 
+            userId: p.userId,
+            patientId: p.patientId 
+          })),
+          loggedInPatientRecord: loggedInPatientRecord ? {
+            id: loggedInPatientRecord.id,
+            email: loggedInPatientRecord.email,
+            userId: loggedInPatientRecord.userId
+          } : null
+        });
+        toast({
+          title: "Patient Record Not Found",
+          description: "Your patient record could not be found. Please ensure your account is properly linked to a patient record, or contact support.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      console.log('[CALENDAR] Successfully found patient record for logged-in patient:', {
+        patientId: patientRecord.id,
+        patientIdString: patientRecord.patientId,
+        email: patientRecord.email,
+        userId: patientRecord.userId,
+        name: `${patientRecord.firstName} ${patientRecord.lastName}`
+      });
+    } else {
+      // For non-patient users, find by patientId string or numeric ID
+      if (bookingForm.patientId) {
+        patientRecord = patients.find((p: any) => 
+          p.patientId === bookingForm.patientId ||
+          p.id.toString() === bookingForm.patientId ||
+          p.id === parseInt(bookingForm.patientId)
+        );
+      }
+    }
+    
+    // Use the numeric database ID from the patients table's id column
+    const numericPatientId = patientRecord?.id || null;
+    
+    console.log('[CALENDAR] Resolved patient:', {
+      patientRecord: patientRecord ? { 
+        id: patientRecord.id, 
+        patientId: patientRecord.patientId,
+        email: patientRecord.email,
+        name: `${patientRecord.firstName} ${patientRecord.lastName}`
+      } : null,
+      numericPatientId,
+      numericPatientIdType: typeof numericPatientId
+    });
+    
+    if (!selectedDoctor || !numericPatientId || !bookingForm.scheduledAt) {
       toast({
         title: "Missing Information",
         description: "Please fill in all required fields.",
@@ -2258,8 +2404,14 @@ const getAppointmentTypeLabel = (appointment: any): string => {
       return;
     }
 
-    if (!bookingForm.patientId && resolvedPatientId) {
-      setBookingForm((prev) => ({ ...prev, patientId: resolvedPatientId }));
+    // Validate that we have a valid numeric patient ID
+    if (!numericPatientId || isNaN(numericPatientId)) {
+      toast({
+        title: "Missing patient record",
+        description: "We could not resolve your patient record. Please try again.",
+        variant: "destructive",
+      });
+      return;
     }
 
     // Validate that the appointment time is not in the past
@@ -2275,25 +2427,13 @@ const getAppointmentTypeLabel = (appointment: any): string => {
       return;
     }
 
-    // Handle both numeric and string patient IDs
-    if (!resolvedPatientId) {
-      toast({
-        title: "Missing patient record",
-        description: "We could not resolve your patient record. Please try again.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const dbPatientId = patientRecord?.id || null;
-
     // Check for duplicate appointments (same patient, same doctor, same date)
-    if (allAppointments && selectedDate && dbPatientId) {
+    if (allAppointments && selectedDate && numericPatientId) {
       const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
       const duplicateAppointment = allAppointments.find((apt: any) => {
         const aptDateStr = format(new Date(apt.scheduledAt), 'yyyy-MM-dd');
         return (
-          apt.patientId === dbPatientId &&
+          apt.patientId === numericPatientId &&
           apt.providerId.toString() === selectedDoctor.id.toString() &&
           aptDateStr === selectedDateStr &&
           apt.status !== 'cancelled' && // Don't count cancelled appointments as duplicates
@@ -2306,10 +2446,10 @@ const getAppointmentTypeLabel = (appointment: any): string => {
         const formattedDate = format(selectedDate, 'MMMM do, yyyy');
         
         // Find patient name
-    const patient = patientRecord || patients.find((p: any) => 
-      p.id === dbPatientId || 
-      p.id.toString() === dbPatientId.toString()
-    );
+        const patient = patientRecord || patients.find((p: any) => 
+          p.id === numericPatientId || 
+          p.id.toString() === numericPatientId.toString()
+        );
         const patientName = patient ? `${patient.firstName} ${patient.lastName}` : 'the patient';
         
         setDuplicateAppointmentDetails(`${patientName} on ${formattedDate}`);
@@ -2346,14 +2486,84 @@ const getAppointmentTypeLabel = (appointment: any): string => {
         ? doctorAppointmentSelectedConsultation?.id || null
         : null;
 
+    // Ensure patientId is a number, not a string
+    let patientIdToSend: number;
+    if (typeof numericPatientId === 'number') {
+      patientIdToSend = numericPatientId;
+    } else if (typeof numericPatientId === 'string') {
+      patientIdToSend = parseInt(numericPatientId, 10);
+    } else {
+      patientIdToSend = numericPatientId as number;
+    }
+    
+    if (!patientIdToSend || isNaN(patientIdToSend)) {
+      console.error('[CALENDAR] Invalid patient ID:', numericPatientId, 'Type:', typeof numericPatientId);
+      toast({
+        title: "Patient Record Issue",
+        description: "We couldn't find your patient record. Please contact support if this issue persists.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Double-check that patientIdToSend is a valid number
+    if (typeof patientIdToSend !== 'number' || patientIdToSend <= 0) {
+      console.error('[CALENDAR] Patient ID is not a valid positive number:', patientIdToSend);
+      toast({
+        title: "Patient Record Issue",
+        description: "Invalid patient information. Please try again or contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Create base appointment data, ensuring patientId is always a number
+    const { patientId: _, ...bookingFormWithoutPatientId } = bookingForm;
     const baseAppointmentData: any = {
-      ...bookingForm,
-      patientId: resolvedPatientId,
+      ...bookingFormWithoutPatientId,
+      patientId: patientIdToSend, // Explicitly ensure it's a number (not a string)
       providerId: selectedDoctor.id,
       title: bookingForm.title || `${bookingForm.type} with ${selectedDoctor.firstName} ${selectedDoctor.lastName}`,
       location: bookingForm.location || `${selectedDoctor.department} Department`,
       duration: parseInt(bookingForm.duration)
     };
+    
+    console.log('[CALENDAR] baseAppointmentData patientId:', {
+      value: baseAppointmentData.patientId,
+      type: typeof baseAppointmentData.patientId,
+      isNumber: typeof baseAppointmentData.patientId === 'number',
+      originalBookingFormPatientId: bookingForm.patientId,
+      originalType: typeof bookingForm.patientId
+    });
+    
+    console.log('[CALENDAR] Final appointment data being sent:', {
+      patientId: baseAppointmentData.patientId,
+      patientIdType: typeof baseAppointmentData.patientId,
+      providerId: baseAppointmentData.providerId,
+      scheduledAt: baseAppointmentData.scheduledAt,
+      type: baseAppointmentData.type,
+      patientRecord: patientRecord ? { 
+        id: patientRecord.id, 
+        patientId: patientRecord.patientId, 
+        email: patientRecord.email,
+        userId: patientRecord.userId,
+        organizationId: patientRecord.organizationId
+      } : null,
+      user: user ? {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        organizationId: user.organizationId
+      } : null,
+      loggedInPatientRecord: loggedInPatientRecord ? {
+        id: loggedInPatientRecord.id,
+        patientId: loggedInPatientRecord.patientId,
+        email: loggedInPatientRecord.email,
+        userId: loggedInPatientRecord.userId,
+        organizationId: loggedInPatientRecord.organizationId
+      } : null,
+      patientIdMatches: patientRecord && loggedInPatientRecord ? patientRecord.id === loggedInPatientRecord.id : 'N/A'
+    });
     const appointmentData = isDoctorLike(user?.role)
       ? {
           ...baseAppointmentData,
@@ -2365,8 +2575,8 @@ const getAppointmentTypeLabel = (appointment: any): string => {
 
     // Find patient to get their name for the invoice
     const patient = patientRecord || patients.find((p: any) => 
-      p.id === dbPatientId ||
-      p.id.toString() === dbPatientId.toString()
+      p.id === numericPatientId ||
+      p.id.toString() === numericPatientId.toString()
     );
     
     if (!patient) {
@@ -2383,8 +2593,9 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     const invoiceDefaults = buildInvoiceDefaults(appointmentData, serviceInfo, user?.role);
     
     // Create invoice data populated with selected service details
+    // IMPORTANT: invoices table uses string patient_id (like "P000001"), not numeric id
     const invoiceData = {
-      patientId: resolvedPatientId,
+      patientId: patient.patientId || patient.patient_id || `P${patient.id.toString().padStart(6, '0')}`, // Use string patient_id for invoices table
       patientName: patientName,
       nhsNumber: patient.nhsNumber || undefined,
       dateOfService: invoiceDefaults.serviceDate,
@@ -2823,7 +3034,57 @@ const getAppointmentTypeLabel = (appointment: any): string => {
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Main Calendar - 2 columns */}
             <div className="lg:col-span-2">
-              <RoleBasedAppointmentRouter onNewAppointment={() => setShowNewAppointmentModal(true)} />
+              <RoleBasedAppointmentRouter onNewAppointment={() => {
+                // For patient users, ensure patient record is found before opening modal
+                if (user?.role === 'patient') {
+                  // Try to find patient record if not already found
+                  let patientRecord = loggedInPatientRecord;
+                  
+                  if (!patientRecord && user?.id && patients.length > 0) {
+                    console.log('[CALENDAR] Patient record not in loggedInPatientRecord, searching...');
+                    patientRecord = patients.find((p: any) => 
+                      p.userId === user.id || 
+                      p.userId?.toString() === user.id?.toString() ||
+                      p.email?.toLowerCase() === user.email?.toLowerCase()
+                    );
+                    
+                    if (patientRecord) {
+                      console.log('[CALENDAR] Found patient record when opening modal:', {
+                        id: patientRecord.id,
+                        patientId: patientRecord.patientId,
+                        email: patientRecord.email
+                      });
+                    } else {
+                      console.error('[CALENDAR] Patient record not found when opening modal!', {
+                        userId: user.id,
+                        userEmail: user.email,
+                        patientsCount: patients.length
+                      });
+                      toast({
+                        title: "Patient Record Not Found",
+                        description: "We couldn't find your patient record. Please ensure your account is properly linked, or contact support.",
+                        variant: "destructive",
+                      });
+                      return; // Don't open modal if patient record not found
+                    }
+                  } else if (!patientRecord && patients.length === 0) {
+                    console.warn('[CALENDAR] Patients array is empty, cannot verify patient record');
+                    toast({
+                      title: "Loading Patient Data",
+                      description: "Please wait while we load your patient information...",
+                      variant: "default",
+                    });
+                    return; // Don't open modal if patients haven't loaded yet
+                  } else if (patientRecord) {
+                    console.log('[CALENDAR] Patient record confirmed, opening booking modal:', {
+                      patientId: patientRecord.id,
+                      patientIdString: patientRecord.patientId,
+                      email: patientRecord.email
+                    });
+                  }
+                }
+                setShowNewAppointmentModal(true);
+              }} />
             </div>
             
             {/* Doctor List - 1 column */}
@@ -3352,6 +3613,11 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                         name: `${p.firstName} ${p.lastName}`
                                       }))
                                     });
+                                  }
+                                  
+                                  // For patient users, use loggedInPatientRecord directly
+                                  if (user?.role === 'patient' && loggedInPatientRecord) {
+                                    return loggedInPatientRecord;
                                   }
                                   
                                   const found = patients.find((patient: any) => {
@@ -3902,16 +4168,23 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           </Label>
                           {bookingForm.patientId ? (
                             (() => {
-                              const selectedPatient = patients.find((patient: any) => {
-                                // Try multiple matching strategies to find the patient
-                                const patientIdStr = bookingForm.patientId?.toString() || '';
-                                return (
-                                  patient.id?.toString() === patientIdStr ||
-                                  patient.patientId?.toString() === patientIdStr ||
-                                  patient.id?.toString() === bookingForm.patientId ||
-                                  patient.patientId === bookingForm.patientId
-                                );
-                              });
+                              // For patient users, use loggedInPatientRecord directly to ensure consistency
+                              let selectedPatient: any = null;
+                              
+                              if (user?.role === 'patient' && loggedInPatientRecord) {
+                                selectedPatient = loggedInPatientRecord;
+                              } else {
+                                selectedPatient = patients.find((patient: any) => {
+                                  // Try multiple matching strategies to find the patient
+                                  const patientIdStr = bookingForm.patientId?.toString() || '';
+                                  return (
+                                    patient.id?.toString() === patientIdStr ||
+                                    patient.patientId?.toString() === patientIdStr ||
+                                    patient.id?.toString() === bookingForm.patientId ||
+                                    patient.patientId === bookingForm.patientId
+                                  );
+                                });
+                              }
                               
                               if (!selectedPatient) return null;
                               
@@ -4873,18 +5146,36 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           "yyyy-MM-dd'T'HH:mm:ssxxx",
                         );
                         
-                        // Handle both numeric and string patient IDs
-                        let patientId: string | number = bookingForm.patientId;
-                        if (/^\d+$/.test(bookingForm.patientId)) {
-                          patientId = parseInt(bookingForm.patientId);
+                        // For patient users, use loggedInPatientRecord.id (numeric ID)
+                        // For other users, try to convert bookingForm.patientId to number
+                        let patientId: number;
+                        if (user?.role === 'patient' && loggedInPatientRecord) {
+                          patientId = loggedInPatientRecord.id;
+                          console.log('[PATIENT-BOOKING] Using loggedInPatientRecord.id:', patientId);
+                        } else {
+                          // Handle both numeric and string patient IDs for non-patient users
+                          let patientIdValue: string | number = bookingForm.patientId;
+                          if (/^\d+$/.test(bookingForm.patientId)) {
+                            patientIdValue = parseInt(bookingForm.patientId);
+                          }
+                          // Try to find patient record to get numeric ID
+                          const foundPatient = patients.find((p: any) => 
+                            p.id.toString() === patientIdValue || 
+                            p.patientId === patientIdValue ||
+                            p.id === patientIdValue
+                          );
+                          patientId = foundPatient?.id || (typeof patientIdValue === 'number' ? patientIdValue : parseInt(patientIdValue.toString().replace(/^P0*/, ''), 10));
+                          console.log('[PATIENT-BOOKING] Resolved patientId for non-patient user:', patientId);
                         }
 
                         // Get provider info
                         const provider = filteredUsers.find((u: any) => u.id.toString() === selectedProviderId);
 
+                        // Create appointment data, ensuring patientId is always a number
+                        const { patientId: _, ...bookingFormWithoutPatientId } = bookingForm;
                         const appointmentData = {
-                          ...bookingForm,
-                          patientId: patientId,
+                          ...bookingFormWithoutPatientId,
+                          patientId: patientId, // Always numeric ID
                           providerId: Number(selectedProviderId),
                           assignedRole: selectedRole,
                           title: bookingForm.title || `Appointment with ${provider?.firstName || ''} ${provider?.lastName || ''}`.trim(),
@@ -4892,6 +5183,12 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           duration: selectedDuration,
                           scheduledAt: appointmentDateTime
                         };
+                        
+                        console.log('[PATIENT-BOOKING] appointmentData patientId:', {
+                          value: appointmentData.patientId,
+                          type: typeof appointmentData.patientId,
+                          isNumber: typeof appointmentData.patientId === 'number'
+                        });
 
                         const normalizedPatientAppointmentType =
                           doctorAppointmentType || "consultation";
@@ -4911,14 +5208,21 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                         };
 
                         // Check for duplicate appointments (same patient, same doctor, same date)
-                        // Convert patientId to numeric ID for comparison
-                        const selectedPatient = patients.find((p: any) => {
-                          return p.id.toString() === bookingForm.patientId || p.patientId === bookingForm.patientId;
-                        });
-                        const numericPatientId = selectedPatient?.id;
+                        // For patient users, use loggedInPatientRecord directly
+                        let patientForDuplicateCheck: any = null;
+                        if (user?.role === 'patient' && loggedInPatientRecord) {
+                          patientForDuplicateCheck = loggedInPatientRecord;
+                        } else {
+                          // For non-patient users, find by bookingForm.patientId
+                          patientForDuplicateCheck = patients.find((p: any) => {
+                            return p.id.toString() === bookingForm.patientId || p.patientId === bookingForm.patientId;
+                          });
+                        }
+                        const numericPatientId = patientForDuplicateCheck?.id;
                         
                         console.log('[DUPLICATE CHECK] bookingForm.patientId:', bookingForm.patientId);
-                        console.log('[DUPLICATE CHECK] selectedPatient:', selectedPatient);
+                        console.log('[DUPLICATE CHECK] loggedInPatientRecord:', loggedInPatientRecord);
+                        console.log('[DUPLICATE CHECK] patientForDuplicateCheck:', patientForDuplicateCheck);
                         console.log('[DUPLICATE CHECK] numericPatientId:', numericPatientId);
                         console.log('[DUPLICATE CHECK] selectedProviderId:', selectedProviderId);
                         console.log('[DUPLICATE CHECK] selectedDate:', selectedDate);
@@ -4960,7 +5264,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           
                           if (duplicateAppointment) {
                             // Find patient name
-                            const patientName = selectedPatient ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : 'the patient';
+                            const patientName = patientForDuplicateCheck ? `${patientForDuplicateCheck.firstName} ${patientForDuplicateCheck.lastName}` : 'the patient';
                             const formattedDate = format(selectedDate, 'MMMM do, yyyy');
                             setDuplicateAppointmentDetails(`Patient ${patientName} already has an appointment with the same doctor on ${formattedDate}. Please select another time slot.`);
                             setShowDuplicateWarning(true);
@@ -5018,7 +5322,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                               const aptProviderId = conflictingAppointment.provider_id || conflictingAppointment.providerId;
                               const conflictDoctor = filteredUsers.find((u: any) => u.id === aptProviderId);
                               const doctorFullName = conflictDoctor ? `${conflictDoctor.firstName} ${conflictDoctor.lastName}` : 'Unknown Doctor';
-                              const patientName = selectedPatient ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : 'Patient';
+                              const patientName = patientForDuplicateCheck ? `${patientForDuplicateCheck.firstName} ${patientForDuplicateCheck.lastName}` : 'Patient';
                               const formattedDate = format(new Date(conflictingAppointment.scheduledAt), 'MMMM do, yyyy');
                               
                               // Extract time from scheduledAt string to avoid timezone conversion

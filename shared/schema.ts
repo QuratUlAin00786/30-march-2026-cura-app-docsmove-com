@@ -3819,6 +3819,26 @@ export const treatmentsInfo = pgTable("treatments_info", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Analytics Subjects Table
+export const analyticsSubjects = pgTable("analytics_subjects", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  subjectTitle: text("subject_title").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Analytics Subject Treatments Mapping Table
+export const analyticsSubjectTreatments = pgTable("analytics_subject_treatments", {
+  id: serial("id").primaryKey(),
+  subjectId: integer("subject_id").notNull().references(() => analyticsSubjects.id, { onDelete: "cascade" }),
+  // NOTE: this maps to `treatments_info.id` (the catalog used by the UI)
+  treatmentId: integer("treatment_id").notNull().references(() => treatmentsInfo.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqueSubjectTreatment: uniqueIndex("unique_subject_treatment").on(table.subjectId, table.treatmentId),
+}));
+
 export const insertTreatmentsInfoSchema = createInsertSchema(treatmentsInfo).omit({
   id: true,
   createdAt: true,

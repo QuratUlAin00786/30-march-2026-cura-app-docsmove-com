@@ -19,7 +19,7 @@ import { messagingService } from "./messaging-service";
 import { isDoctorLike } from './utils/role-utils.js';
 // PayPal imports moved to dynamic imports to avoid initialization errors when credentials are missing
 import { gdprComplianceService } from "./services/gdpr-compliance";
-import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, User, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, saasPackages, saasPayments, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema, InsertSaaSSubscription, imagingPricing, scheduledVideoCalls, insertScheduledVideoCallSchema, messages } from "../shared/schema";
+import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, User, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, saasPackages, saasPayments, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema, InsertSaaSSubscription, imagingPricing, scheduledVideoCalls, insertScheduledVideoCallSchema, messages, analyticsSubjects, analyticsSubjectTreatments } from "../shared/schema";
 import * as schema from "../shared/schema";
 import { db, pool } from "./db";
 import { and, eq, sql, desc, asc, isNull, isNotNull, or, gte, lte, ne } from "drizzle-orm";
@@ -6484,8 +6484,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     return requireModulePermission('appointments', 'create')(req, res, next);
   }, async (req: TenantRequest, res) => {
     try {
-      console.log("Appointment creation request received:", req.body);
-      console.log("Tenant ID:", req.tenant?.id);
+      console.log("[APPOINTMENTS] Request received:", {
+        method: req.method,
+        path: req.path,
+        hasUser: !!req.user,
+        userRole: req.user?.role,
+        userEmail: req.user?.email,
+        tenantId: req.tenant?.id,
+        hasAuthHeader: !!req.get("Authorization"),
+        bodyPatientId: req.body?.patientId,
+        bodyPatientIdType: typeof req.body?.patientId
+      });
 
       const normalizedBody = {
         ...req.body,
@@ -6495,11 +6504,26 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       };
 
       const appointmentData = z.object({
-        patientId: z.any().transform((val) => {
+        patientId: z.union([z.number(), z.string()]).transform((val) => {
+          console.log("[APPOINTMENTS-ZOD] Transforming patientId:", val, "Type:", typeof val);
           // Handle null, undefined, empty string, or NaN
           if (val === null || val === undefined || val === "" || (typeof val === "number" && isNaN(val))) {
+            console.log("[APPOINTMENTS-ZOD] PatientId is null/undefined/empty/NaN");
             return null;
           }
+          // If it's a string that looks like a number, convert to number
+          if (typeof val === "string" && /^\d+$/.test(val)) {
+            const numVal = parseInt(val, 10);
+            console.log("[APPOINTMENTS-ZOD] Converted string to number:", val, "->", numVal);
+            return numVal;
+          }
+          // If it's already a number, return as-is
+          if (typeof val === "number") {
+            console.log("[APPOINTMENTS-ZOD] PatientId is already a number:", val);
+            return val;
+          }
+          // Otherwise return as-is (might be a string patientId for legacy support)
+          console.log("[APPOINTMENTS-ZOD] PatientId is string (legacy format):", val);
           return val;
         }),
         providerId: z.number(),
@@ -6521,14 +6545,113 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         createdBy: z.number().optional()
       }).parse(normalizedBody);
 
-      console.log("Parsed appointment data:", appointmentData);
+      console.log("[APPOINTMENTS] Parsed appointment data:", {
+        patientId: appointmentData.patientId,
+        patientIdType: typeof appointmentData.patientId,
+        providerId: appointmentData.providerId,
+        appointmentType: appointmentData.appointmentType
+      });
 
-      // Handle patientId conversion
+      // Handle patientId conversion - We expect numeric ID from patients table (id column)
       let numericPatientId: number;
-      if (appointmentData.patientId === null) {
-        console.log("Patient ID is null, returning error");
+      if (appointmentData.patientId === null || appointmentData.patientId === undefined) {
+        console.log("[APPOINTMENTS] Patient ID is null/undefined, returning error");
         return res.status(400).json({ error: "Patient ID is required" });
+      } else if (typeof appointmentData.patientId === "number") {
+        // Direct numeric ID from patients table - this is what we want
+        console.log("[APPOINTMENTS] Patient ID received as number (patients.id):", appointmentData.patientId);
+        numericPatientId = appointmentData.patientId;
+        
+        // Validate that the patient exists by numeric ID
+        console.log("[APPOINTMENTS] Looking up patient with ID:", numericPatientId, "in organization:", req.tenant!.id);
+        let patient = await storage.getPatient(numericPatientId, req.tenant!.id);
+        
+        if (!patient) {
+          console.log("[APPOINTMENTS] Patient not found for numeric ID:", numericPatientId, "Organization:", req.tenant!.id);
+          console.log("[APPOINTMENTS] User making request:", {
+            userId: req.user?.id,
+            userEmail: req.user?.email,
+            userRole: req.user?.role,
+            userOrganizationId: req.user?.organizationId,
+            tenantId: req.tenant!.id
+          });
+          
+          // For patient users, try to find their patient record by userId
+          if (req.user?.role === 'patient' && req.user?.id) {
+            console.log("[APPOINTMENTS] Patient user detected, trying to find patient record by userId:", req.user.id, "in organization:", req.tenant!.id);
+            try {
+              const patientByUserId = await storage.getPatientByUserId(req.user.id, req.tenant!.id);
+              if (patientByUserId) {
+                console.log("[APPOINTMENTS] Found patient record by userId:", {
+                  id: patientByUserId.id,
+                  patientId: patientByUserId.patientId,
+                  email: patientByUserId.email,
+                  userId: patientByUserId.userId,
+                  organizationId: patientByUserId.organizationId,
+                  requestedPatientId: numericPatientId,
+                  matches: patientByUserId.id === numericPatientId
+                });
+                
+                // Check if the patient ID sent matches the one found by userId
+                if (patientByUserId.id !== numericPatientId) {
+                  console.log("[APPOINTMENTS] Patient ID mismatch! Frontend sent:", numericPatientId, "but userId lookup found:", patientByUserId.id);
+                  console.log("[APPOINTMENTS] Using the correct patient ID from userId lookup:", patientByUserId.id);
+                }
+                
+                // Use the correct patient ID from userId lookup
+                numericPatientId = patientByUserId.id;
+                // Re-fetch with correct ID
+                patient = await storage.getPatient(numericPatientId, req.tenant!.id);
+                if (!patient) {
+                  console.error("[APPOINTMENTS] Patient still not found after userId lookup, even with corrected ID:", numericPatientId);
+                  console.error("[APPOINTMENTS] This suggests a database inconsistency. Patient found by userId but not by id.");
+                  return res.status(400).json({
+                    error: "Patient not found. Please verify the patient exists in the system or contact support."
+                  });
+                }
+                console.log("[APPOINTMENTS] Successfully found patient with corrected ID:", numericPatientId);
+              } else {
+                console.log("[APPOINTMENTS] Patient record not found by userId either. userId:", req.user.id, "organizationId:", req.tenant!.id);
+                // Try to get list of patients to help debug
+                try {
+                  const allPatients = await storage.getPatientsByOrganization(req.tenant!.id, 10);
+                  console.log("[APPOINTMENTS] Available patients in organization:", allPatients.map((p: any) => ({
+                    id: p.id,
+                    patientId: p.patientId,
+                    email: p.email,
+                    userId: p.userId
+                  })));
+                } catch (err) {
+                  console.error("[APPOINTMENTS] Error fetching patients list:", err);
+                }
+                return res.status(400).json({
+                  error: "Patient not found. Please verify the patient exists in the system or contact support."
+                });
+              }
+            } catch (err) {
+              console.error("[APPOINTMENTS] Error looking up patient by userId:", err);
+              return res.status(400).json({
+                error: "Patient not found. Please verify the patient exists in the system or contact support."
+              });
+            }
+          } else {
+            return res.status(400).json({
+              error: "Patient not found. Please verify the patient exists in the system or contact support."
+            });
+          }
+        }
+        
+        console.log("[APPOINTMENTS] Found patient by numeric ID:", {
+          id: patient.id,
+          patientId: patient.patientId,
+          name: `${patient.firstName} ${patient.lastName}`,
+          email: patient.email,
+          userId: patient.userId,
+          organizationId: patient.organizationId
+        });
       } else if (typeof appointmentData.patientId === "string") {
+        // Legacy support: string patientId (like "P000001") - try to find by patientId string
+        console.log("[APPOINTMENTS] Patient ID received as string (legacy format):", appointmentData.patientId);
         // If it's a string (like "P000007"), find the patient by patientId
         console.log("Looking up patient by patientId:", appointmentData.patientId);
         let patient = await storage.getPatientByPatientId(appointmentData.patientId, req.tenant!.id);
@@ -6562,16 +6685,62 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         }
 
         if (!patient) {
-          console.log("Patient not found for patientId:", appointmentData.patientId);
+          console.log("[APPOINTMENTS] Patient not found for patientId (string):", appointmentData.patientId);
+          console.log("[APPOINTMENTS] Organization ID:", req.tenant!.id);
           return res.status(400).json({
-            error: `Patient not found. Please use a valid patient ID like P000001, P000002, P000004, P000005, P000007, P000008, P000009, P000010, or P000158.`
+            error: "Patient not found. Please verify the patient exists in the system or contact support."
           });
         }
         numericPatientId = patient.id;
-        console.log("Found patient with numeric ID:", numericPatientId);
+        console.log("[APPOINTMENTS] Found patient with numeric ID:", numericPatientId);
       } else {
-        numericPatientId = appointmentData.patientId;
-        console.log("Using provided numeric patient ID:", numericPatientId);
+        // Fallback: Try to parse as numeric ID if it's a string representation of a number
+        console.log("[APPOINTMENTS] Patient ID received as other type, attempting to parse:", appointmentData.patientId, "Type:", typeof appointmentData.patientId);
+        
+        const parsedId = typeof appointmentData.patientId === 'string' && /^\d+$/.test(appointmentData.patientId)
+          ? parseInt(appointmentData.patientId, 10)
+          : typeof appointmentData.patientId === 'number'
+          ? appointmentData.patientId
+          : null;
+        
+        if (!parsedId || isNaN(parsedId) || parsedId <= 0) {
+          console.log("[APPOINTMENTS] Invalid patient ID format:", appointmentData.patientId);
+          return res.status(400).json({ 
+            error: `Invalid patient ID format. Expected a numeric ID from the patients table (id column), received: ${appointmentData.patientId} (type: ${typeof appointmentData.patientId})` 
+          });
+        }
+        
+        numericPatientId = parsedId;
+        console.log("[APPOINTMENTS] Parsed patient ID as numeric:", numericPatientId, "Organization:", req.tenant!.id);
+        
+        // Validate that the patient exists by numeric ID
+        const patient = await storage.getPatient(numericPatientId, req.tenant!.id);
+        if (!patient) {
+          console.log("[APPOINTMENTS] Patient not found for numeric ID:", numericPatientId, "Organization:", req.tenant!.id);
+          // Try to get list of available patient IDs for better error message
+          try {
+            const allPatients = await storage.getPatientsByOrganization(req.tenant!.id, 100);
+            const availablePatientIds = allPatients
+              .slice(0, 10)
+              .map((p: any) => `${p.id} (${p.patientId || 'N/A'})`)
+              .join(", ");
+            return res.status(400).json({
+              error: `Patient not found with ID ${numericPatientId}. Available patient IDs: ${availablePatientIds || 'none'}.`
+            });
+          } catch (err) {
+            console.error("[APPOINTMENTS] Error fetching patients list:", err);
+            return res.status(400).json({
+              error: `Patient not found with ID ${numericPatientId}. Please verify the patient exists.`
+            });
+          }
+        }
+        
+        console.log("[APPOINTMENTS] Found patient:", {
+          id: patient.id,
+          patientId: patient.patientId,
+          name: `${patient.firstName} ${patient.lastName}`,
+          email: patient.email
+        });
       }
 
       // Generate unique appointment ID
@@ -7656,7 +7825,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Create treatments info (metadata)
-  app.post("/api/treatments-info", authMiddleware, async (req: TenantRequest, res) => {
+  app.post("/api/treatments-info", authMiddleware, multiTenantEnforcer(), async (req: TenantRequest, res: Response) => {
     try {
       if (!req.tenant || !req.user) {
         return res.status(401).json({ error: "Organization or user not found" });
@@ -36338,6 +36507,905 @@ Cura EMR Team
     } catch (error) {
       console.error("Error viewing prescription:", error);
       res.status(500).json({ error: "Failed to view prescription" });
+    }
+  });
+
+  // Treatment Analytics Endpoints
+  // Get treatment popularity (most popular treatments)
+  app.get("/api/analytics/treatment-popularity", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Build status condition
+      const statusCondition = statusFilter.toLowerCase() === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()}`;
+      
+      // Query appointments with treatment_id
+      // treatment_id comes directly from appointments table (a.treatment_id)
+      // Join with treatments table to get treatment name
+      const result = await db.execute(sql`
+        SELECT 
+          COALESCE(ti.name, t.name, 'Unknown Treatment') as name,
+          COUNT(a.id)::integer as total_sessions
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+        GROUP BY COALESCE(ti.name, t.name, 'Unknown Treatment')
+        HAVING COUNT(a.id) > 0
+        ORDER BY total_sessions DESC
+        LIMIT 20
+      `);
+      
+      console.log(`[TREATMENT-POPULARITY] Organization ${organizationId}: Found ${result.rows?.length || 0} treatment types (status=${statusFilter})`);
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching treatment popularity:", error);
+      res.status(500).json({ error: "Failed to fetch treatment popularity", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Get monthly treatment trends
+  app.get("/api/analytics/monthly-trends", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Build status condition
+      const statusCondition = statusFilter.toLowerCase() === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()}`;
+      
+      const result = await db.execute(sql`
+        SELECT 
+          TO_CHAR(a.scheduled_at, 'YYYY-MM') as month,
+          COUNT(*)::integer as total_sessions
+        FROM appointments a
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+        GROUP BY TO_CHAR(a.scheduled_at, 'YYYY-MM')
+        ORDER BY month
+      `);
+      
+      res.json(result.rows);
+    } catch (error) {
+      console.error("Error fetching monthly trends:", error);
+      res.status(500).json({ error: "Failed to fetch monthly trends" });
+    }
+  });
+
+  // Get revenue per treatment
+  app.get("/api/analytics/revenue-per-treatment", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Build status condition
+      const statusCondition = statusFilter.toLowerCase() === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()}`;
+      
+      // Get revenue from invoices linked to appointments with treatments
+      // invoices.service_id links to appointments.appointment_id (text field)
+      // Filter by service_type = 'appointments' to ensure we only get appointment invoices
+      const result = await db.execute(sql`
+        SELECT 
+          COALESCE(ti.name, t.name, 'Unknown Treatment') as name,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+        GROUP BY COALESCE(ti.name, t.name, 'Unknown Treatment')
+        HAVING COUNT(a.id) > 0
+        ORDER BY revenue DESC
+        LIMIT 20
+      `);
+      
+      console.log(`[REVENUE-PER-TREATMENT] Organization ${organizationId}: Found ${result.rows?.length || 0} treatments with revenue (status=${statusFilter})`);
+      if (result.rows && result.rows.length > 0) {
+        console.log(`[REVENUE-PER-TREATMENT] Sample: ${result.rows[0].name} - £${result.rows[0].revenue}`);
+      }
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching revenue per treatment:", error);
+      res.status(500).json({ error: "Failed to fetch revenue per treatment", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Get treatments by category
+  app.get("/api/analytics/category-distribution", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Build status condition
+      const statusCondition = statusFilter.toLowerCase() === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()}`;
+      
+      // Categorize by treatment name patterns (since treatment_categories may not exist)
+      const result = await db.execute(sql`
+        SELECT 
+          CASE 
+            WHEN LOWER(COALESCE(ti.name, t.name, '')) LIKE '%iv%' OR LOWER(COALESCE(ti.name, t.name, '')) LIKE '%therapy%' THEN 'IV Therapy'
+            WHEN LOWER(COALESCE(ti.name, t.name, '')) LIKE '%prp%' THEN 'PRP'
+            WHEN LOWER(COALESCE(ti.name, t.name, '')) LIKE '%facial%' OR LOWER(COALESCE(ti.name, t.name, '')) LIKE '%hydro%' THEN 'Facial'
+            WHEN LOWER(COALESCE(ti.name, t.name, '')) LIKE '%light%' THEN 'Light Therapy'
+            WHEN LOWER(COALESCE(ti.name, t.name, '')) LIKE '%compression%' THEN 'Compression Therapy'
+            WHEN LOWER(COALESCE(ti.name, t.name, '')) LIKE '%blood%' OR LOWER(COALESCE(ti.name, t.name, '')) LIKE '%test%' THEN 'Blood Testing'
+            ELSE 'Other'
+          END as category_name,
+          COUNT(a.id)::integer as total
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+        GROUP BY category_name
+        ORDER BY total DESC
+      `);
+      
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching category distribution:", error);
+      res.status(500).json({ error: "Failed to fetch category distribution", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Diagnostic endpoint to check what appointment data exists
+  app.get("/api/analytics/treatment-sessions-debug", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      
+      // Check all appointments regardless of status
+      // treatment_id comes directly from appointments table
+      const allAppointments = await db.execute(sql`
+        SELECT 
+          COUNT(*)::integer as total_appointments,
+          COUNT(CASE WHEN LOWER(status) = 'completed' THEN 1 END)::integer as completed_count,
+          COUNT(CASE WHEN treatment_id IS NOT NULL THEN 1 END)::integer as with_treatment_id,
+          COUNT(CASE WHEN LOWER(status) = 'completed' AND treatment_id IS NOT NULL THEN 1 END)::integer as completed_with_treatment_id
+        FROM appointments
+        WHERE organization_id = ${organizationId}
+      `);
+      
+      // Get sample appointments
+      const sampleAppointments = await db.execute(sql`
+        SELECT 
+          id,
+          status,
+          treatment_id,
+          title,
+          scheduled_at
+        FROM appointments
+        WHERE organization_id = ${organizationId}
+        ORDER BY created_at DESC
+        LIMIT 10
+      `);
+      
+      res.json({
+        summary: allAppointments.rows[0] || {},
+        samples: sampleAppointments.rows || []
+      });
+    } catch (error) {
+      console.error("Error in diagnostic endpoint:", error);
+      res.status(500).json({ error: "Failed to fetch diagnostic data" });
+    }
+  });
+
+  // Get all treatment sessions data (for comprehensive analytics) - optimized for speed
+  app.get("/api/analytics/treatment-sessions", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req); // Gets organization_id from logged-in user
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Build status condition
+      const statusCondition = statusFilter.toLowerCase() === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()}`;
+      
+      // Query to get appointments with treatment_id
+      // treatment_id comes directly from appointments table (a.treatment_id column)
+      // Join with treatments table to get treatment name
+      // invoices.service_id links to appointments.appointment_id (text field)
+      const result = await db.execute(sql`
+        SELECT 
+          a.id,
+          a.patient_id,
+          a.treatment_id,
+          a.provider_id,
+          a.scheduled_at as session_date,
+          LOWER(TRIM(a.status)) as status,
+          COALESCE(ti.name, t.name, 'Unknown Treatment') as treatment_name,
+          COALESCE(i.total_amount, 0) as price
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+        ORDER BY a.scheduled_at DESC
+        LIMIT 500
+      `);
+      
+      console.log(`[TREATMENT-SESSIONS-API] Organization ${organizationId}: Returning ${result.rows?.length || 0} treatment sessions (status=${statusFilter})`);
+      
+      // Always run diagnostic query to check today's appointments
+      const diagnosticResult = await db.execute(sql`
+        SELECT 
+          COUNT(*)::integer as total_appointments,
+          COUNT(CASE WHEN a.treatment_id IS NOT NULL THEN 1 END)::integer as with_treatment_id,
+          COUNT(CASE WHEN DATE(a.scheduled_at) = CURRENT_DATE THEN 1 END)::integer as today_total,
+          COUNT(CASE WHEN DATE(a.scheduled_at) = CURRENT_DATE AND a.treatment_id IS NOT NULL THEN 1 END)::integer as today_with_treatment,
+          COUNT(CASE WHEN DATE(a.scheduled_at) = CURRENT_DATE AND a.treatment_id IS NOT NULL AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()} THEN 1 END)::integer as today_with_treatment_and_status
+        FROM appointments a
+        WHERE a.organization_id = ${organizationId}
+      `);
+      const diag = diagnosticResult.rows[0];
+      console.log(`[TREATMENT-SESSIONS-API] 📊 Diagnostic Results:`);
+      console.log(`  Total appointments: ${diag?.total_appointments || 0}`);
+      console.log(`  With treatment_id: ${diag?.with_treatment_id || 0}`);
+      console.log(`  Today total: ${diag?.today_total || 0}`);
+      console.log(`  Today with treatment: ${diag?.today_with_treatment || 0}`);
+      console.log(`  Today with treatment + status '${statusFilter}': ${diag?.today_with_treatment_and_status || 0}`);
+      
+      if (result.rows && result.rows.length > 0) {
+        console.log(`[TREATMENT-SESSIONS-API] Sample: ID=${result.rows[0].id}, status=${result.rows[0].status}, treatment_id=${result.rows[0].treatment_id}, treatment_name=${result.rows[0].treatment_name}`);
+        // Log today's appointments from results
+        const today = new Date().toISOString().split('T')[0];
+        const todayAppointments = result.rows.filter((row: any) => {
+          if (!row.session_date) return false;
+          const rowDate = new Date(row.session_date).toISOString().split('T')[0];
+          return rowDate === today;
+        });
+        console.log(`[TREATMENT-SESSIONS-API] ✅ Today's appointments in results (${today}): ${todayAppointments.length}`);
+        if (todayAppointments.length > 0) {
+          todayAppointments.forEach((apt: any, index: number) => {
+            console.log(`[TREATMENT-SESSIONS-API] Today[${index}]: ID=${apt.id}, status=${apt.status}, treatment_id=${apt.treatment_id}, treatment_name="${apt.treatment_name}", scheduled_at=${apt.session_date}`);
+          });
+        } else if (diag?.today_with_treatment_and_status > 0) {
+          console.log(`[TREATMENT-SESSIONS-API] ⚠️ Today's appointments exist but not in results. Check date/timezone or status filter.`);
+        }
+      } else {
+        console.log(`[TREATMENT-SESSIONS-API] ⚠️ No treatment sessions returned. Check status filter and treatment_id.`);
+      }
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("[TREATMENT-SESSIONS-API] Error:", error);
+      res.json([]);
+    }
+  });
+
+  // Get summary statistics
+  app.get("/api/analytics/treatment-summary", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      
+      const result = await db.execute(sql`
+        SELECT 
+          COUNT(DISTINCT a.patient_id)::integer as total_patients,
+          COUNT(a.id)::integer as total_treatments,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue_this_month,
+          (
+            SELECT COALESCE(ti2.name, t2.name, 'Unknown')
+            FROM appointments a2
+            LEFT JOIN treatments t2 ON t2.id = a2.treatment_id
+            LEFT JOIN treatments_info ti2 ON ti2.id = a2.treatment_id
+            WHERE a2.organization_id = ${organizationId}
+              AND LOWER(TRIM(a2.status)) = 'completed'
+              AND a2.treatment_id IS NOT NULL
+            GROUP BY COALESCE(ti2.name, t2.name, 'Unknown')
+            ORDER BY COUNT(*) DESC
+            LIMIT 1
+          ) as most_popular_treatment
+        FROM appointments a
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+          AND DATE_TRUNC('month', i.invoice_date) = DATE_TRUNC('month', CURRENT_DATE)
+        WHERE a.organization_id = ${organizationId}
+          AND TRIM(LOWER(a.status)) = 'completed'
+          AND a.treatment_id IS NOT NULL
+      `);
+      
+      const summary = result.rows[0] || {
+        total_patients: 0,
+        total_treatments: 0,
+        revenue_this_month: 0,
+        most_popular_treatment: null
+      };
+      
+      console.log(`[TREATMENT-SUMMARY] Organization ${organizationId}:`, summary);
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching treatment summary:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch treatment summary",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Get daily treatment analytics
+  app.get("/api/analytics/treatments-daily", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const daysParam = parseInt(req.query.days as string) || 30;
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Validate status filter to prevent SQL injection
+      const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
+      const safeStatus = validStatuses.includes(statusFilter.toLowerCase()) ? statusFilter.toLowerCase() : 'completed';
+      
+      // Build status condition using parameterized query
+      const statusCondition = safeStatus === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      // Build date condition - if days=1, show only today; otherwise show last N days (including today)
+      // Always include today's appointments by using >= CURRENT_DATE - INTERVAL
+      const dateCondition = daysParam === 1 
+        ? sql`AND DATE(a.scheduled_at) = CURRENT_DATE`
+        : sql`AND DATE(a.scheduled_at) >= CURRENT_DATE - INTERVAL '${daysParam - 1} days' AND DATE(a.scheduled_at) <= CURRENT_DATE`;
+      
+      console.log(`[TREATMENTS-DAILY] Date condition: daysParam=${daysParam}, will include today's appointments`);
+      
+      const result = await db.execute(sql`
+        SELECT 
+          DATE(a.scheduled_at) as date,
+          COUNT(a.id)::integer as total_treatments,
+          COUNT(DISTINCT a.patient_id)::integer as total_patients,
+          COUNT(DISTINCT a.provider_id)::integer as total_practitioners,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+          ${dateCondition}
+        GROUP BY DATE(a.scheduled_at)
+        ORDER BY date DESC
+      `);
+      
+      console.log(`[TREATMENTS-DAILY] Organization ${organizationId}: Found ${result.rows?.length || 0} days with treatment data (days=${daysParam}, status=${safeStatus})`);
+      if (result.rows && result.rows.length > 0) {
+        // Check if today's data is included
+        const today = new Date().toISOString().split('T')[0];
+        const todayData = result.rows.find((row: any) => {
+          const rowDate = new Date(row.date).toISOString().split('T')[0];
+          return rowDate === today;
+        });
+        if (todayData) {
+          console.log(`[TREATMENTS-DAILY] ✅ Today's data (${today}): ${JSON.stringify(todayData)}`);
+        } else {
+          console.log(`[TREATMENTS-DAILY] ⚠️ Today's data (${today}) not found in results`);
+        }
+        // Log all results
+        result.rows.forEach((row: any, index: number) => {
+          console.log(`[TREATMENTS-DAILY] [${index}] Date: ${row.date}, Treatments: ${row.total_treatments}, Patients: ${row.total_patients}, Revenue: ${row.revenue}`);
+        });
+      } else {
+        console.log(`[TREATMENTS-DAILY] ⚠️ No daily data found. Checking today's appointments...`);
+        // Diagnostic query for today
+        const todayDiagnostic = await db.execute(sql`
+          SELECT 
+            COUNT(a.id) as today_count,
+            COUNT(DISTINCT a.patient_id) as today_patients,
+            COUNT(DISTINCT a.provider_id) as today_practitioners
+          FROM appointments a
+          WHERE a.organization_id = ${organizationId}
+            AND DATE(a.scheduled_at) = CURRENT_DATE
+            ${statusCondition}
+            AND a.treatment_id IS NOT NULL
+        `);
+        console.log(`[TREATMENTS-DAILY] Today's diagnostic: ${JSON.stringify(todayDiagnostic.rows[0])}`);
+      }
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching daily treatment analytics:", error);
+      res.json([]);
+    }
+  });
+
+  // Get monthly treatment analytics
+  app.get("/api/analytics/treatments-monthly", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const monthsParam = parseInt(req.query.months as string) || 12;
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Validate status filter to prevent SQL injection
+      const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
+      const safeStatus = validStatuses.includes(statusFilter.toLowerCase()) ? statusFilter.toLowerCase() : 'completed';
+      
+      // Build status condition using parameterized query
+      const statusCondition = safeStatus === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      const result = await db.execute(sql`
+        SELECT 
+          TO_CHAR(a.scheduled_at, 'YYYY-MM') as month,
+          TO_CHAR(a.scheduled_at, 'Mon YYYY') as month_label,
+          COUNT(a.id)::integer as total_treatments,
+          COUNT(DISTINCT a.patient_id)::integer as total_patients,
+          COUNT(DISTINCT a.provider_id)::integer as total_practitioners,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+          AND a.scheduled_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${monthsParam} months'
+        GROUP BY TO_CHAR(a.scheduled_at, 'YYYY-MM'), TO_CHAR(a.scheduled_at, 'Mon YYYY')
+        ORDER BY month DESC
+      `);
+      
+      console.log(`[TREATMENTS-MONTHLY] Organization ${organizationId}: Found ${result.rows?.length || 0} months with treatment data (months=${monthsParam}, status=${safeStatus})`);
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching monthly treatment analytics:", error);
+      res.json([]);
+    }
+  });
+
+  // Get yearly treatment analytics
+  app.get("/api/analytics/treatments-yearly", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const yearsParam = parseInt(req.query.years as string) || 5;
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Validate status filter to prevent SQL injection
+      const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
+      const safeStatus = validStatuses.includes(statusFilter.toLowerCase()) ? statusFilter.toLowerCase() : 'completed';
+      
+      // Build status condition using parameterized query
+      const statusCondition = safeStatus === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      const result = await db.execute(sql`
+        SELECT 
+          TO_CHAR(a.scheduled_at, 'YYYY') as year,
+          COUNT(a.id)::integer as total_treatments,
+          COUNT(DISTINCT a.patient_id)::integer as total_patients,
+          COUNT(DISTINCT a.provider_id)::integer as total_practitioners,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+          AND a.scheduled_at >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '${yearsParam} years'
+        GROUP BY TO_CHAR(a.scheduled_at, 'YYYY')
+        ORDER BY year DESC
+      `);
+      
+      console.log(`[TREATMENTS-YEARLY] Organization ${organizationId}: Found ${result.rows?.length || 0} years with treatment data (years=${yearsParam}, status=${safeStatus})`);
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching yearly treatment analytics:", error);
+      res.json([]);
+    }
+  });
+
+  // ==================== Custom Analytics Subjects ====================
+  
+  // Get all analytics subjects for an organization
+  app.get("/api/analytics/custom-subjects", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      
+      const subjects = await db
+        .select({
+          id: analyticsSubjects.id,
+          subjectTitle: analyticsSubjects.subjectTitle,
+          createdAt: analyticsSubjects.createdAt,
+          updatedAt: analyticsSubjects.updatedAt,
+        })
+        .from(analyticsSubjects)
+        .where(eq(analyticsSubjects.organizationId, organizationId))
+        .orderBy(desc(analyticsSubjects.createdAt));
+      
+      // Get treatment counts for each subject
+      const subjectsWithCounts = await Promise.all(
+        subjects.map(async (subject) => {
+          const treatmentCount = await db
+            .select({ count: sql<number>`COUNT(*)::integer` })
+            .from(analyticsSubjectTreatments)
+            .where(eq(analyticsSubjectTreatments.subjectId, subject.id));
+          
+          return {
+            ...subject,
+            treatmentCount: treatmentCount[0]?.count || 0,
+          };
+        })
+      );
+      
+      res.json(subjectsWithCounts);
+    } catch (error) {
+      console.error("Error fetching analytics subjects:", error);
+      res.status(500).json({ error: "Failed to fetch analytics subjects" });
+    }
+  });
+
+  // Get a single analytics subject with its treatments
+  app.get("/api/analytics/custom-subjects/:id", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const subjectId = parseInt(req.params.id);
+      
+      const [subject] = await db
+        .select()
+        .from(analyticsSubjects)
+        .where(and(
+          eq(analyticsSubjects.id, subjectId),
+          eq(analyticsSubjects.organizationId, organizationId)
+        ));
+      
+      if (!subject) {
+        return res.status(404).json({ error: "Analytics subject not found" });
+      }
+      
+      // Get treatments for this subject (from treatments_info)
+      const treatments = await db
+        .select({
+          id: schema.treatmentsInfo.id,
+          name: schema.treatmentsInfo.name,
+          colorCode: schema.treatmentsInfo.colorCode,
+        })
+        .from(analyticsSubjectTreatments)
+        .innerJoin(schema.treatmentsInfo, eq(analyticsSubjectTreatments.treatmentId, schema.treatmentsInfo.id))
+        .where(eq(analyticsSubjectTreatments.subjectId, subjectId));
+      
+      res.json({
+        ...subject,
+        treatments,
+      });
+    } catch (error) {
+      console.error("Error fetching analytics subject:", error);
+      res.status(500).json({ error: "Failed to fetch analytics subject" });
+    }
+  });
+
+  // Create a new analytics subject
+  app.post("/api/analytics/custom-subjects", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const { subjectTitle, treatmentIds } = req.body;
+      
+      if (!subjectTitle || typeof subjectTitle !== 'string' || subjectTitle.trim().length === 0) {
+        return res.status(400).json({ error: "Subject title is required" });
+      }
+      
+      if (!Array.isArray(treatmentIds) || treatmentIds.length === 0) {
+        return res.status(400).json({ error: "At least one treatment must be selected" });
+      }
+      
+      // Create the subject
+      const [newSubject] = await db
+        .insert(analyticsSubjects)
+        .values({
+          organizationId,
+          subjectTitle: subjectTitle.trim(),
+        })
+        .returning();
+      
+      // Add treatments to the subject
+      if (treatmentIds.length > 0) {
+        await db.insert(analyticsSubjectTreatments).values(
+          treatmentIds.map((treatmentId: number) => ({
+            subjectId: newSubject.id,
+            treatmentId,
+          }))
+        );
+      }
+      
+      res.status(201).json(newSubject);
+    } catch (error) {
+      console.error("Error creating analytics subject:", error);
+      res.status(500).json({ error: "Failed to create analytics subject" });
+    }
+  });
+
+  // Update an analytics subject
+  app.put("/api/analytics/custom-subjects/:id", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const subjectId = parseInt(req.params.id);
+      const { subjectTitle, treatmentIds } = req.body;
+      
+      // Verify subject belongs to organization
+      const [existingSubject] = await db
+        .select()
+        .from(analyticsSubjects)
+        .where(and(
+          eq(analyticsSubjects.id, subjectId),
+          eq(analyticsSubjects.organizationId, organizationId)
+        ));
+      
+      if (!existingSubject) {
+        return res.status(404).json({ error: "Analytics subject not found" });
+      }
+      
+      // Update subject title if provided
+      if (subjectTitle !== undefined) {
+        if (typeof subjectTitle !== 'string' || subjectTitle.trim().length === 0) {
+          return res.status(400).json({ error: "Subject title cannot be empty" });
+        }
+        
+        await db
+          .update(analyticsSubjects)
+          .set({
+            subjectTitle: subjectTitle.trim(),
+            updatedAt: new Date(),
+          })
+          .where(eq(analyticsSubjects.id, subjectId));
+      }
+      
+      // Update treatments if provided
+      if (Array.isArray(treatmentIds)) {
+        // Remove existing treatments
+        await db
+          .delete(analyticsSubjectTreatments)
+          .where(eq(analyticsSubjectTreatments.subjectId, subjectId));
+        
+        // Add new treatments
+        if (treatmentIds.length > 0) {
+          await db.insert(analyticsSubjectTreatments).values(
+            treatmentIds.map((treatmentId: number) => ({
+              subjectId,
+              treatmentId,
+            }))
+          );
+        }
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating analytics subject:", error);
+      res.status(500).json({ error: "Failed to update analytics subject" });
+    }
+  });
+
+  // Delete an analytics subject
+  app.delete("/api/analytics/custom-subjects/:id", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const subjectId = parseInt(req.params.id);
+      
+      // Verify subject belongs to organization
+      const [existingSubject] = await db
+        .select()
+        .from(analyticsSubjects)
+        .where(and(
+          eq(analyticsSubjects.id, subjectId),
+          eq(analyticsSubjects.organizationId, organizationId)
+        ));
+      
+      if (!existingSubject) {
+        return res.status(404).json({ error: "Analytics subject not found" });
+      }
+      
+      // Delete subject (cascade will delete treatments mapping)
+      await db
+        .delete(analyticsSubjects)
+        .where(eq(analyticsSubjects.id, subjectId));
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting analytics subject:", error);
+      res.status(500).json({ error: "Failed to delete analytics subject" });
+    }
+  });
+
+  // Get available treatments for an organization (for selection in subject creation)
+  app.get("/api/analytics/available-treatments", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      console.log(`[AVAILABLE-TREATMENTS] Fetching treatments for organization ${organizationId}`);
+      
+      // IMPORTANT: Use `treatments_info` as the source of truth for selectable treatments
+      const treatmentsInfo = await db
+        .select({
+          id: schema.treatmentsInfo.id,
+          name: schema.treatmentsInfo.name,
+          colorCode: schema.treatmentsInfo.colorCode,
+        })
+        .from(schema.treatmentsInfo)
+        .where(eq(schema.treatmentsInfo.organizationId, organizationId))
+        .orderBy(asc(schema.treatmentsInfo.name));
+      
+      // Add default pricing fields since treatments_info doesn't have them
+      // Frontend expects basePrice and currency for display
+      const treatmentsWithDefaults = treatmentsInfo.map((info) => ({
+        id: info.id,
+        name: info.name,
+        colorCode: info.colorCode,
+        basePrice: '0', // Default value since treatments_info doesn't have pricing
+        currency: 'GBP', // Default currency
+      }));
+      
+      console.log(`[AVAILABLE-TREATMENTS] Found ${treatmentsWithDefaults.length} treatments for organization ${organizationId}`);
+      if (treatmentsWithDefaults.length > 0) {
+        console.log(`[AVAILABLE-TREATMENTS] Sample treatment:`, treatmentsWithDefaults[0]);
+      }
+      
+      res.json(treatmentsWithDefaults);
+    } catch (error) {
+      console.error("[AVAILABLE-TREATMENTS] Error fetching available treatments:", error);
+      res.status(500).json({ error: "Failed to fetch available treatments", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Get custom analytics data for a subject
+  app.get("/api/analytics/custom-subjects/:id/analytics", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const subjectId = parseInt(req.params.id);
+      const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      
+      // Validate status filter
+      const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
+      const safeStatus = validStatuses.includes(statusFilter.toLowerCase()) ? statusFilter.toLowerCase() : 'completed';
+      
+      // Verify subject belongs to organization
+      const [subject] = await db
+        .select()
+        .from(analyticsSubjects)
+        .where(and(
+          eq(analyticsSubjects.id, subjectId),
+          eq(analyticsSubjects.organizationId, organizationId)
+        ));
+      
+      if (!subject) {
+        return res.status(404).json({ error: "Analytics subject not found" });
+      }
+      
+      // Get treatment IDs for this subject
+      const subjectTreatments = await db
+        .select({ treatmentId: analyticsSubjectTreatments.treatmentId })
+        .from(analyticsSubjectTreatments)
+        .where(eq(analyticsSubjectTreatments.subjectId, subjectId));
+      
+      const treatmentIds = subjectTreatments.map(st => st.treatmentId);
+      
+      if (treatmentIds.length === 0) {
+        return res.json({
+          totalTreatments: 0,
+          totalRevenue: 0,
+          totalPatients: 0,
+          monthlyTrends: [],
+          treatmentDistribution: [],
+        });
+      }
+      
+      // Build status condition
+      const statusCondition = safeStatus === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      // Total treatments
+      console.log(`[CUSTOM-ANALYTICS] Querying for subject ${subjectId}, organization ${organizationId}, treatmentIds:`, treatmentIds);
+      console.log(`[CUSTOM-ANALYTICS] Status filter: ${safeStatus}`);
+      
+      const totalTreatmentsResult = await db.execute(sql`
+        SELECT COUNT(*)::integer as total
+        FROM appointments a
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id = ANY(${treatmentIds})
+          AND a.treatment_id IS NOT NULL
+      `);
+      
+      console.log(`[CUSTOM-ANALYTICS] Total treatments found:`, totalTreatmentsResult.rows[0]?.total || 0);
+      
+      // Total revenue (from invoices)
+      // invoices.service_id links to appointments.appointment_id (text field)
+      const totalRevenueResult = await db.execute(sql`
+        SELECT COALESCE(SUM(i.total_amount), 0)::numeric as total
+        FROM appointments a
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id = ANY(${treatmentIds})
+          AND a.treatment_id IS NOT NULL
+      `);
+      
+      // Total unique patients
+      const totalPatientsResult = await db.execute(sql`
+        SELECT COUNT(DISTINCT a.patient_id)::integer as total
+        FROM appointments a
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id = ANY(${treatmentIds})
+          AND a.treatment_id IS NOT NULL
+      `);
+      
+      // Monthly trends
+      // invoices.service_id links to appointments.appointment_id (text field)
+      const monthlyTrendsResult = await db.execute(sql`
+        SELECT 
+          TO_CHAR(a.scheduled_at, 'YYYY-MM') as month,
+          TO_CHAR(a.scheduled_at, 'Mon YYYY') as month_label,
+          COUNT(a.id)::integer as total_treatments,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue
+        FROM appointments a
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id = ANY(${treatmentIds})
+          AND a.treatment_id IS NOT NULL
+        GROUP BY TO_CHAR(a.scheduled_at, 'YYYY-MM'), TO_CHAR(a.scheduled_at, 'Mon YYYY')
+        ORDER BY month DESC
+        LIMIT 24
+      `);
+      
+      // Treatment distribution (by treatment name)
+      const treatmentDistributionResult = await db.execute(sql`
+        SELECT 
+          COALESCE(ti.name, t.name, 'Unknown Treatment') as treatment_name,
+          COUNT(a.id)::integer as count
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id = ANY(${treatmentIds})
+          AND a.treatment_id IS NOT NULL
+        GROUP BY COALESCE(ti.name, t.name, 'Unknown Treatment')
+        ORDER BY count DESC
+      `);
+      
+      const result = {
+        totalTreatments: parseInt(totalTreatmentsResult.rows[0]?.total || '0'),
+        totalRevenue: parseFloat(totalRevenueResult.rows[0]?.total || '0'),
+        totalPatients: parseInt(totalPatientsResult.rows[0]?.total || '0'),
+        monthlyTrends: monthlyTrendsResult.rows || [],
+        treatmentDistribution: treatmentDistributionResult.rows || [],
+      };
+      
+      console.log(`[CUSTOM-ANALYTICS] Returning data for subject ${subjectId}:`, {
+        totalTreatments: result.totalTreatments,
+        totalRevenue: result.totalRevenue,
+        totalPatients: result.totalPatients,
+        monthlyTrendsCount: result.monthlyTrends.length,
+        treatmentDistributionCount: result.treatmentDistribution.length
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching custom analytics:", error);
+      res.status(500).json({ error: "Failed to fetch custom analytics" });
     }
   });
 

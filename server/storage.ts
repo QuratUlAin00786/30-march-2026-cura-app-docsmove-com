@@ -2807,9 +2807,9 @@ export class DatabaseStorage implements IStorage {
       const newPatients = userPatientsList.filter(u => new Date(u.createdAt) > thirtyDaysAgo).length;
       
       // Calculate appointment stats
-      const completedAppointments = appointmentsList.filter(a => a.status === 'completed').length;
-      const cancelledAppointments = appointmentsList.filter(a => a.status === 'cancelled').length;
-      const noShowAppointments = appointmentsList.filter(a => a.status === 'no-show').length;
+      const completedAppointments = appointmentsList.filter(a => a.status?.toLowerCase().trim() === 'completed').length;
+      const cancelledAppointments = appointmentsList.filter(a => a.status?.toLowerCase().trim() === 'cancelled').length;
+      const noShowAppointments = appointmentsList.filter(a => a.status?.toLowerCase().trim() === 'no-show').length;
       
       // Clinical Analytics Data
       const totalConsultations = consultationsList.length;
@@ -2923,10 +2923,10 @@ export class DatabaseStorage implements IStorage {
           return scheduledDate >= dayStart && scheduledDate <= dayEnd;
         });
         
-        const completed = dayAppointments.filter(a => a.status === 'completed').length;
-        const cancelled = dayAppointments.filter(a => a.status === 'cancelled').length;
-        const noShow = dayAppointments.filter(a => a.status === 'no-show').length;
-        const scheduled = dayAppointments.filter(a => a.status === 'scheduled').length;
+        const completed = dayAppointments.filter(a => a.status?.toLowerCase().trim() === 'completed').length;
+        const cancelled = dayAppointments.filter(a => a.status?.toLowerCase().trim() === 'cancelled').length;
+        const noShow = dayAppointments.filter(a => a.status?.toLowerCase().trim() === 'no-show').length;
+        const scheduled = dayAppointments.filter(a => a.status?.toLowerCase().trim() === 'scheduled').length;
         
         appointmentVolumeData.push({
           date: dayStart.toISOString().split('T')[0],
@@ -5136,7 +5136,7 @@ export class DatabaseStorage implements IStorage {
     // Use drizzle update for regular fields, then update updatedAt separately with raw SQL
     if (Object.keys(updateData).length > 0) {
       await db
-        .update(prescriptions)
+      .update(prescriptions)
         .set(updateData as any)
         .where(and(eq(prescriptions.id, id), eq(prescriptions.organizationId, organizationId)));
     }

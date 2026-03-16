@@ -775,25 +775,30 @@ const parseShiftTimeToMinutes = (time?: string): number => {
   // Create appointment mutation
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: any) => {
-      const response = await apiRequest("POST", "/api/appointments", data);
-      return response.json();
+      console.log('[APPOINTMENT-CALENDAR] Mutation function called with data:', data);
+      try {
+        const response = await apiRequest("POST", "/api/appointments", data);
+        const result = await response.json();
+        console.log('[APPOINTMENT-CALENDAR] API response received:', result);
+        return result;
+      } catch (error: any) {
+        console.error('[APPOINTMENT-CALENDAR] API request failed:', error);
+        throw error;
+      }
     },
     onSuccess: (data) => {
+      console.log('[APPOINTMENT-CALENDAR] Mutation onSuccess called:', data);
       queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
       const finalAppointmentType = data.appointmentType || appointmentType || "consultation";
       setCreatedAppointmentDetails({
         ...data,
         appointmentType: finalAppointmentType,
       });
-      setShowConfirmationDialog(false);
+      // Don't close dialogs here - let the inline callbacks handle it
     },
-    onError: (error) => {
-      console.error("Create appointment error:", error);
-      toast({
-        title: "Creation Failed",
-        description: "Failed to create the appointment. Please try again.",
-        variant: "destructive",
-      });
+    onError: (error: any) => {
+      console.error("[APPOINTMENT-CALENDAR] Mutation onError called:", error);
+      // Error handling is done in the inline onError callback
     },
   });
 
@@ -3971,6 +3976,21 @@ Medical License: [License Number]
                     ? appointmentSelectedConsultation?.id || null
                     : null;
 
+                  console.log('[APPOINTMENT-CALENDAR] Creating appointment with data:', {
+                    patientId: parseInt(newAppointmentData.patientId),
+                    providerId: parseInt(selectedProviderId),
+                    assignedRole: selectedRole,
+                    title: generatedTitle,
+                    type: normalizedAppointmentType === "treatment" ? "procedure" : "consultation",
+                    appointmentType: normalizedAppointmentType,
+                    treatmentId,
+                    consultationId,
+                    status: "scheduled",
+                    scheduledAt: newScheduledAt,
+                    duration: selectedDuration,
+                    createdBy: user?.id,
+                  });
+
                   createAppointmentMutation.mutate({
                     patientId: parseInt(newAppointmentData.patientId),
                     providerId: parseInt(selectedProviderId),
@@ -3988,13 +4008,25 @@ Medical License: [License Number]
                     description: "",
                     createdBy: user?.id,
                   }, {
-                    onSuccess: () => {
+                    onSuccess: (data) => {
+                      console.log('[APPOINTMENT-CALENDAR] Appointment created successfully:', data);
+                      setShowConfirmationDialog(false);
+                      setShowNewAppointment(false);
                       setShowSuccessModal(true);
+                      // NOTE: Do not call `onNewAppointment()` here.
+                      // In some parent pages this callback re-opens the "Schedule New Appointment" dialog,
+                      // which is not desired after a successful booking.
+                    },
+                    onError: (error: any) => {
+                      console.error('[APPOINTMENT-CALENDAR] Failed to create appointment:', error);
+                      // Keep dialog open so user can see the error and try again
+                      toast({
+                        title: "Creation Failed",
+                        description: error?.message || "Failed to create the appointment. Please check the console for details.",
+                        variant: "destructive",
+                      });
                     }
                   });
-                  
-                  setShowConfirmationDialog(false);
-                  setShowNewAppointment(false); // Close main dialog
                 }}
                 disabled={createAppointmentMutation.isPending}
               >

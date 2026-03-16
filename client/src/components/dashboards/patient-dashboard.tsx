@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
+import { useCurrency } from "@/hooks/use-currency";
 import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
