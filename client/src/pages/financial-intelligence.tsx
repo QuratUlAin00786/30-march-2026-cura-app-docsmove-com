@@ -1241,7 +1241,7 @@ export default function FinancialIntelligence() {
                       )}
                     </p>
                   </div>
-                  <CurrencyIcon className="w-8 h-8 text-green-500" />
+                  <Banknote className="w-8 h-8 text-green-500" />
                 </div>
                 {revenueData && revenueData.length > 1 && (
                   <div className="flex items-center mt-2 text-sm">
