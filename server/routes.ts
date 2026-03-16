@@ -5193,10 +5193,15 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const hashedPassword = await bcrypt.hash("cura123", 10);
         console.log("🔵 [PATIENT_CREATION] Password hashed successfully");
 
+        // Validate that email is provided - don't generate placeholder
+        if (!patientData.email || patientData.email.trim() === '') {
+          throw new Error("Email address is required for patient user creation");
+        }
+
         const [newUser] = await tx.insert(users).values({
           organizationId: req.tenant!.id,
-          email: patientData.email || `patient_${Date.now()}@placeholder.com`,
-          username: patientData.email || `patient_${Date.now()}`,
+          email: patientData.email.trim(), // Use the provided email, trimmed
+          username: patientData.email.trim(), // Use email as username
           passwordHash: hashedPassword,
           firstName: patientData.firstName,
           lastName: patientData.lastName,
