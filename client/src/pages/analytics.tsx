@@ -3509,11 +3509,11 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Analytics Tabs */}
-        <Tabs defaultValue="treatment-analytics" className="w-full">
-          <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-2 md:grid-cols-6' : 'grid-cols-2 md:grid-cols-5'}`}>
+        <Tabs defaultValue="overview" className="w-full">
+          <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
             {isDoctorLike(user?.role) ? (
               <>
-                <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger>
+                {/* <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger> */}
                 {/* <TabsTrigger value="custom-analytics">Custom Analytics</TabsTrigger> */}
                 <TabsTrigger value="overview">Overview ({user?.firstName} {user?.lastName})</TabsTrigger>
                 <TabsTrigger value="patients">Patients ({user?.firstName} {user?.lastName})</TabsTrigger>
@@ -3523,7 +3523,7 @@ export default function AnalyticsPage() {
               </>
             ) : (
               <>
-                <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger>
+                {/* <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger> */}
                 {/* <TabsTrigger value="custom-analytics">Custom Analytics</TabsTrigger> */}
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="patients">Patients</TabsTrigger>
@@ -3546,7 +3546,8 @@ export default function AnalyticsPage() {
             )}
           </TabsContent>
 
-          {/* Treatment Analytics Dashboard Tab */}
+          {/* Treatment Analytics Dashboard Tab (hidden) */}
+          {/*
           <TabsContent value="treatment-analytics" className="space-y-4 lg:space-y-6">
             {!user ? (
               <Card>
@@ -3583,6 +3584,7 @@ export default function AnalyticsPage() {
               />
             )}
           </TabsContent>
+          */}
 
           <TabsContent value="overview" className="space-y-4">
             {/* Compact Analytics Grid */}
