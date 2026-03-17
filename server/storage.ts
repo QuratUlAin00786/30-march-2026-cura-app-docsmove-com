@@ -1787,11 +1787,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateAppointment(id: number, organizationId: number, updates: Partial<InsertAppointment>): Promise<Appointment | undefined> {
-    const [updated] = await db.update(appointments)
-      .set(updates)
-      .where(and(eq(appointments.id, id), eq(appointments.organizationId, organizationId)))
-      .returning();
-    return updated || undefined;
+    try {
+      console.log(`[STORAGE] updateAppointment called with:`, {
+        id,
+        organizationId,
+        updates,
+        updateKeys: Object.keys(updates)
+      });
+      
+      const [updated] = await db.update(appointments)
+        .set(updates)
+        .where(and(eq(appointments.id, id), eq(appointments.organizationId, organizationId)))
+        .returning();
+      
+      console.log(`[STORAGE] updateAppointment result:`, updated ? 'success' : 'no rows updated');
+      return updated || undefined;
+    } catch (error: any) {
+      console.error(`[STORAGE] updateAppointment error:`, error);
+      console.error(`[STORAGE] updateAppointment error message:`, error?.message);
+      console.error(`[STORAGE] updateAppointment error code:`, error?.code);
+      console.error(`[STORAGE] updateAppointment error detail:`, error?.detail);
+      throw error;
+    }
   }
 
   async deleteAppointment(id: number, organizationId: number): Promise<boolean> {

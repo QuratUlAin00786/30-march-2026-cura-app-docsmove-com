@@ -24,6 +24,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
   Calendar,
   Clock,
@@ -39,6 +41,9 @@ import {
   ChevronRight,
   Filter,
   CheckCircle,
+  ChevronsUpDown,
+  Check,
+  Loader2,
 } from "lucide-react";
 import { format, isSameDay, isToday, isFuture, isPast } from "date-fns";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -69,6 +74,14 @@ export default function PatientAppointments({
     number | null
   >(null);
   const [bookedTimeSlots, setBookedTimeSlots] = useState<string[]>([]);
+  
+  // Edit appointment form states
+  const [editAppointmentType, setEditAppointmentType] = useState<"consultation" | "treatment" | "">("");
+  const [editSelectedTreatment, setEditSelectedTreatment] = useState<any>(null);
+  const [editSelectedConsultation, setEditSelectedConsultation] = useState<any>(null);
+  const [openEditAppointmentTypeCombo, setOpenEditAppointmentTypeCombo] = useState(false);
+  const [openEditTreatmentCombo, setOpenEditTreatmentCombo] = useState(false);
+  const [openEditConsultationCombo, setOpenEditConsultationCombo] = useState(false);
 
   // Patient filter states
   const [roleFilter, setRoleFilter] = useState<string>("");
@@ -79,6 +92,10 @@ export default function PatientAppointments({
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  
+  // Insufficient time error modal state
+  const [showInsufficientTimeModal, setShowInsufficientTimeModal] = useState(false);
+  const [insufficientTimeMessage, setInsufficientTimeMessage] = useState("");
   
   const { user } = useAuth();
   const { toast } = useToast();
@@ -126,6 +143,37 @@ export default function PatientAppointments({
       const response = await apiRequest("GET", "/api/pricing/treatments");
       const data = await response.json();
       return Array.isArray(data) ? data : [];
+    },
+  });
+
+  // Fetch shifts data for shift validation
+  const { data: shiftsData = [] } = useQuery({
+    queryKey: ["/api/shifts"],
+    queryFn: async () => {
+      try {
+        const response = await apiRequest("GET", "/api/shifts");
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error("[EDIT-APPOINTMENT] Error fetching shifts:", error);
+        return [];
+      }
+    },
+  });
+
+  // Fetch default shifts for fallback when no custom shifts exist
+  const { data: defaultShiftsData = [] } = useQuery({
+    queryKey: ["/api/default-shifts"],
+    staleTime: 60000,
+    queryFn: async () => {
+      try {
+        const response = await apiRequest('GET', '/api/default-shifts?forBooking=true');
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error("[EDIT-APPOINTMENT] Error fetching default shifts:", error);
+        return [];
+      }
     },
   });
 
@@ -385,59 +433,149 @@ export default function PatientAppointments({
   };
 
   // Fetch appointments for selected date to check availability
-  const fetchAppointmentsForDate = async (date: Date) => {
+  // Follow the same logic as appointment-calendar.tsx for consistency
+  const fetchAppointmentsForDate = async (date: Date): Promise<string[]> => {
+    if (!date || !editingAppointment?.providerId) {
+      setBookedTimeSlots([]);
+      return [];
+    }
+
     try {
       const dateStr = format(date, "yyyy-MM-dd");
       const response = await apiRequest("GET", "/api/appointments");
       const data = await response.json();
 
-      // Filter appointments for the selected date (excluding the current appointment being edited)
-      // Only include SCHEDULED appointments - CANCELLED appointments should not block time slots
+      console.log(`[EDIT-APPOINTMENT] Fetching appointments for date: ${dateStr}, provider: ${editingAppointment.providerId}`);
+      console.log(`[EDIT-APPOINTMENT] Total appointments from API:`, data.length);
+
+      // Filter appointments for the selected date and provider
+      // Follow the same logic as appointment-calendar.tsx
       const dayAppointments = data.filter((apt: any) => {
-        const aptDate = format(new Date(apt.scheduledAt), "yyyy-MM-dd");
-        return aptDate === dateStr && apt.id !== editingAppointment?.id && apt.status === 'SCHEDULED';
+        // Exclude the appointment being edited from conflict checks
+        if (editingAppointment && apt.id === editingAppointment.id) {
+          console.log('[EDIT-APPOINTMENT] Excluding current editing appointment:', apt.id);
+          return false;
+        }
+        
+        // Exclude cancelled appointments - treat them as available slots
+        if (apt.status === 'cancelled') {
+          console.log('[EDIT-APPOINTMENT] Excluding cancelled appointment:', apt.id);
+          return false;
+        }
+        
+        // Only check appointments for the relevant provider
+        if (apt.providerId !== editingAppointment.providerId) {
+          return false;
+        }
+        
+        // Parse the scheduledAt directly without timezone conversion
+        // Format: "2026-03-19T09:30:00.000Z"
+        const aptDateString = apt.scheduledAt?.substring(0, 10); // Extract "2026-03-19"
+        
+        // Only check appointments on the same date
+        if (aptDateString !== dateStr) return false;
+        
+        return true;
       });
 
-      // Extract booked time slots
-      const bookedSlots = dayAppointments.map((apt: any) => {
-        const aptTime = new Date(apt.scheduledAt);
-        return format(aptTime, "h:mm a");
+      console.log(`[EDIT-APPOINTMENT] Filtered appointments for date:`, dayAppointments.length);
+
+      // Extract booked time slots based on appointment duration
+      // Follow the same logic as appointment-calendar.tsx - check all slots that overlap with appointments
+      const bookedSlotsSet = new Set<string>();
+      
+      dayAppointments.forEach((apt: any) => {
+        // Extract time in 24-hour format directly from the ISO string (no timezone conversion)
+        const timeString = apt.scheduledAt?.substring(11, 16); // Extract "09:30"
+        if (!timeString) return;
+        
+        const [aptHour, aptMinute] = timeString.split(':').map(Number);
+        const aptStartMinutes = aptHour * 60 + aptMinute;
+        const aptDuration = apt.duration || 30; // Default to 30 if duration not set
+        const aptEndMinutes = aptStartMinutes + aptDuration;
+        
+        // Generate all 15-minute slots that overlap with this appointment
+        // Example: 9:30 AM appointment for 60 min occupies 9:30, 9:45, 10:00, 10:15 (ends at 10:30)
+        for (let slotMinutes = aptStartMinutes; slotMinutes < aptEndMinutes; slotMinutes += 15) {
+          const slotHour = Math.floor(slotMinutes / 60);
+          const slotMin = slotMinutes % 60;
+          
+          // Convert to 12-hour format
+          const period = slotHour >= 12 ? 'PM' : 'AM';
+          const displayHours = slotHour % 12 || 12;
+          const displayMinutes = slotMin === 0 ? '00' : slotMin.toString().padStart(2, '0');
+          const slotString = `${displayHours}:${displayMinutes} ${period}`;
+          
+          bookedSlotsSet.add(slotString);
+        }
       });
+
+      const bookedSlots = Array.from(bookedSlotsSet).sort();
+      console.log(`[EDIT-APPOINTMENT] Booked time slots:`, bookedSlots);
 
       setBookedTimeSlots(bookedSlots);
-      console.log("📅 Booked time slots for", dateStr, ":", bookedSlots);
+      return bookedSlots;
     } catch (error) {
-      console.error("Error fetching appointments for date:", error);
+      console.error("[EDIT-APPOINTMENT] Error fetching appointments for date:", error);
       setBookedTimeSlots([]);
+      return [];
     }
   };
 
-  // Fetch appointments when editing appointment date changes
+  // Fetch appointments when editing appointment date or provider changes
   React.useEffect(() => {
     if (editingAppointment?.scheduledAt) {
       const selectedDate = new Date(editingAppointment.scheduledAt);
       fetchAppointmentsForDate(selectedDate);
     }
-  }, [editingAppointment?.scheduledAt, editingAppointment?.id]);
+  }, [editingAppointment?.scheduledAt, editingAppointment?.id, editingAppointment?.providerId]);
 
   // Edit appointment mutation
   const editAppointmentMutation = useMutation({
     mutationFn: async (appointmentData: any) => {
+      try {
+        console.log('[PATIENT-APPOINTMENTS] Updating appointment:', {
+          id: appointmentData.id,
+          appointmentType: appointmentData.appointmentType,
+          treatmentId: appointmentData.treatmentId,
+          consultationId: appointmentData.consultationId,
+          duration: appointmentData.duration,
+          scheduledAt: appointmentData.scheduledAt,
+          fullData: appointmentData
+        });
+        
       const response = await apiRequest(
         "PUT",
         `/api/appointments/${appointmentData.id}`,
         appointmentData,
       );
 
-      if (!response.ok) {
-        throw new Error(`Failed to update appointment: ${response.status}`);
-      }
-
       try {
         return await response.json();
       } catch (jsonError) {
         // If JSON parsing fails but response was successful, return a success indicator
         return { success: true };
+        }
+      } catch (error: any) {
+        console.error('[PATIENT-APPOINTMENTS] Update error:', error);
+        // Extract error details from error message (format: "500: {...}")
+        let errorDetails = error?.message || "Unknown error";
+        try {
+          // Try to parse JSON from error message
+          const match = errorDetails.match(/\{.*\}/);
+          if (match) {
+            const errorJson = JSON.parse(match[0]);
+            errorDetails = errorJson.error || errorJson.details || errorDetails;
+            if (errorJson.details && process.env.NODE_ENV === 'development') {
+              errorDetails += ` (Details: ${errorJson.details})`;
+            }
+          }
+        } catch (parseError) {
+          // If parsing fails, use the original error message
+        }
+        const enhancedError = new Error(errorDetails);
+        (enhancedError as any).originalError = error;
+        throw enhancedError;
       }
     },
     onSuccess: () => {
@@ -446,11 +584,17 @@ export default function PatientAppointments({
       queryClient.invalidateQueries({ queryKey: ["/api/appointments"] });
       queryClient.refetchQueries({ queryKey: ["/api/appointments"] });
       setEditingAppointment(null);
+      setEditAppointmentType("");
+      setEditSelectedTreatment(null);
+      setEditSelectedConsultation(null);
     },
-    onError: (error) => {
+    onError: (error: any) => {
+      console.error('[PATIENT-APPOINTMENTS] Update failed:', error);
+      console.error('[PATIENT-APPOINTMENTS] Original error:', error?.originalError);
+      const errorMessage = error?.message || error?.originalError?.message || "Failed to update appointment. Please try again.";
       toast({
         title: "Update Failed",
-        description: "Failed to update appointment. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -510,7 +654,110 @@ export default function PatientAppointments({
   });
 
   const handleEditAppointment = (appointment: any) => {
-    setEditingAppointment(appointment);
+    // Ensure scheduledAt is a proper Date object in local time
+    // Also store the original string to avoid timezone conversion when displaying
+    // Store the original scheduledAt to identify the existing appointment time (grey)
+    console.log('[EDIT-APPOINTMENT] Original appointment data:', {
+      scheduledAt: appointment.scheduledAt,
+      scheduledAtType: typeof appointment.scheduledAt,
+      isDate: appointment.scheduledAt instanceof Date,
+      scheduledAtString: appointment.scheduledAt?.toString()
+    });
+    
+    // Store original scheduledAt for comparison (to show grey for existing time)
+    let originalScheduledAt: Date | null = null;
+    if (appointment.scheduledAt) {
+      if (appointment.scheduledAt instanceof Date) {
+        originalScheduledAt = new Date(appointment.scheduledAt);
+      } else if (typeof appointment.scheduledAt === 'string') {
+        originalScheduledAt = new Date(appointment.scheduledAt);
+      }
+    }
+    
+    const appointmentCopy = { 
+      ...appointment, 
+      _originalScheduledAt: null as string | null,
+      _originalScheduledAtDate: originalScheduledAt as Date | null
+    };
+    if (appointment.scheduledAt) {
+      let date: Date;
+      let originalString: string | null = null;
+      
+      // Always extract time from the original string if available to avoid timezone conversion
+      if (appointment.scheduledAt instanceof Date) {
+        // If it's already a Date object, we can't get the original string
+        // This shouldn't happen if data comes from API, but handle it anyway
+        console.warn('[EDIT-APPOINTMENT] scheduledAt is already a Date object, cannot preserve original string');
+        const existingDate = appointment.scheduledAt;
+        date = new Date(
+          existingDate.getFullYear(),
+          existingDate.getMonth(),
+          existingDate.getDate(),
+          existingDate.getHours(),
+          existingDate.getMinutes(),
+          existingDate.getSeconds(),
+          0
+        );
+      } else if (typeof appointment.scheduledAt === 'string') {
+        // Store the original string for display purposes - this is the key to avoiding timezone conversion
+        originalString = appointment.scheduledAt;
+        console.log('[EDIT-APPOINTMENT] Original string stored:', originalString);
+        
+        // Extract time components directly from the string
+        if (appointment.scheduledAt.endsWith('Z')) {
+          // Extract date and time from UTC string: "2026-03-19T09:30:00.000Z"
+          // Treat the UTC time as local time (no conversion)
+          const [datePart, timePart] = appointment.scheduledAt.split('T');
+          const [year, month, day] = datePart.split('-').map(Number);
+          const [timeOnly] = timePart.split('.');
+          const [hours, minutes, seconds = 0] = timeOnly.split(':').map(Number);
+          
+          console.log('[EDIT-APPOINTMENT] Extracted from UTC string:', { year, month, day, hours, minutes });
+          
+          // Create a local date with these exact components (no timezone conversion)
+          date = new Date(year, month - 1, day, hours, minutes, seconds || 0, 0);
+        } else {
+          // Non-UTC string, parse it
+          const parsedDate = new Date(appointment.scheduledAt);
+          // Extract components to create a local date (avoiding any conversion)
+          date = new Date(
+            parsedDate.getFullYear(),
+            parsedDate.getMonth(),
+            parsedDate.getDate(),
+            parsedDate.getHours(),
+            parsedDate.getMinutes(),
+            parsedDate.getSeconds(),
+            0
+          );
+        }
+      } else {
+        date = new Date(appointment.scheduledAt);
+      }
+      
+      if (!isNaN(date.getTime())) {
+        appointmentCopy.scheduledAt = date;
+        appointmentCopy._originalScheduledAt = originalString;
+        console.log('[EDIT-APPOINTMENT] Final date object:', {
+          date: date.toString(),
+          hours: date.getHours(),
+          minutes: date.getMinutes(),
+          originalString: originalString
+        });
+      }
+    }
+    setEditingAppointment(appointmentCopy);
+    // Initialize edit form states
+    const normalizedAppointmentType = appointment.appointmentType || "consultation";
+    setEditAppointmentType(normalizedAppointmentType);
+    setEditSelectedTreatment(
+      treatmentsList.find((treatment: any) => treatment.id === appointment.treatmentId) || null
+    );
+    setEditSelectedConsultation(
+      consultationServices.find((service: any) => service.id === appointment.consultationId) || null
+    );
+    setOpenEditAppointmentTypeCombo(false);
+    setOpenEditTreatmentCombo(false);
+    setOpenEditConsultationCombo(false);
   };
 
   const handleDeleteAppointment = (appointmentId: number) => {
@@ -543,24 +790,427 @@ export default function PatientAppointments({
     setDeletingAppointmentId(null);
   };
 
-  const handleSaveEdit = () => {
-    if (editingAppointment) {
-      editAppointmentMutation.mutate({
-        ...editingAppointment,
-        patientId: currentPatient?.id,
+  // Parse shift time to minutes (e.g., "09:30" -> 570)
+  const parseShiftTimeToMinutes = (time?: string): number => {
+    if (!time) return 0;
+    const cleaned = time.split(".")[0];
+    const parts = cleaned.split(":").map((part) => parseInt(part, 10));
+    if (parts.length < 2 || parts.some((num) => Number.isNaN(num))) return 0;
+    const [hours, minutes] = parts;
+    return hours * 60 + minutes;
+  };
+
+  // Get provider shift bounds for a given date (custom shifts first, then default shifts)
+  // Checks by role name and provider ID
+  const getProviderShiftBounds = (
+    providerId: number | string, 
+    date: Date,
+    roleName?: string
+  ): { start: number; end: number } | null => {
+    if (!providerId) return null;
+    const selectedDateStr = format(date, "yyyy-MM-dd");
+
+    // TIER 1: Check for custom shifts for this date and provider
+    if (shiftsData && Array.isArray(shiftsData)) {
+      const customShift = shiftsData.find((shift: any) => {
+        if (shift.staffId?.toString() !== providerId.toString()) return false;
+        const shiftDateStr =
+          shift.date instanceof Date ? format(shift.date, "yyyy-MM-dd") : shift.date?.substring(0, 10);
+        return shiftDateStr === selectedDateStr;
       });
+      
+      if (customShift) {
+        let endMinutes = parseShiftTimeToMinutes(customShift.endTime);
+        // Handle midnight - if end time is 00:00, treat as 1440 (end of day)
+        // Also handle 23:59 as effectively midnight (1440) to allow last 15-min slot
+        const endTimeStr = customShift.endTime?.toString().toLowerCase() || '';
+        if (endMinutes === 0 && (endTimeStr.includes('00:00') || endTimeStr.includes('24:00'))) {
+          endMinutes = 1440;
+        } else if (endMinutes === 1439) { // 23:59 - treat as midnight to allow 11:45 PM slot
+          endMinutes = 1440;
+        }
+        console.log('[SHIFT-VALIDATION] Using custom shift:', {
+          providerId,
+          roleName,
+          date: selectedDateStr,
+          startTime: customShift.startTime,
+          endTime: customShift.endTime,
+          startMinutes: parseShiftTimeToMinutes(customShift.startTime),
+          endMinutes
+        });
+        return {
+          start: parseShiftTimeToMinutes(customShift.startTime),
+          end: endMinutes,
+        };
+      }
+    }
+
+    // TIER 2: If no custom shifts, fall back to default shifts from doctor_default_shifts
+    // Filter by role name if provided
+    if (defaultShiftsData && defaultShiftsData.length > 0) {
+      const defaultShift = defaultShiftsData.find((ds: any) => {
+        // Match by provider ID
+        if (ds.userId?.toString() !== providerId.toString()) return false;
+        // If role name is provided, also check role match
+        if (roleName && ds.roleName) {
+          return ds.roleName.toLowerCase() === roleName.toLowerCase();
+        }
+        return true;
+      });
+      
+      if (defaultShift) {
+        const dayName = format(date, "EEEE");
+        if ((defaultShift.workingDays || []).includes(dayName)) {
+          let endMinutes = parseShiftTimeToMinutes(defaultShift.endTime || "23:59");
+          // Handle midnight - if end time is 00:00, treat as 1440 (end of day)
+          // Also handle 23:59 as effectively midnight (1440) to allow last 15-min slot
+          const endTimeStr = (defaultShift.endTime || '23:59').toString().toLowerCase();
+          if (endMinutes === 0 && (endTimeStr.includes('00:00') || endTimeStr.includes('24:00'))) {
+            endMinutes = 1440;
+          } else if (endMinutes === 1439) { // 23:59 - treat as midnight to allow 11:45 PM slot
+            endMinutes = 1440;
+          }
+          console.log('[SHIFT-VALIDATION] Using default shift:', {
+            providerId,
+            roleName,
+            date: selectedDateStr,
+            dayName,
+            startTime: defaultShift.startTime,
+            endTime: defaultShift.endTime,
+            startMinutes: parseShiftTimeToMinutes(defaultShift.startTime || '00:00'),
+            endMinutes
+          });
+          return {
+            start: parseShiftTimeToMinutes(defaultShift.startTime || '00:00'),
+            end: endMinutes,
+          };
+        }
+      }
+    }
+
+    console.log('[SHIFT-VALIDATION] No shift found for provider:', providerId, 'role:', roleName, 'on date:', selectedDateStr);
+    return null; // No shift found
+  };
+
+  // Check if sufficient consecutive time slots are available for the selected duration
+  // This version accepts bookedSlots as a parameter for validation and checks shift boundaries
+  const checkConsecutiveSlotsAvailableWithSlots = (
+    date: Date, 
+    startTime: Date, 
+    duration: number,
+    originalScheduledAt: Date | null,
+    originalDuration: number,
+    bookedSlots: string[],
+    providerId: number | string | null,
+    roleName?: string
+  ): { available: boolean; availableMinutes: number } => {
+    if (!date || !startTime || !duration) {
+      console.log('[TIME-VALIDATION] Missing required parameters:', { date, startTime, duration });
+      return { available: true, availableMinutes: duration };
+    }
+    
+    // Get shift bounds for the provider (checks custom shifts first, then default shifts by role)
+    const shiftBounds = providerId ? getProviderShiftBounds(providerId, date, roleName) : null;
+    
+    // Calculate how many 15-minute slots we need
+    const slotsNeeded = Math.ceil(duration / 15);
+    
+    // Get the start time in minutes (24-hour format)
+    const startHour24 = startTime.getHours();
+    const startMinutes = startTime.getMinutes();
+    const startTotalMinutes = startHour24 * 60 + startMinutes;
+    const endTotalMinutes = startTotalMinutes + duration;
+    
+    console.log('[TIME-VALIDATION] ========== VALIDATION DETAILS ==========');
+    console.log('[TIME-VALIDATION] Time calculations:', {
+      duration,
+      slotsNeeded,
+      startTime: `${startHour24}:${startMinutes.toString().padStart(2, '0')}`,
+      startTotalMinutes,
+      endTotalMinutes,
+      bookedSlots: bookedSlots.length,
+      bookedSlotsList: bookedSlots.slice(0, 10), // Show first 10 for debugging
+      originalScheduledAt: originalScheduledAt ? `${originalScheduledAt.getHours()}:${originalScheduledAt.getMinutes().toString().padStart(2, '0')}` : null,
+      shiftBounds: shiftBounds ? { 
+        start: shiftBounds.start, 
+        startTime: `${Math.floor(shiftBounds.start / 60)}:${(shiftBounds.start % 60).toString().padStart(2, '0')}`,
+        end: shiftBounds.end,
+        endTime: `${Math.floor(shiftBounds.end / 60)}:${(shiftBounds.end % 60).toString().padStart(2, '0')}`
+      } : null,
+      providerId,
+      roleName
+    });
+    
+    // Check if the appointment fits within shift boundaries
+    if (shiftBounds) {
+      // Check if start time is within shift
+      if (startTotalMinutes < shiftBounds.start) {
+        console.log('[TIME-VALIDATION] Start time is before shift start');
+        return { 
+          available: false, 
+          availableMinutes: Math.max(0, shiftBounds.start - startTotalMinutes) 
+        };
+      }
+      
+      // Check if end time is within shift
+      if (endTotalMinutes > shiftBounds.end) {
+        const availableMinutes = Math.max(0, shiftBounds.end - startTotalMinutes);
+        console.log('[TIME-VALIDATION] End time exceeds shift end', {
+          endTotalMinutes,
+          shiftEnd: shiftBounds.end,
+          availableMinutes
+        });
+        return { 
+          available: false, 
+          availableMinutes: availableMinutes 
+        };
+      }
+    }
+    
+    // Get original appointment's time slots (to exclude from check)
+    const originalSlotsSet = new Set<string>();
+    if (originalScheduledAt) {
+      const originalHour24 = originalScheduledAt.getHours();
+      const originalMinutes = originalScheduledAt.getMinutes();
+      const originalStartMinutes = originalHour24 * 60 + originalMinutes;
+      const originalSlotsNeeded = Math.ceil(originalDuration / 15);
+      
+      for (let i = 0; i < originalSlotsNeeded; i++) {
+        const slotMinutes = originalStartMinutes + (i * 15);
+        const slotHour = Math.floor(slotMinutes / 60);
+        const slotMinute = slotMinutes % 60;
+        
+        // Convert to 12-hour format
+        let displayHour = slotHour % 12;
+        if (displayHour === 0) displayHour = 12;
+        const slotPeriod = slotHour >= 12 ? 'PM' : 'AM';
+        const slotTimeString = `${displayHour}:${slotMinute.toString().padStart(2, '0')} ${slotPeriod}`;
+        originalSlotsSet.add(slotTimeString);
+      }
+    }
+    
+    // Check each consecutive 15-minute slot
+    let availableSlots = 0;
+    let firstUnavailableReason = '';
+    
+    for (let i = 0; i < slotsNeeded; i++) {
+      const slotMinutes = startTotalMinutes + (i * 15);
+      const slotHour = Math.floor(slotMinutes / 60);
+      const slotMinute = slotMinutes % 60;
+      const slotEndMinutes = slotMinutes + 15; // Each slot is 15 minutes
+      
+      // Check if this slot is within shift boundaries
+      if (shiftBounds) {
+        if (slotMinutes < shiftBounds.start) {
+          console.log('[TIME-VALIDATION] Slot before shift start:', {
+            slotMinutes,
+            shiftStart: shiftBounds.start
+          });
+          firstUnavailableReason = 'shift_start';
+          break; // Stop at first slot before shift start
+        }
+        
+        // Allow slot if it ends exactly at or before shift end time
+        // If shift ends at 5:00 PM (1020 min), 4:45 PM (1005 min) + 15 = 1020 min is allowed
+        if (slotEndMinutes > shiftBounds.end) {
+          console.log('[TIME-VALIDATION] Slot exceeds shift end:', {
+            slotMinutes,
+            slotEndMinutes,
+            shiftEnd: shiftBounds.end,
+            availableSlots: i
+          });
+          // Calculate how many minutes are available until shift end
+          // availableSlots already contains the count of slots before this one
+          firstUnavailableReason = 'shift_end';
+          break; // Stop at first slot that exceeds shift end
+        }
+      }
+      
+      // Convert to 12-hour format for checking against bookedTimeSlots
+      let displayHour = slotHour % 12;
+      if (displayHour === 0) displayHour = 12;
+      const slotPeriod = slotHour >= 12 ? 'PM' : 'AM';
+      const slotTimeString = `${displayHour}:${slotMinute.toString().padStart(2, '0')} ${slotPeriod}`;
+      
+      // Check if this slot is booked (excluding the current appointment's original time)
+      const isOriginalSlot = originalSlotsSet.has(slotTimeString);
+      const isBooked = bookedSlots.includes(slotTimeString);
+      
+      if (!isBooked || isOriginalSlot) {
+        // Slot is available (either not booked, or it's the original appointment's slot)
+        availableSlots++;
+      } else {
+        // Slot is booked by another appointment
+        console.log('[TIME-VALIDATION] Slot unavailable (booked):', slotTimeString, { isBooked, isOriginalSlot });
+        firstUnavailableReason = 'booked';
+        break; // Stop at first unavailable slot
+      }
+    }
+    
+    // Calculate available minutes
+    let availableMinutes = availableSlots * 15;
+    
+    // If we hit shift end boundary, calculate exact minutes available
+    if (firstUnavailableReason === 'shift_end' && shiftBounds) {
+      // Calculate how many minutes from the start time until shift end
+      const minutesUntilShiftEnd = Math.max(0, shiftBounds.end - startTotalMinutes);
+      // Round down to nearest 15-minute increment (since we work with 15-minute slots)
+      availableMinutes = Math.floor(minutesUntilShiftEnd / 15) * 15;
+      console.log('[TIME-VALIDATION] Shift end calculation:', {
+        startTotalMinutes,
+        shiftEnd: shiftBounds.end,
+        minutesUntilShiftEnd,
+        availableMinutes
+      });
+    }
+    
+    // Ensure availableMinutes is at least 0
+    availableMinutes = Math.max(0, availableMinutes);
+    
+    const isAvailable = availableSlots === slotsNeeded;
+    
+    console.log('[TIME-VALIDATION] Result:', {
+      availableSlots,
+      slotsNeeded,
+      availableMinutes,
+      isAvailable,
+      firstUnavailableReason,
+      duration,
+      endTotalMinutes,
+      shiftBounds: shiftBounds ? { start: shiftBounds.start, end: shiftBounds.end } : null
+    });
+    
+    return {
+      available: isAvailable,
+      availableMinutes: availableMinutes,
+    };
+  };
+
+  const handleSaveEdit = async () => {
+    if (editingAppointment) {
+      console.log('[SAVE-EDIT] Starting validation...', {
+        scheduledAt: editingAppointment.scheduledAt,
+        duration: editingAppointment.duration
+      });
+      
+      // Ensure we have the latest booked slots for the selected date
+      const selectedDate = new Date(editingAppointment.scheduledAt);
+      const latestBookedSlots = await fetchAppointmentsForDate(selectedDate);
+      
+      // Validate sufficient time availability before saving
+      const duration = editingAppointment.duration || 30;
+      const selectedTime = new Date(editingAppointment.scheduledAt);
+      
+      // Get original appointment time (to exclude from validation)
+      const originalScheduledAt = (editingAppointment as any)._originalScheduledAtDate as Date | null;
+      const originalDuration = editingAppointment.duration || 30;
+      
+      // Get provider ID and role for shift validation
+      const providerId = editingAppointment.providerId || editingAppointment.provider_id;
+      const provider = providerId ? getProviderWithRole(providerId) : null;
+      const roleName = provider?.role;
+      
+      console.log('[SAVE-EDIT] Provider info:', { providerId, roleName, provider });
+      
+      // Use the latest booked slots for validation
+      const tempBookedSlots = latestBookedSlots;
+      
+      // Check if there are enough consecutive slots available
+      // This checks both booked slots and shift boundaries
+      const timeCheck = checkConsecutiveSlotsAvailableWithSlots(
+        selectedDate, 
+        selectedTime, 
+        duration,
+        originalScheduledAt,
+        originalDuration,
+        tempBookedSlots,
+        providerId,
+        roleName
+      );
+      
+      console.log('[SAVE-EDIT] Time validation result:', timeCheck);
+      
+      if (!timeCheck.available) {
+        // Format the selected time for the error message
+        const timeString = formatTime(selectedTime);
+        const errorMessage = `Only ${timeCheck.availableMinutes} minutes are available at ${timeString}. Please select another time slot.`;
+        
+        console.log('[SAVE-EDIT] Insufficient time - showing error:', errorMessage);
+        
+        setInsufficientTimeMessage(errorMessage);
+        setShowInsufficientTimeModal(true);
+        return; // Don't save if insufficient time
+      }
+      
+      console.log('[SAVE-EDIT] Time validation passed, proceeding with save...');
+      
+      const normalizedAppointmentType = editAppointmentType || editingAppointment.appointmentType || "consultation";
+      const treatmentId = normalizedAppointmentType === "treatment" ? (editSelectedTreatment?.id || editingAppointment.treatmentId || null) : null;
+      const consultationId = normalizedAppointmentType === "consultation" ? (editSelectedConsultation?.id || editingAppointment.consultationId || null) : null;
+      
+      // Format scheduledAt properly - use local time without timezone conversion
+      let scheduledAt = editingAppointment.scheduledAt;
+      if (scheduledAt instanceof Date) {
+        // Format as local ISO string (YYYY-MM-DDTHH:mm:ss) without timezone conversion
+        scheduledAt = formatLocalISOString(scheduledAt);
+      } else if (typeof scheduledAt === 'string') {
+        // If it's already a string, parse it and format as local time
+        const date = new Date(scheduledAt);
+        if (!isNaN(date.getTime())) {
+          scheduledAt = formatLocalISOString(date);
+        }
+      }
+      
+      // Ensure all required fields are present
+      const updateData: any = {
+        id: editingAppointment.id,
+      };
+      
+      // Only include fields that are being updated (not undefined)
+      if (editingAppointment.title !== undefined) updateData.title = editingAppointment.title;
+      if (editingAppointment.description !== undefined) updateData.description = editingAppointment.description;
+      // Always include scheduledAt (required for date/time updates)
+      if (scheduledAt) {
+        updateData.scheduledAt = scheduledAt;
+        console.log('[SAVE-EDIT] Including scheduledAt in update:', {
+          original: editingAppointment.scheduledAt,
+          formatted: scheduledAt,
+          date: new Date(scheduledAt)
+        });
+      }
+      if (editingAppointment.duration !== undefined) updateData.duration = editingAppointment.duration || 30;
+      if (editingAppointment.status !== undefined) updateData.status = editingAppointment.status;
+      if (editingAppointment.type !== undefined) updateData.type = editingAppointment.type;
+      if (normalizedAppointmentType) updateData.appointmentType = normalizedAppointmentType;
+      // Always include treatmentId and consultationId (can be null to clear)
+      updateData.treatmentId = treatmentId;
+      updateData.consultationId = consultationId;
+      if (editingAppointment.location !== undefined) updateData.location = editingAppointment.location;
+      if (editingAppointment.isVirtual !== undefined) updateData.isVirtual = editingAppointment.isVirtual || false;
+      
+      console.log('[PATIENT-APPOINTMENTS] Saving appointment update:', updateData);
+      editAppointmentMutation.mutate(updateData);
     }
   };
 
-  const formatTime = (timeString: string) => {
+  // Helper function to format date as local ISO string (without timezone conversion)
+  const formatLocalISOString = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  };
+
+  const formatTime = (timeString: string | Date) => {
     try {
-      // FIXED: Extract time directly from database string without timezone conversion
-      // Database format: "2025-09-27T09:00:00.000Z"
-      // Extract "09:00" and convert to readable format
-      const timeOnly = timeString.split('T')[1]?.substring(0, 5); // Extract "09:00"
-      if (!timeOnly) return "Invalid time";
-      
-      const [hours, minutes] = timeOnly.split(':').map(Number);
+      // Handle both string and Date object
+      const date = timeString instanceof Date ? timeString : new Date(timeString);
+      // Use local time from Date object to avoid timezone conversion issues
+      const hours = date.getHours();
+      const minutes = date.getMinutes();
       const period = hours >= 12 ? 'PM' : 'AM';
       const displayHours = hours % 12 || 12;
       
@@ -570,9 +1220,11 @@ export default function PatientAppointments({
     }
   };
 
-  const formatDate = (timeString: string) => {
+  const formatDate = (timeString: string | Date) => {
     try {
-      const date = new Date(timeString);
+      // Handle both string and Date object
+      const date = timeString instanceof Date ? timeString : new Date(timeString);
+      // Use date-fns format which respects the Date object's local time
       return format(date, "EEEE, MMMM d, yyyy");
     } catch {
       return "Invalid date";
@@ -764,8 +1416,8 @@ export default function PatientAppointments({
       <Card>
         <CardContent className="p-6">
           <div className="animate-pulse space-y-4">
-            <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-            <div className="h-64 bg-gray-200 rounded"></div>
+            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
+            <div className="h-64 bg-gray-200 dark:bg-gray-700 rounded"></div>
           </div>
         </CardContent>
       </Card>
@@ -778,10 +1430,10 @@ export default function PatientAppointments({
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <div>
-            <h2 className="text-2xl font-bold text-blue-800">
+            <h2 className="text-2xl font-bold text-blue-800 dark:text-blue-300">
               My Appointments
             </h2>
-            <p className="text-gray-600">
+            <p className="text-gray-600 dark:text-gray-300">
               {user?.firstName} {user?.lastName}
             </p>
           </div>
@@ -811,9 +1463,9 @@ export default function PatientAppointments({
 
       {/* Next Appointment Card */}
       {nextAppointment && (
-        <Card className="border-blue-200 bg-blue-50">
+        <Card className="border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg text-blue-800">
+            <CardTitle className="text-lg text-blue-800 dark:text-blue-300">
               Next Appointment
             </CardTitle>
           </CardHeader>
@@ -821,8 +1473,8 @@ export default function PatientAppointments({
             <div className="flex items-center justify-between">
               <div className="space-y-2">
                 <div className="flex items-center space-x-2">
-                  <Clock className="h-5 w-5 text-blue-600" />
-                  <span className="font-medium text-lg">
+                  <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <span className="font-medium text-lg text-gray-900 dark:text-gray-100">
                     {formatDate(nextAppointment.scheduledAt)} at{" "}
                     {formatTime(nextAppointment.scheduledAt)}
                   </span>
@@ -831,8 +1483,8 @@ export default function PatientAppointments({
                 {getDoctorSpecialtyData(nextAppointment.providerId)
                   .subSpecialty && (
                   <div className="flex items-center space-x-2">
-                    <FileText className="h-5 w-5 text-blue-600" />
-                    <span>
+                    <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <span className="text-gray-700 dark:text-gray-300">
                       {
                         getDoctorSpecialtyData(nextAppointment.providerId)
                           .subSpecialty
@@ -841,19 +1493,19 @@ export default function PatientAppointments({
                   </div>
                 )}
                 <div className="flex items-center space-x-2">
-                  <FileText className="h-5 w-5 text-blue-600" />
-                  <span>{formatAppointmentTitle(nextAppointment)}</span>
+                  <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <span className="text-gray-700 dark:text-gray-300">{formatAppointmentTitle(nextAppointment)}</span>
                 </div>
                 {nextAppointment.location && (
                   <div className="flex items-center space-x-2">
-                    <MapPin className="h-5 w-5 text-blue-600" />
-                    <span>{nextAppointment.location}</span>
+                    <MapPin className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <span className="text-gray-700 dark:text-gray-300">{nextAppointment.location}</span>
                   </div>
                 )}
                 {nextAppointment.isVirtual && (
                   <div className="flex items-center space-x-2">
-                    <Video className="h-5 w-5 text-blue-600" />
-                    <span>Virtual Appointment</span>
+                    <Video className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <span className="text-gray-700 dark:text-gray-300">Virtual Appointment</span>
                   </div>
                 )}
               </div>
@@ -912,13 +1564,13 @@ export default function PatientAppointments({
 
         {/* Additional patient-specific filters */}
         {user?.role === "patient" && showAdvancedFilters && (
-          <Card className="border-blue-200 bg-blue-50/30">
+          <Card className="border-blue-200 dark:border-blue-700 bg-blue-50/30 dark:bg-gray-800">
             <CardContent className="pt-6">
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
                   {/* Role Filter */}
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">Select Role</Label>
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Select Role</Label>
                     <Select value={roleFilter} onValueChange={(value) => {
                       setRoleFilter(value);
                       setProviderFilter("");
@@ -944,7 +1596,7 @@ export default function PatientAppointments({
 
                   {/* Provider Name Filter */}
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Provider Name
                     </Label>
                     <Select 
@@ -976,14 +1628,14 @@ export default function PatientAppointments({
 
                   {/* Date Filter */}
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Date
                     </Label>
                     <input
                       type="date"
                       value={dateTimeFilter}
                       onChange={(e) => setDateTimeFilter(e.target.value)}
-                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 [&::-webkit-calendar-picker-indicator]:dark:invert [&::-webkit-calendar-picker-indicator]:dark:brightness-0 [&::-webkit-calendar-picker-indicator]:dark:contrast-100"
                       data-testid="input-filter-datetime"
                     />
                   </div>
@@ -1015,12 +1667,12 @@ export default function PatientAppointments({
         {filteredAppointments.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
-              <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <h3 className="text-lg font-medium text-gray-500 mb-2">
+              <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+              <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400 mb-2">
                 No {selectedFilter !== "all" ? selectedFilter : ""} appointments
                 found
               </h3>
-              <p className="text-gray-400">
+              <p className="text-gray-400 dark:text-gray-500">
                 {selectedFilter === "upcoming"
                   ? "You don't have any upcoming appointments scheduled."
                   : selectedFilter === "past"
@@ -1039,7 +1691,7 @@ export default function PatientAppointments({
             return (
               <Card
                 key={appointment.id}
-                className={`border-l-4 ${isUpcoming ? "bg-white" : "bg-gray-50"}`}
+                className={`border-l-4 ${isUpcoming ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-800/50"}`}
                 style={{
                   borderLeftColor:
                     statusColors[
@@ -1053,7 +1705,7 @@ export default function PatientAppointments({
                     <div className="mb-3">
                       <Badge 
                         variant="outline" 
-                        className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-medium"
+                        className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 text-xs font-medium"
                       >
                         {appointment.appointmentId}
                       </Badge>
@@ -1062,7 +1714,7 @@ export default function PatientAppointments({
               <div className="flex items-center justify-between">
                     <div className="space-y-3 flex-1">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                           {formatAppointmentTitle(appointment)}
                         </h3>
                         <div className="flex items-center space-x-2">
@@ -1074,7 +1726,7 @@ export default function PatientAppointments({
                               className="h-8 w-8 p-0"
                               data-testid={`button-edit-appointment-${appointment.id}`}
                             >
-                              <Edit className="h-4 w-4 text-blue-600" />
+                              <Edit className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                             </Button>
                           )}
                           {/* Cancel Appointment button for patient users */}
@@ -1083,7 +1735,7 @@ export default function PatientAppointments({
                               variant="outline"
                               size="sm"
                               onClick={() => handleCancelAppointment(appointment.id)}
-                              className="border-red-500 text-red-500 hover:bg-red-50 text-xs"
+                              className="border-red-500 dark:border-red-600 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs"
                               data-testid={`button-cancel-appointment-${appointment.id}`}
                               title="Cancel Appointment"
                             >
@@ -1100,7 +1752,7 @@ export default function PatientAppointments({
                               className="h-8 w-8 p-0"
                               data-testid={`button-delete-appointment-${appointment.id}`}
                             >
-                              <Trash2 className="h-4 w-4 text-red-600" />
+                              <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
                             </Button>
                           )}
                           <Badge
@@ -1119,20 +1771,20 @@ export default function PatientAppointments({
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="flex items-center space-x-2">
-                          <Clock className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm">
+                          <Clock className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
                             {formatDate(appointment.scheduledAt)}
                           </span>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Clock className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm font-medium">
+                          <Clock className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                             {formatTime(appointment.scheduledAt)}
                           </span>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <User className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm">
+                          <User className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
                             {currentPatient
                               ? `${currentPatient.firstName} ${currentPatient.lastName}`
                               : "Patient"}
@@ -1141,8 +1793,8 @@ export default function PatientAppointments({
                         {getDoctorSpecialtyData(appointment.providerId)
                           .name && (
                           <div className="flex items-center space-x-2">
-                            <User className="h-4 w-4 text-gray-400" />
-                            <span className="text-sm">
+                            <User className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">
                               {
                                 getDoctorSpecialtyData(appointment.providerId)
                                   .name
@@ -1153,8 +1805,8 @@ export default function PatientAppointments({
                         {user?.role === 'patient' && getDoctorSpecialtyData(appointment.providerId)
                           .category && (
                           <div className="flex items-center space-x-2">
-                            <FileText className="h-4 w-4 text-gray-400" />
-                            <span className="text-sm">
+                            <FileText className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">
                               {
                                 getDoctorSpecialtyData(appointment.providerId)
                                   .category
@@ -1165,8 +1817,8 @@ export default function PatientAppointments({
                         {user?.role === 'patient' && getDoctorSpecialtyData(appointment.providerId)
                           .subSpecialty && (
                           <div className="flex items-center space-x-2">
-                            <FileText className="h-4 w-4 text-gray-400" />
-                            <span className="text-sm">
+                            <FileText className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">
                               {
                                 getDoctorSpecialtyData(appointment.providerId)
                                   .subSpecialty
@@ -1178,8 +1830,8 @@ export default function PatientAppointments({
 
                       {appointment.location && (
                         <div className="flex items-center space-x-2">
-                          <MapPin className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm">
+                          <MapPin className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
                             {appointment.location}
                           </span>
                         </div>
@@ -1187,15 +1839,15 @@ export default function PatientAppointments({
 
                       {appointment.isVirtual && (
                         <div className="flex items-center space-x-2">
-                          <Video className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm text-blue-600">
+                          <Video className="h-4 w-4 text-blue-500 dark:text-blue-400" />
+                          <span className="text-sm text-blue-600 dark:text-blue-400">
                             Virtual Appointment
                           </span>
                         </div>
                       )}
 
                       {appointment.description && (
-                        <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
+                        <p className="text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700/50 p-3 rounded">
                           {appointment.description}
                         </p>
                       )}
@@ -1204,14 +1856,14 @@ export default function PatientAppointments({
                         <>
                           <div className="flex items-center space-x-2 mt-2">
                             <span
-                              className="inline-flex h-2 w-2 rounded-full border border-gray-300"
+                              className="inline-flex h-2 w-2 rounded-full border border-gray-300 dark:border-gray-600"
                               style={{ backgroundColor: serviceInfo.color }}
                             />
-                            <span className="text-sm font-medium">
+                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               Service: {serviceInfo.name}
                             </span>
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
                             Appointment Type:{" "}
                             {(serviceInfo.type || "consultation")
                               .toString()
@@ -1222,7 +1874,7 @@ export default function PatientAppointments({
                       )}
 
                       {appointment.createdBy && getCreatorName(appointment.createdBy) && (
-                        <div className="flex items-center space-x-2 text-xs text-gray-500 pt-2 border-t">
+                        <div className="flex items-center space-x-2 text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
                           <User className="h-3 w-3" />
                           <span>
                             Booked by: {getCreatorName(appointment.createdBy)}
@@ -1240,37 +1892,111 @@ export default function PatientAppointments({
 
       {/* Edit Appointment Modal */}
       {editingAppointment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto overflow-x-hidden">
-            <div className="p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col my-auto">
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0">
               <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                     Edit Appointment
                   </h2>
-                  <p className="text-sm text-gray-500">
+                    {/* Appointment ID - Badge - After Edit Appointment text */}
+                    {editingAppointment?.appointmentId || editingAppointment?.appointment_id || editingAppointment?.id ? (
+                      <Badge 
+                        variant="outline" 
+                        className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 text-xs font-medium"
+                      >
+                        {editingAppointment.appointmentId || editingAppointment.appointment_id || editingAppointment.id}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
                     Update appointment details for {user?.firstName}{" "}
                     {user?.lastName}
                   </p>
+                  
+                  {/* Appointment Information */}
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 mt-2 sm:mt-3">
+                    {/* Appointment Date & Time - First */}
+                    {editingAppointment?.scheduledAt && (
+                      <div className="text-sm text-gray-600 dark:text-gray-300">
+                        <p className="text-[0.7rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Appointment Date & Time
+                        </p>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {(() => {
+                            // Use the exact same logic as the appointment card
+                            // The appointment card uses formatDate(appointment.scheduledAt) and formatTime(appointment.scheduledAt)
+                            // So we should use the same scheduledAt value directly, not convert it
+                            
+                            // First, try to get the original appointment from appointmentsData to match the card exactly
+                            let scheduledAtToUse = editingAppointment.scheduledAt;
+                            if (appointmentsData && Array.isArray(appointmentsData)) {
+                              const originalAppointment = appointmentsData.find((apt: any) => apt.id === editingAppointment.id);
+                              if (originalAppointment && originalAppointment.scheduledAt) {
+                                // Use the exact same scheduledAt as the appointment card uses
+                                scheduledAtToUse = originalAppointment.scheduledAt;
+                              }
+                            }
+                            
+                            // Use formatDate and formatTime exactly as the appointment card does
+                            // This ensures the time matches: "4:30 PM" in card = "4:30 PM" in popup
+                            return `${formatDate(scheduledAtToUse)} at ${formatTime(scheduledAtToUse)}`;
+                          })()}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* Provider Information */}
+                    {editingAppointment?.providerId && getProviderWithRole(editingAppointment.providerId) && (
+                      <div className="flex flex-wrap gap-6 text-sm text-gray-600 dark:text-gray-300">
+                        <div>
+                          <p className="text-[0.7rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            Role
+                          </p>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {getProviderWithRole(editingAppointment.providerId)?.role ? 
+                              getProviderWithRole(editingAppointment.providerId)!.role.charAt(0).toUpperCase() + 
+                              getProviderWithRole(editingAppointment.providerId)!.role.slice(1) : 
+                              "Not set"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[0.7rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            Provider
+                          </p>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {getProviderWithRole(editingAppointment.providerId)?.displayName || "Unknown"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setEditingAppointment(null)}
-                  className="hover:bg-gray-100"
+                  onClick={() => {
+                    setEditingAppointment(null);
+                    setEditAppointmentType("");
+                    setEditSelectedTreatment(null);
+                    setEditSelectedConsultation(null);
+                  }}
+                  className="hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
 
-              <div className="space-y-6">
-                {/* Basic Information */}
-                <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-4 sm:space-y-6">
+                {/* ROW 1: Title and Duration */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   {/* Title */}
                   <div>
                     <Label
                       htmlFor="title"
-                      className="text-sm font-medium text-gray-700"
+                      className="text-sm font-medium text-gray-700 dark:text-gray-300"
                     >
                       Title
                     </Label>
@@ -1284,49 +2010,300 @@ export default function PatientAppointments({
                           title: e.target.value,
                         })
                       }
-                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                       placeholder="Enter appointment title"
                     />
                   </div>
 
-                  {/* Type */}
+                  {/* Duration */}
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">
-                      Type
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Duration (minutes)
                     </Label>
                     <Select
-                      value={editingAppointment.type || "consultation"}
+                      value={(editingAppointment.duration || 30).toString()}
                       onValueChange={(value) =>
                         setEditingAppointment({
                           ...editingAppointment,
-                          type: value,
+                          duration: parseInt(value),
                         })
                       }
                     >
                       <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select type" />
+                        <SelectValue placeholder="Select duration" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="consultation">
-                          Consultation
-                        </SelectItem>
-                        <SelectItem value="checkup">Checkup</SelectItem>
-                        <SelectItem value="follow-up">Follow-up</SelectItem>
-                        <SelectItem value="screening">Screening</SelectItem>
-                        <SelectItem value="procedure">Procedure</SelectItem>
+                        <SelectItem value="15">15 minutes</SelectItem>
+                        <SelectItem value="30">30 minutes</SelectItem>
+                        <SelectItem value="60">60 minutes (1 hour)</SelectItem>
+                        <SelectItem value="90">90 minutes (1.5 hours)</SelectItem>
+                        <SelectItem value="120">120 minutes (2 hours)</SelectItem>
+                        <SelectItem value="180">180 minutes (3 hours)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
 
-                {/* Date and Time Selection - Full Width Single Row */}
-                <div className="grid grid-cols-2 gap-6">
+                {/* ROW 2: Status and Description */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  {/* Status */}
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Status
+                    </Label>
+                    <Select
+                      value={editingAppointment.status || "scheduled"}
+                      onValueChange={(value) =>
+                        setEditingAppointment({
+                          ...editingAppointment,
+                          status: value,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="scheduled">Scheduled</SelectItem>
+                        <SelectItem value="confirmed">Confirmed</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <Label
+                      htmlFor="description"
+                      className="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      Description
+                    </Label>
+                    <textarea
+                      id="description"
+                      value={editingAppointment.description || ""}
+                      onChange={(e) =>
+                        setEditingAppointment({
+                          ...editingAppointment,
+                          description: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      rows={3}
+                      placeholder="e.g. wheelchair, assistance, special needs"
+                    />
+                  </div>
+                </div>
+
+                {/* ROW 3: Appointment Type and Select Treatment */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  {/* Appointment Type */}
+                  <div>
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Appointment Type
+                    </Label>
+                    <Popover open={openEditAppointmentTypeCombo} onOpenChange={setOpenEditAppointmentTypeCombo}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={openEditAppointmentTypeCombo}
+                          className="w-full justify-between mt-1"
+                        >
+                          {editAppointmentType ? editAppointmentType.charAt(0).toUpperCase() + editAppointmentType.slice(1) : "Select appointment type"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search appointment type..." />
+                          <CommandList>
+                            <CommandEmpty>No type found.</CommandEmpty>
+                            <CommandGroup>
+                              {["consultation", "treatment"].map((type) => (
+                                <CommandItem
+                                  key={type}
+                                  value={type}
+                                  onSelect={(currentValue) => {
+                                    const normalized = currentValue as "consultation" | "treatment";
+                                    setEditAppointmentType(normalized);
+                                    setEditSelectedTreatment(null);
+                                    setEditSelectedConsultation(null);
+                                    setOpenEditAppointmentTypeCombo(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={`mr-2 h-4 w-4 ${
+                                      editAppointmentType === type ? "opacity-100" : "opacity-0"
+                                    }`}
+                                  />
+                                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* Select Treatment or Consultation based on Appointment Type */}
+                  {editAppointmentType === "treatment" && (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Select Treatment
+                      </Label>
+                      <Popover open={openEditTreatmentCombo} onOpenChange={setOpenEditTreatmentCombo}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={openEditTreatmentCombo}
+                            className="w-full justify-between mt-1"
+                          >
+                            {editSelectedTreatment ? editSelectedTreatment.name : "Select a treatment"}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-full p-0" align="start">
+                          <Command>
+                            <CommandInput placeholder="Search treatments..." />
+                            <CommandList>
+                              {treatmentsList.length === 0 ? (
+                                <CommandItem disabled>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Loading treatments...
+                                </CommandItem>
+                              ) : (
+                                <>
+                                  <CommandEmpty>No treatments found.</CommandEmpty>
+                                  <CommandGroup>
+                                    {treatmentsList.map((treatment: any) => (
+                                      <CommandItem
+                                        key={treatment.id}
+                                        value={treatment.id.toString()}
+                                        onSelect={() => {
+                                          setEditSelectedTreatment(treatment);
+                                          setOpenEditTreatmentCombo(false);
+                                        }}
+                                      >
+                                        <div className="flex items-center gap-2 w-full">
+                                          <span
+                                            className="inline-flex h-3 w-3 rounded-full border border-gray-300"
+                                            style={{ backgroundColor: treatment.colorCode || "#D1D5DB" }}
+                                          />
+                                          <span className="flex-1 text-left">{treatment.name}</span>
+                                          {treatment.basePrice && (
+                                            <span className="text-xs text-gray-500">
+                                              {treatment.currency || "£"} {treatment.basePrice}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {editSelectedTreatment && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 px-0 text-blue-600 dark:text-blue-400"
+                          onClick={() => setEditSelectedTreatment(null)}
+                        >
+                          Clear selection
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {editAppointmentType === "consultation" && (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Select Consultation
+                      </Label>
+                      <Popover open={openEditConsultationCombo} onOpenChange={setOpenEditConsultationCombo}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={openEditConsultationCombo}
+                            className="w-full justify-between mt-1"
+                          >
+                            {editSelectedConsultation ? editSelectedConsultation.serviceName : "Select a consultation"}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-full p-0" align="start">
+                          <Command>
+                            <CommandInput placeholder="Search consultations..." />
+                            <CommandList>
+                              {consultationServices.length === 0 ? (
+                                <CommandItem disabled>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Loading consultations...
+                                </CommandItem>
+                              ) : (
+                                <>
+                                  <CommandEmpty>No consultations found.</CommandEmpty>
+                                  <CommandGroup>
+                                    {consultationServices.map((service: any) => (
+                                      <CommandItem
+                                        key={service.id}
+                                        value={service.id.toString()}
+                                        onSelect={() => {
+                                          setEditSelectedConsultation(service);
+                                          setOpenEditConsultationCombo(false);
+                                        }}
+                                      >
+                                        <div className="flex items-center gap-2 w-full">
+                                          <span
+                                            className="inline-flex h-3 w-3 rounded-full border border-gray-300"
+                                            style={{ backgroundColor: service.colorCode || "#6366F1" }}
+                                          />
+                                          <span className="flex-1 text-left">{service.serviceName}</span>
+                                          {service.fee && (
+                                            <span className="text-xs text-gray-500">
+                                              {service.currency || "£"} {service.fee}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {editSelectedConsultation && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 px-0 text-blue-600 dark:text-blue-400"
+                          onClick={() => setEditSelectedConsultation(null)}
+                        >
+                          Clear selection
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ROW 4: Select Date and Select Time Slot */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   {/* Select Date */}
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Date *
                     </Label>
-                    <div className="mt-1 p-4 border border-gray-300 rounded-md">
+                    <div className="mt-1 h-[280px] p-4 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 overflow-y-auto">
                       <div className="flex items-center justify-between mb-2">
                         <button
                           type="button"
@@ -1340,11 +2317,11 @@ export default function PatientAppointments({
                               scheduledAt: currentDate,
                             });
                           }}
-                          className="p-1 hover:bg-gray-100 rounded"
+                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
                         >
                           <ChevronLeft className="h-4 w-4" />
                         </button>
-                        <span className="font-medium">
+                        <span className="font-medium text-gray-900 dark:text-gray-100">
                           {format(
                             new Date(editingAppointment.scheduledAt),
                             "MMMM yyyy",
@@ -1362,7 +2339,7 @@ export default function PatientAppointments({
                               scheduledAt: currentDate,
                             });
                           }}
-                          className="p-1 hover:bg-gray-100 rounded"
+                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
                         >
                           <ChevronRight className="h-4 w-4" />
                         </button>
@@ -1372,7 +2349,7 @@ export default function PatientAppointments({
                           (day) => (
                             <div
                               key={day}
-                              className="p-2 text-center font-medium text-gray-500"
+                              className="p-2 text-center font-medium text-gray-500 dark:text-gray-400"
                             >
                               {day}
                             </div>
@@ -1412,13 +2389,16 @@ export default function PatientAppointments({
                               key={i}
                               type="button"
                               onClick={() => {
+                                // Preserve the current time when changing the date
+                                const currentDate = new Date(editingAppointment.scheduledAt);
                                 const newDate = new Date(
-                                  editingAppointment.scheduledAt,
-                                );
-                                newDate.setFullYear(
                                   cellDate.getFullYear(),
                                   cellDate.getMonth(),
                                   cellDate.getDate(),
+                                  currentDate.getHours(),
+                                  currentDate.getMinutes(),
+                                  currentDate.getSeconds(),
+                                  0
                                 );
                                 setEditingAppointment({
                                   ...editingAppointment,
@@ -1427,12 +2407,12 @@ export default function PatientAppointments({
                                 // Fetch appointments for the new date to update time slot availability
                                 fetchAppointmentsForDate(cellDate);
                               }}
-                              className={`p-2 text-sm rounded hover:bg-blue-50 ${
+                              className={`p-2 text-sm rounded hover:bg-blue-50 dark:hover:bg-blue-900 ${
                                 isSelected
                                   ? "bg-blue-500 text-white"
                                   : isCurrentMonth
-                                    ? "text-gray-900"
-                                    : "text-gray-400"
+                                    ? "text-gray-900 dark:text-gray-100"
+                                    : "text-gray-400 dark:text-gray-600"
                               }`}
                             >
                               {cellDate.getDate()}
@@ -1445,43 +2425,78 @@ export default function PatientAppointments({
 
                   {/* Select Time Slot */}
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Time Slot *
                     </Label>
-                    <div className="mt-1 max-h-64 overflow-y-auto border border-gray-300 rounded-md p-3">
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          "9:00 AM",
-                          "9:30 AM",
-                          "10:00 AM",
-                          "10:30 AM",
-                          "11:00 AM",
-                          "11:30 AM",
-                          "12:00 PM",
-                          "12:30 PM",
-                          "1:00 PM",
-                          "1:30 PM",
-                          "2:00 PM",
-                          "2:30 PM",
-                          "3:00 PM",
-                          "3:30 PM",
-                          "4:00 PM",
-                          "4:30 PM",
-                          "5:00 PM",
-                        ].map((timeSlot) => {
-                          const currentTime = format(
-                            new Date(editingAppointment.scheduledAt),
-                            "h:mm a",
-                          );
-                          const isSelected = timeSlot === currentTime;
-                          const isBooked = bookedTimeSlots.includes(timeSlot);
+                    <div className="mt-1 h-[280px] overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-3 bg-white dark:bg-gray-700 relative z-0">
+                      <div className="grid grid-cols-2 gap-2 relative z-0">
+                        {(() => {
+                          // Generate all 15-minute time slots from 9:00 AM to 5:00 PM
+                          const timeSlots: string[] = [];
+                          for (let hour = 9; hour <= 17; hour++) {
+                            for (let minute = 0; minute < 60; minute += 15) {
+                              if (hour === 17 && minute > 0) break; // Stop at 5:00 PM
+                              const period = hour >= 12 ? 'PM' : 'AM';
+                              const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                              const timeSlot = `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
+                              timeSlots.push(timeSlot);
+                            }
+                          }
+                          return timeSlots;
+                        })().map((timeSlot) => {
+                          // Get duration in minutes (default to 30 if not set)
+                          const duration = editingAppointment.duration || 30;
+                          
+                          // Convert time slot string to total minutes (slot start time)
+                          // Each displayed slot represents a 15-minute period starting at that time
+                          const [time, period] = timeSlot.split(" ");
+                          const [hours, minutes] = time.split(":").map(Number);
+                          let slotHour24 = hours;
+                          if (period === "PM" && hours !== 12) slotHour24 += 12;
+                          if (period === "AM" && hours === 12) slotHour24 = 0;
+                          const slotStartMinutes = slotHour24 * 60 + minutes;
+                          const slotEndMinutes = slotStartMinutes + 15; // Each displayed slot is 15 minutes
+                          
+                          // Get the selected appointment's time in minutes
+                          const selectedDate = new Date(editingAppointment.scheduledAt);
+                          const selectedHour24 = selectedDate.getHours();
+                          const selectedMinutes = selectedDate.getMinutes();
+                          const selectedStartMinutes = selectedHour24 * 60 + selectedMinutes;
+                          const selectedEndMinutes = selectedStartMinutes + duration;
+                          
+                          // Check if this 15-minute slot overlaps with the selected appointment duration
+                          // A slot is selected if it overlaps: slot_start < appointment_end AND slot_end > appointment_start
+                          // This ensures all slots that fall within the appointment duration are highlighted in orange
+                          const isSelected = slotStartMinutes < selectedEndMinutes && slotEndMinutes > selectedStartMinutes;
+                          
+                          // Check if this is the original appointment time (should be grey, not orange)
+                          const originalScheduledAt = (editingAppointment as any)._originalScheduledAtDate;
+                          let isOriginalTime = false;
+                          if (originalScheduledAt instanceof Date) {
+                            const originalHour24 = originalScheduledAt.getHours();
+                            const originalMinutes = originalScheduledAt.getMinutes();
+                            const originalStartMinutes = originalHour24 * 60 + originalMinutes;
+                            const originalDuration = editingAppointment.duration || 30;
+                            const originalEndMinutes = originalStartMinutes + originalDuration;
+                            // Check if this slot overlaps with the original appointment time
+                            isOriginalTime = slotStartMinutes < originalEndMinutes && slotEndMinutes > originalStartMinutes;
+                          }
+                          
+                          // A time slot is booked if it's in the bookedTimeSlots array AND it's not part of the current selection
+                          // This allows the current appointment's time slots to remain selectable
+                          const isBooked = bookedTimeSlots.includes(timeSlot) && !isSelected && !isOriginalTime;
+                          
+                          // Determine if this is a newly selected slot (orange) vs original time (grey)
+                          const isNewlySelected = isSelected && !isOriginalTime;
 
                           return (
                             <button
                               key={timeSlot}
                               type="button"
                               disabled={isBooked}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
                                 if (isBooked) return;
 
                                 const [time, period] = timeSlot.split(" ");
@@ -1492,26 +2507,40 @@ export default function PatientAppointments({
                                 if (period === "AM" && hour24 === 12)
                                   hour24 = 0;
 
+                                // Create a new date from the current scheduledAt to preserve the date
+                                const currentDate = new Date(editingAppointment.scheduledAt);
+                                // Set the time in local timezone (no conversion)
                                 const newDate = new Date(
-                                  editingAppointment.scheduledAt,
-                                );
-                                newDate.setHours(
+                                  currentDate.getFullYear(),
+                                  currentDate.getMonth(),
+                                  currentDate.getDate(),
                                   hour24,
                                   parseInt(minutes),
                                   0,
-                                  0,
+                                  0
                                 );
+                                
+                                console.log('[TIME-SLOT] Selected time slot:', {
+                                  timeSlot,
+                                  hour24,
+                                  minutes: parseInt(minutes),
+                                  newDate: newDate.toString(),
+                                  formattedTime: formatTime(newDate)
+                                });
+                                
                                 setEditingAppointment({
                                   ...editingAppointment,
                                   scheduledAt: newDate,
                                 });
                               }}
-                              className={`p-2 text-sm rounded border text-center ${
-                                isSelected
+                              className={`p-2 text-sm rounded border text-center relative z-10 ${
+                                isNewlySelected
                                   ? "bg-yellow-500 text-white border-yellow-500"
+                                  : isOriginalTime
+                                    ? "bg-gray-400 dark:bg-gray-600 text-gray-700 dark:text-gray-300 border-gray-400 dark:border-gray-600"
                                   : isBooked
-                                    ? "bg-gray-400 text-gray-600 border-gray-400 cursor-not-allowed"
-                                    : "bg-green-500 text-white border-green-500 hover:bg-green-600"
+                                      ? "bg-gray-400 dark:bg-gray-600 text-gray-700 dark:text-gray-300 border-gray-400 dark:border-gray-600 cursor-not-allowed"
+                                      : "bg-green-500 text-white border-green-500 hover:bg-green-600 cursor-pointer"
                               }`}
                               title={
                                 isBooked
@@ -1532,73 +2561,30 @@ export default function PatientAppointments({
                     </div>
                   </div>
                 </div>
-
-                {/* Status and Description */}
-                <div className="grid grid-cols-2 gap-6">
-                  {/* Status */}
-                  <div>
-                    <Label className="text-sm font-medium text-gray-700">
-                      Status
-                    </Label>
-                    <Select
-                      value={editingAppointment.status || "scheduled"}
-                      onValueChange={(value) =>
-                        setEditingAppointment({
-                          ...editingAppointment,
-                          status: value,
-                        })
-                      }
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="scheduled">Scheduled</SelectItem>
-                        <SelectItem value="confirmed">Confirmed</SelectItem>
-                        <SelectItem value="completed">Completed</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
 
-                  {/* Description */}
-                  <div>
-                    <Label
-                      htmlFor="description"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      Description
-                    </Label>
-                    <textarea
-                      id="description"
-                      value={editingAppointment.description || ""}
-                      onChange={(e) =>
-                        setEditingAppointment({
-                          ...editingAppointment,
-                          description: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      rows={3}
-                      placeholder="Enter appointment description"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end space-x-3 mt-8 pt-6 border-t">
+              {/* Action Buttons - Sticky footer */}
+              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 pb-4 sm:pb-6 z-10">
                 <Button
                   variant="outline"
-                  onClick={() => setEditingAppointment(null)}
-                  className="px-6"
+                  onClick={() => {
+                    setEditingAppointment(null);
+                    setEditAppointmentType("");
+                    setEditSelectedTreatment(null);
+                    setEditSelectedConsultation(null);
+                  }}
+                  className="px-4 sm:px-6 text-sm sm:text-base"
                 >
                   Cancel
                 </Button>
                 <Button
-                  onClick={handleSaveEdit}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSaveEdit();
+                  }}
                   disabled={editAppointmentMutation.isPending}
-                  className="px-6 bg-blue-600 text-white hover:bg-blue-700"
+                  className="px-4 sm:px-6 bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-sm sm:text-base relative z-20"
                 >
                   {editAppointmentMutation.isPending
                     ? "Saving..."
@@ -1702,12 +2688,12 @@ export default function PatientAppointments({
         <DialogContent className="max-w-md">
           <div className="flex flex-col items-center text-center py-6 space-y-4">
             {/* Green Check Circle Icon */}
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-              <CheckCircle className="w-10 h-10 text-green-600" />
+            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+              <CheckCircle className="w-10 h-10 text-green-600 dark:text-green-400" />
             </div>
             
             {/* Title */}
-            <h2 className="text-xl font-bold text-gray-900">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
               {successMessage.includes("cancelled") 
                 ? "Appointment Cancelled Successfully" 
                 : successMessage.includes("updated") 
@@ -1716,7 +2702,7 @@ export default function PatientAppointments({
             </h2>
             
             {/* Description */}
-            <p className="text-gray-600">
+            <p className="text-gray-600 dark:text-gray-300">
               {successMessage}
             </p>
             
@@ -1726,9 +2712,42 @@ export default function PatientAppointments({
                 setShowSuccessModal(false);
                 setSuccessMessage("");
               }}
-              className="bg-blue-600 hover:bg-blue-700 w-full"
+              className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white w-full"
             >
               Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Insufficient Time Available Modal */}
+      <Dialog open={showInsufficientTimeModal} onOpenChange={setShowInsufficientTimeModal}>
+        <DialogContent className="max-w-md">
+          <div className="flex flex-col items-center text-center py-6 space-y-4">
+            {/* Red Warning Icon */}
+            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+              <X className="w-10 h-10 text-red-600 dark:text-red-400" />
+            </div>
+            
+            {/* Title */}
+            <h2 className="text-xl font-bold text-red-600 dark:text-red-400">
+              Insufficient Time Available
+            </h2>
+            
+            {/* Description */}
+            <p className="text-gray-600 dark:text-gray-300">
+              {insufficientTimeMessage}
+            </p>
+            
+            {/* OK Button */}
+            <Button
+              onClick={() => {
+                setShowInsufficientTimeModal(false);
+                setInsufficientTimeMessage("");
+              }}
+              className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white w-full"
+            >
+              OK
             </Button>
           </div>
         </DialogContent>

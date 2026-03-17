@@ -1450,6 +1450,9 @@ function TreatmentAnalyticsDashboard({
   setYearsFilter,
   statusFilter,
   setStatusFilter,
+  paymentStatusFilter,
+  setPaymentStatusFilter,
+  detailedTreatments,
   user
 }: { 
   treatmentSessions: any[];
@@ -1462,6 +1465,7 @@ function TreatmentAnalyticsDashboard({
   dailyData: any[];
   monthlyData: any[];
   yearlyData: any[];
+  detailedTreatments: any[];
   timeframe: 'daily' | 'monthly' | 'yearly';
   setTimeframe: (value: 'daily' | 'monthly' | 'yearly') => void;
   daysFilter: number;
@@ -1472,6 +1476,8 @@ function TreatmentAnalyticsDashboard({
   setYearsFilter: (value: number) => void;
   statusFilter: string;
   setStatusFilter: (value: string) => void;
+  paymentStatusFilter: string;
+  setPaymentStatusFilter: (value: string) => void;
   user: any;
 }) {
   const { currencyCode } = useCurrency();
@@ -1892,6 +1898,16 @@ function TreatmentAnalyticsDashboard({
                   <SelectItem value="rescheduled">Rescheduled</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={paymentStatusFilter} onValueChange={(value) => setPaymentStatusFilter(value)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Payments</SelectItem>
+                  <SelectItem value="paid">Paid Only</SelectItem>
+                  <SelectItem value="unpaid">Unpaid Only</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
@@ -2001,6 +2017,72 @@ function TreatmentAnalyticsDashboard({
             </LineChart>
           </ResponsiveContainer>
           )}
+
+          {/* Detailed Treatments List */}
+          <div className="mt-8">
+            <h3 className="text-lg font-semibold mb-4">Treatments ({timeframe}) - Detailed View</h3>
+            {detailedTreatments.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <p className="text-sm">No treatment data available for the selected timeframe</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse border border-gray-300 dark:border-gray-700">
+                  <thead>
+                    <tr className="bg-gray-100 dark:bg-gray-800">
+                      <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left text-sm font-medium">Date</th>
+                      <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left text-sm font-medium">Treatment Name</th>
+                      <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm font-medium">Count</th>
+                      <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm font-medium">Patients</th>
+                      <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-right text-sm font-medium">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailedTreatments.map((item: any, index: number) => {
+                      // Format date based on timeframe
+                      let displayDate = item.date;
+                      if (timeframe === 'daily' && item.date) {
+                        try {
+                          const date = new Date(item.date);
+                          displayDate = format(date, 'MMM dd, yyyy');
+                        } catch {
+                          displayDate = item.date;
+                        }
+                      } else if (timeframe === 'monthly' && item.date_label) {
+                        displayDate = item.date_label;
+                      } else if (timeframe === 'yearly') {
+                        displayDate = item.date;
+                      }
+                      
+                      return (
+                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                          <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm">{displayDate}</td>
+                          <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium">{item.treatment_name || 'Unknown Treatment'}</td>
+                          <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">{item.treatment_count || 0}</td>
+                          <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">{item.patient_count || 0}</td>
+                          <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-right text-sm">{formatCurrency(parseFloat(item.revenue) || 0)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-100 dark:bg-gray-800 font-semibold">
+                      <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm" colSpan={2}>Total</td>
+                      <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">
+                        {detailedTreatments.reduce((sum: number, item: any) => sum + (parseInt(item.treatment_count) || 0), 0)}
+                      </td>
+                      <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">
+                        {detailedTreatments.reduce((sum: number, item: any) => sum + (parseInt(item.patient_count) || 0), 0)}
+                      </td>
+                      <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-right text-sm">
+                        {formatCurrency(detailedTreatments.reduce((sum: number, item: any) => sum + (parseFloat(item.revenue) || 0), 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -2214,7 +2296,418 @@ function TreatmentAnalyticsDashboard({
           </ResponsiveContainer>
         </CardContent>
       </Card>
+
+      {/* Appointment Analytics */}
+      <AppointmentAnalyticsSection user={user} />
     </div>
+  );
+}
+
+// Appointment Analytics Section Component
+function AppointmentAnalyticsSection({ user }: { user: any }) {
+  const [dateRange, setDateRange] = useState<'today' | '7days' | '30days' | 'custom'>('30days');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
+  const [practitionerFilter, setPractitionerFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [groupBy, setGroupBy] = useState<'type' | 'day' | 'month'>('type');
+
+  // Calculate date range based on selection
+  const getDateRange = () => {
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date = new Date(now);
+
+    switch (dateRange) {
+      case 'today':
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case '7days':
+        startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case '30days':
+        startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'custom':
+        if (customStartDate && customEndDate) {
+          startDate = new Date(customStartDate);
+          endDate = new Date(customEndDate);
+          endDate.setHours(23, 59, 59, 999);
+        } else {
+          // Default to last 30 days if custom dates not set
+          startDate = new Date(now);
+          startDate.setDate(startDate.getDate() - 30);
+          startDate.setHours(0, 0, 0, 0);
+        }
+        break;
+      default:
+        startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+    }
+
+    return {
+      startDate: startDate.toISOString().split('T')[0] + 'T00:00:00',
+      endDate: endDate.toISOString().split('T')[0] + 'T23:59:59'
+    };
+  };
+
+  // Fetch appointment analytics data
+  const { data: appointmentAnalytics = [], isLoading: isLoadingAppointments } = useQuery({
+    queryKey: ['/api/analytics/appointments', dateRange, customStartDate, customEndDate, practitionerFilter, statusFilter, groupBy],
+    queryFn: async () => {
+      try {
+        const { startDate, endDate } = getDateRange();
+        const params = new URLSearchParams({
+          startDate,
+          endDate,
+          groupBy,
+          status: statusFilter
+        });
+        if (practitionerFilter !== 'all') {
+          params.append('practitionerId', practitionerFilter);
+        }
+        const token = localStorage.getItem('auth_token');
+        const url = `/api/analytics/appointments?${params.toString()}`;
+        console.log('[APPOINTMENT-ANALYTICS] Fetching:', { url, dateRange, startDate, endDate, practitionerFilter, statusFilter, groupBy });
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Tenant-Subdomain': getTenantSubdomain(),
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('[APPOINTMENT-ANALYTICS] Response status:', response.status);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.warn('[APPOINTMENT-ANALYTICS] Failed:', response.status, errorText);
+          return [];
+        }
+        const data = await response.json();
+        console.log('[APPOINTMENT-ANALYTICS] Data received:', Array.isArray(data) ? data.length : 0, 'items');
+        if (Array.isArray(data) && data.length > 0) {
+          console.log('[APPOINTMENT-ANALYTICS] Sample data:', data[0]);
+        }
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error('[APPOINTMENT-ANALYTICS] Error:', error);
+        return [];
+      }
+    },
+    enabled: !!user,
+    staleTime: 60000
+  });
+
+  // Fetch practitioners for filter
+  const { data: medicalStaffData } = useQuery({
+    queryKey: ['/api/medical-staff'],
+    queryFn: async () => {
+      try {
+        const token = localStorage.getItem('auth_token');
+        const response = await fetch('/api/medical-staff', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Tenant-Subdomain': getTenantSubdomain(),
+            'Content-Type': 'application/json'
+          }
+        });
+        if (!response.ok) return { staff: [] };
+        const data = await response.json();
+        return data?.staff || [];
+      } catch (error) {
+        console.error('Error fetching medical staff:', error);
+        return [];
+      }
+    },
+    enabled: !!user
+  });
+
+  // Process data for different chart types
+  const appointmentByType = React.useMemo(() => {
+    if (groupBy !== 'type') return [];
+    return appointmentAnalytics.map((item: any) => ({
+      name: item.appointment_type || 'Unknown',
+      value: item.total_appointments || 0,
+      patients: item.total_patients || 0,
+      practitioners: item.total_practitioners || 0
+    }));
+  }, [appointmentAnalytics, groupBy]);
+
+  const appointmentTrends = React.useMemo(() => {
+    if (groupBy === 'type') return [];
+    return appointmentAnalytics.map((item: any) => ({
+      date: item.date || item.month || item.month_label || 'Unknown',
+      [item.appointment_type || 'Unknown']: item.total_appointments || 0,
+      total: item.total_appointments || 0
+    }));
+  }, [appointmentAnalytics, groupBy]);
+
+  // Get unique appointment types for line chart
+  const appointmentTypes = React.useMemo(() => {
+    const types = new Set<string>();
+    appointmentAnalytics.forEach((item: any) => {
+      if (item.appointment_type) types.add(item.appointment_type);
+    });
+    return Array.from(types);
+  }, [appointmentAnalytics]);
+
+  // Colors for charts
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
+
+  const totalAppointments = appointmentAnalytics.reduce((sum: number, item: any) => sum + (item.total_appointments || 0), 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <CardTitle>Appointment Analytics</CardTitle>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Date Range Selector */}
+            <Select value={dateRange} onValueChange={(value: any) => setDateRange(value)}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="7days">Last 7 Days</SelectItem>
+                <SelectItem value="30days">Last 30 Days</SelectItem>
+                <SelectItem value="custom">Custom Range</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Custom Date Range Inputs */}
+            {dateRange === 'custom' && (
+              <>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="px-3 py-2 border rounded-md text-sm"
+                />
+                <span className="text-sm text-gray-500">to</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="px-3 py-2 border rounded-md text-sm"
+                />
+              </>
+            )}
+
+            {/* Group By Selector */}
+            <Select value={groupBy} onValueChange={(value: any) => setGroupBy(value)}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="type">By Type</SelectItem>
+                <SelectItem value="day">By Day</SelectItem>
+                <SelectItem value="month">By Month</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Status Filter */}
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="scheduled">Scheduled</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="no_show">No Show</SelectItem>
+                <SelectItem value="rescheduled">Rescheduled</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Practitioner Filter */}
+            <Select value={practitionerFilter} onValueChange={(value) => setPractitionerFilter(value)}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="All Practitioners" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Practitioners</SelectItem>
+                {Array.isArray(medicalStaffData) && medicalStaffData.map((staff: any) => (
+                  <SelectItem key={staff.id} value={staff.id.toString()}>
+                    {staff.firstName} {staff.lastName} ({staff.role})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {/* Summary Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <p className="text-xs text-gray-600 dark:text-gray-400">Total Appointments</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{totalAppointments.toLocaleString()}</p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <p className="text-xs text-gray-600 dark:text-gray-400">Appointment Types</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{appointmentTypes.length}</p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <p className="text-xs text-gray-600 dark:text-gray-400">Total Patients</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">
+              {new Set(appointmentAnalytics.map((item: any) => item.total_patients).filter(Boolean)).size || 
+               appointmentAnalytics.reduce((sum: number, item: any) => sum + (item.total_patients || 0), 0)}
+            </p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <p className="text-xs text-gray-600 dark:text-gray-400">Practitioners</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">
+              {new Set(appointmentAnalytics.map((item: any) => item.total_practitioners).filter(Boolean)).size || 
+               appointmentAnalytics.reduce((sum: number, item: any) => sum + (item.total_practitioners || 0), 0)}
+            </p>
+          </div>
+        </div>
+
+        {isLoadingAppointments ? (
+          <div className="flex items-center justify-center h-[400px]">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+          </div>
+        ) : appointmentAnalytics.length === 0 ? (
+          <div className="flex items-center justify-center h-[400px] text-gray-500 dark:text-gray-400">
+            <div className="text-center">
+              <p className="text-sm">No appointment data available</p>
+              <p className="text-xs mt-1">Try adjusting the date range or filters</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Bar Chart - Appointments by Type */}
+            {groupBy === 'type' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Appointments by Type</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <BarChart data={appointmentByType}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                      <YAxis />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend />
+                      <Bar dataKey="value" fill="#0088FE" name="Appointments" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Line Chart - Appointment Trends */}
+            {groupBy !== 'type' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Appointment Trends Over Time</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <LineChart data={appointmentTrends}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" angle={-45} textAnchor="end" height={100} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      {appointmentTypes.map((type, index) => (
+                        <Line
+                          key={type}
+                          type="monotone"
+                          dataKey={type}
+                          stroke={COLORS[index % COLORS.length]}
+                          strokeWidth={2}
+                          name={type}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Pie Chart - Distribution */}
+            {groupBy === 'type' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Appointment Type Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={appointmentByType}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {appointmentByType.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Appointment Type Table */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Appointment Summary</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse border border-gray-300 dark:border-gray-700">
+                        <thead>
+                          <tr className="bg-gray-100 dark:bg-gray-800">
+                            <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left text-sm font-medium">Type</th>
+                            <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm font-medium">Count</th>
+                            <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm font-medium">Patients</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {appointmentByType.map((item, index) => (
+                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                              <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium">{item.name}</td>
+                              <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">{item.value}</td>
+                              <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">{item.patients}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-gray-100 dark:bg-gray-800 font-semibold">
+                            <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm">Total</td>
+                            <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">{totalAppointments}</td>
+                            <td className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-center text-sm">
+                              {appointmentByType.reduce((sum, item) => sum + item.patients, 0)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2329,6 +2822,7 @@ export default function AnalyticsPage() {
   const [monthsFilter, setMonthsFilter] = useState(12);
   const [yearsFilter, setYearsFilter] = useState(5);
   const [statusFilter, setStatusFilter] = useState<string>('all'); // Default to 'all' to show all appointments
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all'); // Default to 'all' to show both paid and unpaid
 
   // Fetch treatment analytics data from dedicated endpoints - optimized for speed
   const { data: treatmentSessions = [], isLoading: sessionsLoading, error: sessionsError } = useQuery({
@@ -2458,12 +2952,12 @@ export default function AnalyticsPage() {
   });
 
   const { data: revenuePerTreatment = [] } = useQuery({
-    queryKey: ['revenue-per-treatment', statusFilter],
+    queryKey: ['revenue-per-treatment', statusFilter, paymentStatusFilter],
     queryFn: async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const url = `/api/analytics/revenue-per-treatment?status=${encodeURIComponent(statusFilter)}`;
-        console.log('[QUERY] Fetching revenue per treatment:', { url, statusFilter });
+        const url = `/api/analytics/revenue-per-treatment?status=${encodeURIComponent(statusFilter)}&paymentStatus=${encodeURIComponent(paymentStatusFilter)}`;
+        console.log('[QUERY] Fetching revenue per treatment:', { url, statusFilter, paymentStatusFilter });
         const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -2565,12 +3059,12 @@ export default function AnalyticsPage() {
   });
 
   const { data: dailyData = [] } = useQuery({
-    queryKey: ['treatments-daily', daysFilter, statusFilter],
+    queryKey: ['treatments-daily', daysFilter, statusFilter, paymentStatusFilter],
     queryFn: async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const url = `/api/analytics/treatments-daily?days=${daysFilter}&status=${encodeURIComponent(statusFilter)}`;
-        console.log('[QUERY] Fetching daily treatments:', { url, daysFilter, statusFilter });
+        const url = `/api/analytics/treatments-daily?days=${daysFilter}&status=${encodeURIComponent(statusFilter)}&paymentStatus=${encodeURIComponent(paymentStatusFilter)}`;
+        console.log('[QUERY] Fetching daily treatments:', { url, daysFilter, statusFilter, paymentStatusFilter });
         const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -2600,12 +3094,12 @@ export default function AnalyticsPage() {
   });
 
   const { data: monthlyData = [] } = useQuery({
-    queryKey: ['treatments-monthly', monthsFilter, statusFilter],
+    queryKey: ['treatments-monthly', monthsFilter, statusFilter, paymentStatusFilter],
     queryFn: async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const url = `/api/analytics/treatments-monthly?months=${monthsFilter}&status=${encodeURIComponent(statusFilter)}`;
-        console.log('[QUERY] Fetching monthly treatments:', { url, monthsFilter, statusFilter });
+        const url = `/api/analytics/treatments-monthly?months=${monthsFilter}&status=${encodeURIComponent(statusFilter)}&paymentStatus=${encodeURIComponent(paymentStatusFilter)}`;
+        console.log('[QUERY] Fetching monthly treatments:', { url, monthsFilter, statusFilter, paymentStatusFilter });
         const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -2635,12 +3129,12 @@ export default function AnalyticsPage() {
   });
 
   const { data: yearlyData = [] } = useQuery({
-    queryKey: ['treatments-yearly', yearsFilter, statusFilter],
+    queryKey: ['treatments-yearly', yearsFilter, statusFilter, paymentStatusFilter],
     queryFn: async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        const url = `/api/analytics/treatments-yearly?years=${yearsFilter}&status=${encodeURIComponent(statusFilter)}`;
-        console.log('[QUERY] Fetching yearly treatments:', { url, yearsFilter, statusFilter });
+        const url = `/api/analytics/treatments-yearly?years=${yearsFilter}&status=${encodeURIComponent(statusFilter)}&paymentStatus=${encodeURIComponent(paymentStatusFilter)}`;
+        console.log('[QUERY] Fetching yearly treatments:', { url, yearsFilter, statusFilter, paymentStatusFilter });
         const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -2666,6 +3160,54 @@ export default function AnalyticsPage() {
       }
     },
     enabled: !!user && timeframe === 'yearly',
+    staleTime: 60000
+  });
+
+  // Fetch detailed treatments list grouped by date
+  const { data: detailedTreatments = [] } = useQuery({
+    queryKey: ['treatments-detailed', timeframe, daysFilter, monthsFilter, yearsFilter, statusFilter, paymentStatusFilter],
+    queryFn: async () => {
+      try {
+        const token = localStorage.getItem('auth_token');
+        const params = new URLSearchParams({
+          timeframe: timeframe,
+          status: statusFilter,
+          paymentStatus: paymentStatusFilter
+        });
+        if (timeframe === 'daily') {
+          params.append('days', daysFilter.toString());
+        } else if (timeframe === 'monthly') {
+          params.append('months', monthsFilter.toString());
+        } else {
+          params.append('years', yearsFilter.toString());
+        }
+        const url = `/api/analytics/treatments-detailed?${params.toString()}`;
+        console.log('[QUERY] Fetching detailed treatments:', { url, timeframe, daysFilter, monthsFilter, yearsFilter, statusFilter, paymentStatusFilter });
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Tenant-Subdomain': getTenantSubdomain(),
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log('[QUERY] Detailed treatments response status:', response.status, response.ok);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.warn('[QUERY] Failed to fetch detailed treatments:', response.status, errorText);
+          return [];
+        }
+        const data = await response.json();
+        console.log('[QUERY] Detailed treatments data received:', Array.isArray(data) ? data.length : 0, 'items');
+        if (Array.isArray(data) && data.length > 0) {
+          console.log('[QUERY] Sample detailed treatment:', data[0]);
+        }
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error('[QUERY] Error fetching detailed treatments:', error);
+        return [];
+      }
+    },
+    enabled: !!user,
     staleTime: 60000
   });
 
@@ -2967,11 +3509,11 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Analytics Tabs */}
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
+        <Tabs defaultValue="treatment-analytics" className="w-full">
+          <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-2 md:grid-cols-6' : 'grid-cols-2 md:grid-cols-5'}`}>
             {isDoctorLike(user?.role) ? (
               <>
-                {/* <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger> */}
+                <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger>
                 {/* <TabsTrigger value="custom-analytics">Custom Analytics</TabsTrigger> */}
                 <TabsTrigger value="overview">Overview ({user?.firstName} {user?.lastName})</TabsTrigger>
                 <TabsTrigger value="patients">Patients ({user?.firstName} {user?.lastName})</TabsTrigger>
@@ -2981,7 +3523,7 @@ export default function AnalyticsPage() {
               </>
             ) : (
               <>
-                {/* <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger> */}
+                <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger>
                 {/* <TabsTrigger value="custom-analytics">Custom Analytics</TabsTrigger> */}
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="patients">Patients</TabsTrigger>
@@ -3024,6 +3566,7 @@ export default function AnalyticsPage() {
                 dailyData={dailyData}
                 monthlyData={monthlyData}
                 yearlyData={yearlyData}
+                detailedTreatments={detailedTreatments}
                 timeframe={timeframe}
                 setTimeframe={setTimeframe}
                 daysFilter={daysFilter}
@@ -3034,6 +3577,8 @@ export default function AnalyticsPage() {
                 setYearsFilter={setYearsFilter}
                 statusFilter={statusFilter}
                 setStatusFilter={setStatusFilter}
+                paymentStatusFilter={paymentStatusFilter}
+                setPaymentStatusFilter={setPaymentStatusFilter}
                 user={user}
               />
             )}

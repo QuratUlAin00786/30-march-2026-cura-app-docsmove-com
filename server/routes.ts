@@ -6304,26 +6304,69 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       // Prepare update data (only allow updating certain fields)
       const allowedUpdates: any = {};
-      const { title, description, scheduledAt, duration, status, type, location, isVirtual } = req.body;
+      const { title, description, scheduledAt, duration, status, type, location, isVirtual, appointmentType, treatmentId, consultationId } = req.body;
+
+      console.log(`[UPDATE-APPOINTMENT] Received update request for appointment ${appointmentId}:`, {
+        title, description, scheduledAt, duration, status, type, location, isVirtual, appointmentType, treatmentId, consultationId,
+        body: req.body
+      });
 
       if (title !== undefined) allowedUpdates.title = title;
       if (description !== undefined) allowedUpdates.description = description;
       if (scheduledAt !== undefined) {
-        // Store scheduledAt string directly without timezone conversion
-        allowedUpdates.scheduledAt = scheduledAt;
+        // Convert scheduledAt to Date object if it's a string
+        try {
+          if (typeof scheduledAt === 'string') {
+            const dateObj = new Date(scheduledAt);
+            if (isNaN(dateObj.getTime())) {
+              throw new Error(`Invalid scheduledAt date format: ${scheduledAt}`);
+            }
+            allowedUpdates.scheduledAt = dateObj;
+          } else if (scheduledAt instanceof Date) {
+            allowedUpdates.scheduledAt = scheduledAt;
+          } else {
+            throw new Error(`Invalid scheduledAt type: ${typeof scheduledAt}`);
+          }
+        } catch (error: any) {
+          console.error(`[UPDATE-APPOINTMENT] Error parsing scheduledAt:`, error.message);
+          throw new Error(`Invalid date format: ${error.message}`);
+        }
       }
       if (duration !== undefined) allowedUpdates.duration = duration;
       if (status !== undefined) allowedUpdates.status = status;
       if (type !== undefined) allowedUpdates.type = type;
       if (location !== undefined) allowedUpdates.location = location;
       if (isVirtual !== undefined) allowedUpdates.isVirtual = isVirtual;
+      if (appointmentType !== undefined) allowedUpdates.appointmentType = appointmentType;
+      // Allow null values to clear treatmentId/consultationId
+      if (treatmentId !== undefined) allowedUpdates.treatmentId = treatmentId;
+      if (consultationId !== undefined) allowedUpdates.consultationId = consultationId;
+      
+      console.log(`[UPDATE-APPOINTMENT] Prepared allowedUpdates:`, allowedUpdates);
+      console.log(`[UPDATE-APPOINTMENT] Calling storage.updateAppointment with:`, {
+        appointmentId,
+        organizationId: req.tenant!.id,
+        updates: allowedUpdates,
+        updateKeys: Object.keys(allowedUpdates),
+        scheduledAtType: typeof allowedUpdates.scheduledAt,
+        scheduledAtValue: allowedUpdates.scheduledAt
+      });
 
       // Update the appointment
-      const updatedAppointment = await storage.updateAppointment(
-        appointmentId,
-        req.tenant!.id,
-        allowedUpdates
-      );
+      let updatedAppointment;
+      try {
+        updatedAppointment = await storage.updateAppointment(
+          appointmentId,
+          req.tenant!.id,
+          allowedUpdates
+        );
+        console.log(`[UPDATE-APPOINTMENT] Storage.updateAppointment returned:`, updatedAppointment ? 'success' : 'undefined');
+      } catch (storageError: any) {
+        console.error(`[UPDATE-APPOINTMENT] Storage error:`, storageError);
+        console.error(`[UPDATE-APPOINTMENT] Storage error message:`, storageError?.message);
+        console.error(`[UPDATE-APPOINTMENT] Storage error stack:`, storageError?.stack);
+        throw storageError;
+      }
 
       if (updatedAppointment) {
         console.log(`✅ Appointment ${appointmentId} updated successfully by user ${userId} (${userRole})`);
@@ -6349,11 +6392,35 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
         res.json(updatedAppointment);
       } else {
+        console.error(`[UPDATE-APPOINTMENT] Storage returned undefined for appointment ${appointmentId}`);
         res.status(400).json({ error: "Failed to update appointment" });
       }
     } catch (error) {
       console.error("Appointment update error:", error);
-      res.status(500).json({ error: "Failed to update appointment. Please try again." });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      const appointmentId = parseInt(req.params.id);
+      console.error("Appointment update error details:", {
+        appointmentId: appointmentId,
+        userId: req.user?.id,
+        userRole: req.user?.role,
+        errorMessage,
+        errorStack,
+        requestBody: req.body
+      });
+      
+      // Always include details in development, and in production for debugging
+      const errorResponse: any = { 
+        error: "Failed to update appointment. Please try again."
+      };
+      
+      // Include detailed error information
+      if (process.env.NODE_ENV === 'development' || process.env.DEBUG === 'true') {
+        errorResponse.details = errorMessage;
+        errorResponse.stack = errorStack;
+      }
+      
+      res.status(500).json(errorResponse);
     }
   });
 
@@ -15002,7 +15069,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
   });
 
   // Get invoice by service type and service ID and/or appointment_id (matches invoice row or any line item)
-  app.get("/api/invoices/by-service", authMiddleware, async (req: TenantRequest, res) => {
+  app.get("/api/invoices/by-service", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: "User not authenticated" });
@@ -36589,11 +36656,21 @@ Cura EMR Team
     try {
       const organizationId = requireOrgId(req);
       const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      const paymentStatus = (req.query.paymentStatus as string) || 'all'; // Default to 'all' to show both paid and unpaid
       
       // Build status condition
       const statusCondition = statusFilter.toLowerCase() === 'all' 
         ? sql``
         : sql`AND LOWER(TRIM(a.status)) = ${statusFilter.toLowerCase()}`;
+      
+      // Build payment status condition for invoice join
+      let paymentCondition = sql``;
+      if (paymentStatus.toLowerCase() === 'paid') {
+        paymentCondition = sql`AND LOWER(TRIM(i.status)) IN ('paid', 'completed')`;
+      } else if (paymentStatus.toLowerCase() === 'unpaid') {
+        paymentCondition = sql`AND (i.status IS NULL OR LOWER(TRIM(i.status)) NOT IN ('paid', 'completed'))`;
+      }
+      // If 'all', no payment condition (include all invoices)
       
       // Get revenue from invoices linked to appointments with treatments
       // invoices.service_id links to appointments.appointment_id (text field)
@@ -36607,7 +36684,7 @@ Cura EMR Team
         LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
         LEFT JOIN invoices i ON i.service_id = a.appointment_id 
           AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
-          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+          ${paymentCondition}
         WHERE a.organization_id = ${organizationId}
           ${statusCondition}
           AND a.treatment_id IS NOT NULL
@@ -36852,6 +36929,7 @@ Cura EMR Team
       const organizationId = requireOrgId(req);
       const daysParam = parseInt(req.query.days as string) || 30;
       const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      const paymentStatus = (req.query.paymentStatus as string) || 'all'; // Default to 'all' to show both paid and unpaid
       
       // Validate status filter to prevent SQL injection
       const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
@@ -36862,13 +36940,22 @@ Cura EMR Team
         ? sql``
         : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
       
+      // Build payment status condition for invoice join
+      let paymentCondition = sql``;
+      if (paymentStatus.toLowerCase() === 'paid') {
+        paymentCondition = sql`AND LOWER(TRIM(i.status)) IN ('paid', 'completed')`;
+      } else if (paymentStatus.toLowerCase() === 'unpaid') {
+        paymentCondition = sql`AND (i.status IS NULL OR LOWER(TRIM(i.status)) NOT IN ('paid', 'completed'))`;
+      }
+      // If 'all', no payment condition (include all invoices)
+      
       // Build date condition - if days=1, show only today; otherwise show last N days (including today)
       // Always include today's appointments by using >= CURRENT_DATE - INTERVAL
       const dateCondition = daysParam === 1 
         ? sql`AND DATE(a.scheduled_at) = CURRENT_DATE`
         : sql`AND DATE(a.scheduled_at) >= CURRENT_DATE - INTERVAL '${daysParam - 1} days' AND DATE(a.scheduled_at) <= CURRENT_DATE`;
       
-      console.log(`[TREATMENTS-DAILY] Date condition: daysParam=${daysParam}, will include today's appointments`);
+      console.log(`[TREATMENTS-DAILY] Date condition: daysParam=${daysParam}, will include today's appointments, paymentStatus=${paymentStatus}`);
       
       const result = await db.execute(sql`
         SELECT 
@@ -36881,7 +36968,7 @@ Cura EMR Team
         LEFT JOIN treatments t ON t.id = a.treatment_id
         LEFT JOIN invoices i ON i.service_id = a.appointment_id 
           AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
-          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+          ${paymentCondition}
         WHERE a.organization_id = ${organizationId}
           ${statusCondition}
           AND a.treatment_id IS NOT NULL
@@ -36936,6 +37023,7 @@ Cura EMR Team
       const organizationId = requireOrgId(req);
       const monthsParam = parseInt(req.query.months as string) || 12;
       const statusFilter = (req.query.status as string) || 'all'; // Default to 'all' to show all appointments
+      const paymentStatus = (req.query.paymentStatus as string) || 'all'; // Default to 'all' to show both paid and unpaid
       
       // Validate status filter to prevent SQL injection
       const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
@@ -36945,6 +37033,15 @@ Cura EMR Team
       const statusCondition = safeStatus === 'all' 
         ? sql``
         : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      // Build payment status condition for invoice join
+      let paymentCondition = sql``;
+      if (paymentStatus.toLowerCase() === 'paid') {
+        paymentCondition = sql`AND LOWER(TRIM(i.status)) IN ('paid', 'completed')`;
+      } else if (paymentStatus.toLowerCase() === 'unpaid') {
+        paymentCondition = sql`AND (i.status IS NULL OR LOWER(TRIM(i.status)) NOT IN ('paid', 'completed'))`;
+      }
+      // If 'all', no payment condition (include all invoices)
       
       const result = await db.execute(sql`
         SELECT 
@@ -36958,7 +37055,7 @@ Cura EMR Team
         LEFT JOIN treatments t ON t.id = a.treatment_id
         LEFT JOIN invoices i ON i.service_id = a.appointment_id 
           AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
-          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+          ${paymentCondition}
         WHERE a.organization_id = ${organizationId}
           ${statusCondition}
           AND a.treatment_id IS NOT NULL
@@ -36991,6 +37088,16 @@ Cura EMR Team
         ? sql``
         : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
       
+      // Build payment status condition for invoice join
+      let paymentCondition = sql``;
+      const paymentStatus = (req.query.paymentStatus as string) || 'all';
+      if (paymentStatus.toLowerCase() === 'paid') {
+        paymentCondition = sql`AND LOWER(TRIM(i.status)) IN ('paid', 'completed')`;
+      } else if (paymentStatus.toLowerCase() === 'unpaid') {
+        paymentCondition = sql`AND (i.status IS NULL OR LOWER(TRIM(i.status)) NOT IN ('paid', 'completed'))`;
+      }
+      // If 'all', no payment condition (include all invoices)
+      
       const result = await db.execute(sql`
         SELECT 
           TO_CHAR(a.scheduled_at, 'YYYY') as year,
@@ -37002,7 +37109,7 @@ Cura EMR Team
         LEFT JOIN treatments t ON t.id = a.treatment_id
         LEFT JOIN invoices i ON i.service_id = a.appointment_id 
           AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
-          AND LOWER(TRIM(i.status)) IN ('paid', 'completed')
+          ${paymentCondition}
         WHERE a.organization_id = ${organizationId}
           ${statusCondition}
           AND a.treatment_id IS NOT NULL
@@ -37016,6 +37123,169 @@ Cura EMR Team
     } catch (error) {
       console.error("Error fetching yearly treatment analytics:", error);
       res.json([]);
+    }
+  });
+
+  // Get detailed treatments list grouped by date (for Treatment Analytics by Timeframe)
+  app.get("/api/analytics/treatments-detailed", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const timeframe = (req.query.timeframe as string) || 'daily'; // 'daily', 'monthly', or 'yearly'
+      const daysParam = parseInt(req.query.days as string) || 30;
+      const monthsParam = parseInt(req.query.months as string) || 12;
+      const yearsParam = parseInt(req.query.years as string) || 5;
+      const statusFilter = (req.query.status as string) || 'all';
+      const paymentStatus = (req.query.paymentStatus as string) || 'all';
+      
+      // Validate status filter
+      const validStatuses = ['all', 'completed', 'scheduled', 'cancelled', 'no_show', 'rescheduled'];
+      const safeStatus = validStatuses.includes(statusFilter.toLowerCase()) ? statusFilter.toLowerCase() : 'all';
+      
+      // Build status condition
+      const statusCondition = safeStatus === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      // Build payment status condition for invoice join
+      let paymentCondition = sql``;
+      if (paymentStatus.toLowerCase() === 'paid') {
+        paymentCondition = sql`AND LOWER(TRIM(i.status)) IN ('paid', 'completed')`;
+      } else if (paymentStatus.toLowerCase() === 'unpaid') {
+        paymentCondition = sql`AND (i.status IS NULL OR LOWER(TRIM(i.status)) NOT IN ('paid', 'completed'))`;
+      }
+      
+      let dateCondition = sql``;
+      let groupByClause = sql``;
+      let dateField = sql``;
+      
+      if (timeframe === 'daily') {
+        dateCondition = daysParam === 1 
+          ? sql`AND DATE(a.scheduled_at) = CURRENT_DATE`
+          : sql`AND DATE(a.scheduled_at) >= CURRENT_DATE - INTERVAL '${daysParam - 1} days' AND DATE(a.scheduled_at) <= CURRENT_DATE`;
+        dateField = sql`DATE(a.scheduled_at) as date`;
+        groupByClause = sql`GROUP BY DATE(a.scheduled_at), COALESCE(ti.name, t.name, 'Unknown Treatment')`;
+      } else if (timeframe === 'monthly') {
+        dateCondition = sql`AND a.scheduled_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '${monthsParam} months'`;
+        dateField = sql`TO_CHAR(a.scheduled_at, 'YYYY-MM') as date, TO_CHAR(a.scheduled_at, 'Mon YYYY') as date_label`;
+        groupByClause = sql`GROUP BY TO_CHAR(a.scheduled_at, 'YYYY-MM'), TO_CHAR(a.scheduled_at, 'Mon YYYY'), COALESCE(ti.name, t.name, 'Unknown Treatment')`;
+      } else { // yearly
+        dateCondition = sql`AND a.scheduled_at >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '${yearsParam} years'`;
+        dateField = sql`TO_CHAR(a.scheduled_at, 'YYYY') as date`;
+        groupByClause = sql`GROUP BY TO_CHAR(a.scheduled_at, 'YYYY'), COALESCE(ti.name, t.name, 'Unknown Treatment')`;
+      }
+      
+      const result = await db.execute(sql`
+        SELECT 
+          ${dateField},
+          COALESCE(ti.name, t.name, 'Unknown Treatment') as treatment_name,
+          COUNT(a.id)::integer as treatment_count,
+          COUNT(DISTINCT a.patient_id)::integer as patient_count,
+          COALESCE(SUM(i.total_amount), 0)::numeric as revenue
+        FROM appointments a
+        LEFT JOIN treatments t ON t.id = a.treatment_id
+        LEFT JOIN treatments_info ti ON ti.id = a.treatment_id
+        LEFT JOIN invoices i ON i.service_id = a.appointment_id 
+          AND (i.service_type IS NULL OR LOWER(TRIM(i.service_type)) = 'appointments')
+          ${paymentCondition}
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          AND a.treatment_id IS NOT NULL
+          ${dateCondition}
+        ${groupByClause}
+        ORDER BY date DESC, treatment_count DESC
+      `);
+      
+      console.log(`[TREATMENTS-DETAILED] Organization ${organizationId}: Found ${result.rows?.length || 0} treatment records (timeframe=${timeframe})`);
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching detailed treatments:", error);
+      res.status(500).json({ error: "Failed to fetch detailed treatments", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Get appointment analytics by type and date range
+  app.get("/api/analytics/appointments", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      const practitionerId = req.query.practitionerId as string | undefined;
+      const statusFilter = (req.query.status as string) || 'all';
+      const locationFilter = req.query.location as string | undefined;
+      const groupBy = (req.query.groupBy as string) || 'type'; // 'type', 'day', 'month'
+      
+      // Validate status filter
+      const validStatuses = ['all', 'scheduled', 'completed', 'cancelled', 'no_show', 'rescheduled'];
+      const safeStatus = validStatuses.includes(statusFilter.toLowerCase()) ? statusFilter.toLowerCase() : 'all';
+      
+      // Build status condition
+      const statusCondition = safeStatus === 'all' 
+        ? sql``
+        : sql`AND LOWER(TRIM(a.status)) = ${safeStatus}`;
+      
+      // Build practitioner filter
+      let practitionerCondition = sql``;
+      if (practitionerId && practitionerId !== 'all') {
+        const practitionerIdNum = parseInt(practitionerId);
+        if (!isNaN(practitionerIdNum)) {
+          practitionerCondition = sql`AND a.provider_id = ${practitionerIdNum}`;
+        }
+      }
+      
+      // Build location filter
+      let locationCondition = sql``;
+      if (locationFilter && locationFilter !== 'all' && locationFilter.trim() !== '') {
+        locationCondition = sql`AND LOWER(TRIM(a.location)) = LOWER(TRIM(${locationFilter}))`;
+      }
+      
+      // Build date condition
+      let dateCondition = sql``;
+      if (startDate && endDate) {
+        dateCondition = sql`AND a.scheduled_at >= ${startDate}::timestamp AND a.scheduled_at <= ${endDate}::timestamp`;
+      } else if (startDate) {
+        dateCondition = sql`AND a.scheduled_at >= ${startDate}::timestamp`;
+      } else if (endDate) {
+        dateCondition = sql`AND a.scheduled_at <= ${endDate}::timestamp`;
+      } else {
+        // Default to last 30 days if no date range provided
+        dateCondition = sql`AND a.scheduled_at >= CURRENT_DATE - INTERVAL '30 days'`;
+      }
+      
+      let groupByClause = sql``;
+      let selectFields = sql``;
+      
+      if (groupBy === 'day') {
+        selectFields = sql`DATE(a.scheduled_at) as date, COALESCE(a.appointment_type, a.type, 'Unknown') as appointment_type`;
+        groupByClause = sql`GROUP BY DATE(a.scheduled_at), COALESCE(a.appointment_type, a.type, 'Unknown') ORDER BY date DESC, total_appointments DESC`;
+      } else if (groupBy === 'month') {
+        selectFields = sql`TO_CHAR(a.scheduled_at, 'YYYY-MM') as month, TO_CHAR(a.scheduled_at, 'Mon YYYY') as month_label, COALESCE(a.appointment_type, a.type, 'Unknown') as appointment_type`;
+        groupByClause = sql`GROUP BY TO_CHAR(a.scheduled_at, 'YYYY-MM'), TO_CHAR(a.scheduled_at, 'Mon YYYY'), COALESCE(a.appointment_type, a.type, 'Unknown') ORDER BY month DESC, total_appointments DESC`;
+      } else {
+        // Default: group by type only
+        selectFields = sql`COALESCE(a.appointment_type, a.type, 'Unknown') as appointment_type`;
+        groupByClause = sql`GROUP BY COALESCE(a.appointment_type, a.type, 'Unknown') ORDER BY total_appointments DESC`;
+      }
+      
+      const result = await db.execute(sql`
+        SELECT 
+          ${selectFields},
+          COUNT(*)::integer as total_appointments,
+          COUNT(DISTINCT a.patient_id)::integer as total_patients,
+          COUNT(DISTINCT a.provider_id)::integer as total_practitioners
+        FROM appointments a
+        WHERE a.organization_id = ${organizationId}
+          ${statusCondition}
+          ${practitionerCondition}
+          ${locationCondition}
+          ${dateCondition}
+        ${groupByClause}
+      `);
+      
+      console.log(`[APPOINTMENT-ANALYTICS] Organization ${organizationId}: Found ${result.rows?.length || 0} appointment records (groupBy=${groupBy}, status=${safeStatus})`);
+      res.json(result.rows || []);
+    } catch (error) {
+      console.error("Error fetching appointment analytics:", error);
+      res.status(500).json({ error: "Failed to fetch appointment analytics", details: error instanceof Error ? error.message : String(error) });
     }
   });
 
