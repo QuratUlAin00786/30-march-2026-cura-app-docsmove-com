@@ -6314,16 +6314,67 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       if (title !== undefined) allowedUpdates.title = title;
       if (description !== undefined) allowedUpdates.description = description;
       if (scheduledAt !== undefined) {
-        // Convert scheduledAt to Date object if it's a string
+        // Handle scheduledAt to store EXACT time without timezone conversion
+        // Database column is timestamp WITHOUT time zone, so we store the exact time components
         try {
           if (typeof scheduledAt === 'string') {
-            const dateObj = new Date(scheduledAt);
-            if (isNaN(dateObj.getTime())) {
-              throw new Error(`Invalid scheduledAt date format: ${scheduledAt}`);
+            // If string doesn't have timezone (no Z or +/-), treat as exact time components
+            // Format: "2026-03-24T00:00:00" should be stored as "2026-03-24 00:00:00" (12:00 AM)
+            if (!scheduledAt.includes('Z') && !/[+-]\d{2}:\d{2}$/.test(scheduledAt)) {
+              // Timezone-naive string - convert to PostgreSQL timestamp format (YYYY-MM-DD HH:mm:ss)
+              const [datePart, timePart] = scheduledAt.split('T');
+              if (datePart && timePart) {
+                const [timeOnly] = timePart.split('.');
+                const [hours, minutes, seconds = 0] = timeOnly.split(':').map(Number);
+                // Format as PostgreSQL timestamp string: "YYYY-MM-DD HH:mm:ss"
+                // This will be stored EXACTLY as-is in the database (no timezone conversion)
+                const pgTimestamp = `${datePart} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds || 0).padStart(2, '0')}`;
+                console.log(`[UPDATE-APPOINTMENT] Converting timezone-naive string to PostgreSQL timestamp:`, {
+                  input: scheduledAt,
+                  pgTimestamp,
+                  note: 'Will be stored exactly as-is in database (no timezone conversion)'
+                });
+                // Store as string - Drizzle will handle it correctly for timestamp without timezone
+                allowedUpdates.scheduledAt = pgTimestamp as any;
+              } else {
+                throw new Error(`Invalid scheduledAt date format: ${scheduledAt}`);
+              }
+            } else {
+              // Timezone-aware string - extract components and store as local time
+              const dateObj = new Date(scheduledAt);
+              if (isNaN(dateObj.getTime())) {
+                throw new Error(`Invalid scheduledAt date format: ${scheduledAt}`);
+              }
+              // Extract local time components and format as PostgreSQL timestamp
+              const year = dateObj.getFullYear();
+              const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+              const day = String(dateObj.getDate()).padStart(2, '0');
+              const hours = String(dateObj.getHours()).padStart(2, '0');
+              const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+              const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+              const pgTimestamp = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+              console.log(`[UPDATE-APPOINTMENT] Converting timezone-aware string to PostgreSQL timestamp:`, {
+                input: scheduledAt,
+                pgTimestamp,
+                note: 'Using local time components (no UTC conversion)'
+              });
+              allowedUpdates.scheduledAt = pgTimestamp as any;
             }
-            allowedUpdates.scheduledAt = dateObj;
           } else if (scheduledAt instanceof Date) {
-            allowedUpdates.scheduledAt = scheduledAt;
+            // Date object - extract local time components and format as PostgreSQL timestamp
+            const year = scheduledAt.getFullYear();
+            const month = String(scheduledAt.getMonth() + 1).padStart(2, '0');
+            const day = String(scheduledAt.getDate()).padStart(2, '0');
+            const hours = String(scheduledAt.getHours()).padStart(2, '0');
+            const minutes = String(scheduledAt.getMinutes()).padStart(2, '0');
+            const seconds = String(scheduledAt.getSeconds()).padStart(2, '0');
+            const pgTimestamp = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+            console.log(`[UPDATE-APPOINTMENT] Converting Date object to PostgreSQL timestamp:`, {
+              dateObject: scheduledAt.toString(),
+              pgTimestamp,
+              note: 'Using local time components (getHours, not getUTCHours)'
+            });
+            allowedUpdates.scheduledAt = pgTimestamp as any;
           } else {
             throw new Error(`Invalid scheduledAt type: ${typeof scheduledAt}`);
           }

@@ -1792,15 +1792,51 @@ export class DatabaseStorage implements IStorage {
         id,
         organizationId,
         updates,
-        updateKeys: Object.keys(updates)
+        updateKeys: Object.keys(updates),
+        scheduledAtType: typeof updates.scheduledAt,
+        scheduledAtValue: updates.scheduledAt
       });
       
-      const [updated] = await db.update(appointments)
-        .set(updates)
+      // Handle scheduledAt separately if it's a string (PostgreSQL timestamp format)
+      // This ensures exact time storage without timezone conversion
+      const { scheduledAt, ...otherUpdates } = updates as any;
+      const updateData: any = { ...otherUpdates };
+      
+      if (scheduledAt !== undefined) {
+        // If scheduledAt is a string in PostgreSQL format (YYYY-MM-DD HH:mm:ss),
+        // use raw SQL to update it directly without timezone conversion
+        if (typeof scheduledAt === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(scheduledAt)) {
+          console.log(`[STORAGE] Updating scheduledAt using raw SQL (no timezone conversion):`, scheduledAt);
+          // Use raw SQL to set timestamp without timezone conversion
+          await db.execute(sql`
+            UPDATE appointments
+            SET scheduled_at = ${scheduledAt}::timestamp
+            WHERE id = ${id} AND organization_id = ${organizationId}
+          `);
+        } else {
+          // If it's a Date object or other format, let Drizzle handle it
+          updateData.scheduledAt = scheduledAt;
+        }
+      }
+      
+      // Update other fields using Drizzle
+      if (Object.keys(updateData).length > 0) {
+        await db.update(appointments)
+          .set(updateData)
+          .where(and(eq(appointments.id, id), eq(appointments.organizationId, organizationId)));
+      }
+      
+      // Fetch and return the updated appointment
+      const [updated] = await db
+        .select()
+        .from(appointments)
         .where(and(eq(appointments.id, id), eq(appointments.organizationId, organizationId)))
-        .returning();
+        .limit(1);
       
       console.log(`[STORAGE] updateAppointment result:`, updated ? 'success' : 'no rows updated');
+      if (updated) {
+        console.log(`[STORAGE] Updated appointment scheduledAt:`, updated.scheduledAt);
+      }
       return updated || undefined;
     } catch (error: any) {
       console.error(`[STORAGE] updateAppointment error:`, error);

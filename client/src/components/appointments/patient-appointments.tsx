@@ -445,11 +445,20 @@ export default function PatientAppointments({
       const response = await apiRequest("GET", "/api/appointments");
       const data = await response.json();
 
-      console.log(`[EDIT-APPOINTMENT] Fetching appointments for date: ${dateStr}, provider: ${editingAppointment.providerId}`);
+      console.log(`[EDIT-APPOINTMENT] ===== FETCHING APPOINTMENTS FOR DATE =====`);
+      console.log(`[EDIT-APPOINTMENT] Selected date: ${dateStr}`);
+      console.log(`[EDIT-APPOINTMENT] Provider ID: ${editingAppointment.providerId}`);
       console.log(`[EDIT-APPOINTMENT] Total appointments from API:`, data.length);
+      console.log(`[EDIT-APPOINTMENT] Sample appointments (first 5):`, data.slice(0, 5).map((apt: any) => ({
+        id: apt.id,
+        providerId: apt.providerId,
+        scheduledAt: apt.scheduledAt,
+        status: apt.status,
+        duration: apt.duration
+      })));
 
       // Filter appointments for the selected date and provider
-      // Follow the same logic as appointment-calendar.tsx
+      // Use parseScheduledAtAsLocal to correctly parse dates and compare them
       const dayAppointments = data.filter((apt: any) => {
         // Exclude the appointment being edited from conflict checks
         if (editingAppointment && apt.id === editingAppointment.id) {
@@ -468,12 +477,24 @@ export default function PatientAppointments({
           return false;
         }
         
-        // Parse the scheduledAt directly without timezone conversion
-        // Format: "2026-03-19T09:30:00.000Z"
-        const aptDateString = apt.scheduledAt?.substring(0, 10); // Extract "2026-03-19"
+        // CRITICAL: Parse scheduledAt using the SAME function as time extraction
+        // This ensures date comparison works correctly regardless of date format
+        const aptDate = parseScheduledAtAsLocal(apt.scheduledAt);
+        const aptDateString = format(aptDate, "yyyy-MM-dd");
         
-        // Only check appointments on the same date
-        if (aptDateString !== dateStr) return false;
+        console.log('[EDIT-APPOINTMENT] Checking appointment date:', {
+          appointmentId: apt.id,
+          scheduledAtRaw: apt.scheduledAt,
+          parsedDate: aptDate.toString(),
+          aptDateString,
+          selectedDateString: dateStr,
+          matches: aptDateString === dateStr
+        });
+        
+        // Only check appointments on the same date (using parsed date, not string extraction)
+        if (aptDateString !== dateStr) {
+          return false;
+        }
         
         return true;
       });
@@ -485,33 +506,65 @@ export default function PatientAppointments({
       const bookedSlotsSet = new Set<string>();
       
       dayAppointments.forEach((apt: any) => {
-        // Extract time in 24-hour format directly from the ISO string (no timezone conversion)
-        const timeString = apt.scheduledAt?.substring(11, 16); // Extract "09:30"
-        if (!timeString) return;
+        // CRITICAL: Parse scheduledAt as local time to avoid timezone conversion
+        // Use the SAME logic as orange slots (parseScheduledAtAsLocal + getHours/getMinutes)
+        const aptDate = parseScheduledAtAsLocal(apt.scheduledAt);
         
-        const [aptHour, aptMinute] = timeString.split(':').map(Number);
+        // Extract local time components using the SAME methods as orange slot logic
+        // This ensures consistency - if orange slots work, grey slots will work too
+        const aptHour = aptDate.getHours(); // Local hour (same as selectedDate.getHours() for orange)
+        const aptMinute = aptDate.getMinutes(); // Local minute (same as selectedDate.getMinutes() for orange)
         const aptStartMinutes = aptHour * 60 + aptMinute;
         const aptDuration = apt.duration || 30; // Default to 30 if duration not set
         const aptEndMinutes = aptStartMinutes + aptDuration;
         
+        console.log(`[EDIT-APPOINTMENT] Processing booked appointment (SAME LOGIC AS ORANGE):`, {
+          appointmentId: apt.id,
+          scheduledAtRaw: apt.scheduledAt,
+          scheduledAtType: typeof apt.scheduledAt,
+          parsedDate: aptDate.toString(),
+          parsedDateISO: aptDate.toISOString(),
+          localHour: aptHour,
+          localMinute: aptMinute,
+          utcHour: aptDate.getUTCHours(), // For comparison
+          utcMinute: aptDate.getUTCMinutes(), // For comparison
+          localTime: `${aptHour}:${aptMinute.toString().padStart(2, '0')}`,
+          duration: aptDuration,
+          startMinutes: aptStartMinutes,
+          endMinutes: aptEndMinutes,
+          note: 'Using getHours() (local) not getUTCHours() - same as orange slot logic'
+        });
+        
         // Generate all 15-minute slots that overlap with this appointment
-        // Example: 9:30 AM appointment for 60 min occupies 9:30, 9:45, 10:00, 10:15 (ends at 10:30)
+        // Use the EXACT SAME logic as orange slots for consistency
         for (let slotMinutes = aptStartMinutes; slotMinutes < aptEndMinutes; slotMinutes += 15) {
           const slotHour = Math.floor(slotMinutes / 60);
           const slotMin = slotMinutes % 60;
           
-          // Convert to 12-hour format
+          // Convert to 12-hour format (SAME as orange slot formatting)
           const period = slotHour >= 12 ? 'PM' : 'AM';
           const displayHours = slotHour % 12 || 12;
           const displayMinutes = slotMin === 0 ? '00' : slotMin.toString().padStart(2, '0');
           const slotString = `${displayHours}:${displayMinutes} ${period}`;
+          
+          console.log(`[EDIT-APPOINTMENT] Adding booked slot:`, {
+            slotString,
+            slotHour,
+            slotMin,
+            fromAppointment: apt.id,
+            appointmentTime: `${aptHour}:${aptMinute.toString().padStart(2, '0')}`
+          });
           
           bookedSlotsSet.add(slotString);
         }
       });
 
       const bookedSlots = Array.from(bookedSlotsSet).sort();
+      console.log(`[EDIT-APPOINTMENT] ===== FINAL BOOKED TIME SLOTS =====`);
+      console.log(`[EDIT-APPOINTMENT] Total booked slots: ${bookedSlots.length}`);
       console.log(`[EDIT-APPOINTMENT] Booked time slots:`, bookedSlots);
+      console.log(`[EDIT-APPOINTMENT] Appointments processed: ${dayAppointments.length}`);
+      console.log(`[EDIT-APPOINTMENT] ===========================================`);
 
       setBookedTimeSlots(bookedSlots);
       return bookedSlots;
@@ -525,7 +578,8 @@ export default function PatientAppointments({
   // Fetch appointments when editing appointment date or provider changes
   React.useEffect(() => {
     if (editingAppointment?.scheduledAt) {
-      const selectedDate = new Date(editingAppointment.scheduledAt);
+      // Parse scheduledAt as local time to avoid timezone conversion
+      const selectedDate = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
       fetchAppointmentsForDate(selectedDate);
     }
   }, [editingAppointment?.scheduledAt, editingAppointment?.id, editingAppointment?.providerId]);
@@ -892,6 +946,58 @@ export default function PatientAppointments({
     return null; // No shift found
   };
 
+  // Generate time slots based on shift boundaries (custom shifts first, then default shifts by role)
+  const generateTimeSlotsFromShifts = (
+    providerId: number | string | null,
+    date: Date,
+    roleName?: string
+  ): string[] => {
+    if (!providerId || !date) {
+      console.log('[TIME-SLOTS] Missing providerId or date, returning empty slots');
+      return [];
+    }
+
+    // Get shift bounds using the same logic as getProviderShiftBounds
+    const shiftBounds = getProviderShiftBounds(providerId, date, roleName);
+    
+    if (!shiftBounds) {
+      console.log('[TIME-SLOTS] No shift bounds found, returning empty slots');
+      return [];
+    }
+
+    console.log('[TIME-SLOTS] Generating slots from shift bounds:', {
+      providerId,
+      roleName,
+      date: format(date, 'yyyy-MM-dd'),
+      startMinutes: shiftBounds.start,
+      endMinutes: shiftBounds.end,
+      startTime: `${Math.floor(shiftBounds.start / 60)}:${(shiftBounds.start % 60).toString().padStart(2, '0')}`,
+      endTime: `${Math.floor(shiftBounds.end / 60)}:${(shiftBounds.end % 60).toString().padStart(2, '0')}`
+    });
+
+    const timeSlots: string[] = [];
+    let currentMinutes = shiftBounds.start;
+
+    // Generate 15-minute interval slots between start and end time
+    while (currentMinutes < shiftBounds.end) {
+      const hour24 = Math.floor(currentMinutes / 60);
+      const minute = currentMinutes % 60;
+      
+      // Convert to 12-hour format
+      const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+      const period = hour24 < 12 ? 'AM' : 'PM';
+      const timeString = `${hour12}:${minute.toString().padStart(2, '0')} ${period}`;
+      
+      timeSlots.push(timeString);
+      
+      // Move to next 15-minute slot
+      currentMinutes += 15;
+    }
+
+    console.log('[TIME-SLOTS] Generated', timeSlots.length, 'time slots:', timeSlots.slice(0, 5), '...', timeSlots.slice(-5));
+    return timeSlots;
+  };
+
   // Check if sufficient consecutive time slots are available for the selected duration
   // This version accepts bookedSlots as a parameter for validation and checks shift boundaries
   const checkConsecutiveSlotsAvailableWithSlots = (
@@ -1094,12 +1200,14 @@ export default function PatientAppointments({
       });
       
       // Ensure we have the latest booked slots for the selected date
-      const selectedDate = new Date(editingAppointment.scheduledAt);
+      // Parse scheduledAt as local time to avoid timezone conversion
+      const selectedDate = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
       const latestBookedSlots = await fetchAppointmentsForDate(selectedDate);
       
       // Validate sufficient time availability before saving
       const duration = editingAppointment.duration || 30;
-      const selectedTime = new Date(editingAppointment.scheduledAt);
+      // Parse scheduledAt as local time to avoid timezone conversion
+      const selectedTime = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
       
       // Get original appointment time (to exclude from validation)
       const originalScheduledAt = (editingAppointment as any)._originalScheduledAtDate as Date | null;
@@ -1149,17 +1257,35 @@ export default function PatientAppointments({
       const consultationId = normalizedAppointmentType === "consultation" ? (editSelectedConsultation?.id || editingAppointment.consultationId || null) : null;
       
       // Format scheduledAt properly - use local time without timezone conversion
+      // CRITICAL: Do NOT use toISOString() or any UTC methods - they cause timezone conversion
       let scheduledAt = editingAppointment.scheduledAt;
+      
+      console.log('[SAVE-EDIT] Formatting scheduledAt (NO timezone conversion):', {
+        original: scheduledAt,
+        originalType: typeof scheduledAt,
+        isDate: scheduledAt instanceof Date
+      });
+      
       if (scheduledAt instanceof Date) {
         // Format as local ISO string (YYYY-MM-DDTHH:mm:ss) without timezone conversion
+        // DO NOT use scheduledAt.toISOString() - it converts to UTC!
         scheduledAt = formatLocalISOString(scheduledAt);
       } else if (typeof scheduledAt === 'string') {
-        // If it's already a string, parse it and format as local time
-        const date = new Date(scheduledAt);
+        // If it's already a string, parse it as local time (no timezone conversion) and format
+        // DO NOT use new Date(scheduledAt) directly if it has timezone - use parseScheduledAtAsLocal
+        const date = parseScheduledAtAsLocal(scheduledAt);
         if (!isNaN(date.getTime())) {
           scheduledAt = formatLocalISOString(date);
+        } else {
+          console.error('[SAVE-EDIT] Failed to parse scheduledAt string:', scheduledAt);
         }
       }
+      
+      console.log('[SAVE-EDIT] Final scheduledAt string (sent to backend):', {
+        scheduledAt,
+        hasTimezone: scheduledAt.includes('Z') || /[+-]\d{2}:\d{2}$/.test(scheduledAt),
+        note: 'Should be FALSE - no timezone indicator means backend treats as local time'
+      });
       
       // Ensure all required fields are present
       const updateData: any = {
@@ -1174,8 +1300,10 @@ export default function PatientAppointments({
         updateData.scheduledAt = scheduledAt;
         console.log('[SAVE-EDIT] Including scheduledAt in update:', {
           original: editingAppointment.scheduledAt,
+          originalType: typeof editingAppointment.scheduledAt,
           formatted: scheduledAt,
-          date: new Date(scheduledAt)
+          parsedBack: parseScheduledAtAsLocal(scheduledAt),
+          parsedBackFormatted: formatTime(parseScheduledAtAsLocal(scheduledAt))
         });
       }
       if (editingAppointment.duration !== undefined) updateData.duration = editingAppointment.duration || 30;
@@ -1194,21 +1322,128 @@ export default function PatientAppointments({
   };
 
   // Helper function to format date as local ISO string (without timezone conversion)
+  // Format: "YYYY-MM-DDTHH:mm:ss" (no timezone indicator, backend should treat as-is)
+  // IMPORTANT: Uses getHours(), getMinutes(), etc. (local time) NOT getUTCHours(), getUTCMinutes() (UTC)
   const formatLocalISOString = (date: Date): string => {
+    // Use LOCAL time methods (not UTC methods) to avoid timezone conversion
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    const hours = String(date.getHours()).padStart(2, '0'); // Local hours, not UTC
+    const minutes = String(date.getMinutes()).padStart(2, '0'); // Local minutes, not UTC
+    const seconds = String(date.getSeconds()).padStart(2, '0'); // Local seconds, not UTC
+    
+    // Return without timezone indicator (no Z, no +/- offset)
+    // Backend will parse this as local time components
+    const result = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    
+    console.log('[FORMAT-LOCAL-ISO] Formatting date without timezone:', {
+      inputDate: date.toString(),
+      localComponents: { year, month, day, hours, minutes, seconds },
+      formatted: result,
+      // Verify no timezone conversion by comparing with UTC methods
+      utcHours: date.getUTCHours(),
+      localHours: date.getHours(),
+      timezoneOffset: date.getTimezoneOffset()
+    });
+    
+    return result;
+  };
+
+  // Parse scheduledAt values WITHOUT applying JS timezone conversion.
+  // This is the SAME function used for both orange slots (current appointment) and grey slots (booked appointments)
+  // Handles multiple formats: PostgreSQL timestamp, ISO with timezone, ISO without timezone
+  const parseScheduledAtAsLocal = (value: string | Date): Date => {
+    if (value instanceof Date) {
+      return value;
+    }
+    if (typeof value !== "string") {
+      return new Date(value as any);
+    }
+
+    // Handle PostgreSQL timestamp format: "2026-03-24 15:00:00" (space-separated, no timezone)
+    // This is the format returned by the database when stored as timestamp without timezone
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
+      const [datePart, timePart] = value.split(' ');
+      const [y, m, d] = datePart.split("-").map((n) => parseInt(n, 10));
+      const [hhStr, mmStr, ssStr] = timePart.split(":");
+      const hh = parseInt(hhStr || "0", 10);
+      const mm = parseInt(mmStr || "0", 10);
+      const ss = parseInt((ssStr || "0").split(".")[0], 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        const result = new Date(y, (m || 1) - 1, d || 1, hh, mm, ss, 0);
+        console.log('[PARSE-LOCAL] Parsed PostgreSQL format (space-separated):', {
+          input: value,
+          components: { y, m, d, hh, mm, ss },
+          result: result.toString(),
+          resultHours: result.getHours(),
+          resultLocalTime: `${result.getHours()}:${result.getMinutes().toString().padStart(2, '0')}`
+        });
+        return result;
+      }
+    }
+
+    // Handle ISO format with timezone: "2026-03-26T00:00:00.000Z" or "2026-03-26T15:00:00.000Z"
+    // Extract components and treat them as local time (no UTC conversion)
+    const isoLike = value.includes("T") && (value.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(value));
+    if (isoLike) {
+      const [datePart, timePartRaw] = value.split("T");
+      const [y, m, d] = datePart.split("-").map((n) => parseInt(n, 10));
+      // Remove timezone indicators (Z or +/-HH:mm)
+      const timePart = (timePartRaw || "").replace("Z", "").replace(/[+-]\d{2}:\d{2}$/, "");
+      const [hhStr, mmStr, ssStr] = timePart.split(":");
+      const hh = parseInt(hhStr || "0", 10);
+      const mm = parseInt(mmStr || "0", 10);
+      const ss = parseInt((ssStr || "0").split(".")[0], 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        const result = new Date(y, (m || 1) - 1, d || 1, hh, mm, ss, 0);
+        console.log('[PARSE-LOCAL] Parsed ISO format with timezone (treating as local):', {
+          input: value,
+          components: { y, m, d, hh, mm, ss },
+          result: result.toString(),
+          resultHours: result.getHours(),
+          resultLocalTime: `${result.getHours()}:${result.getMinutes().toString().padStart(2, '0')}`,
+          note: 'Treating UTC time components as local time (no conversion)'
+        });
+        return result;
+      }
+    }
+
+    // Handle ISO format without timezone: "2026-03-26T00:00:00" (no Z, no offset)
+    if (value.includes("T") && !value.includes("Z") && !/[+-]\d{2}:\d{2}$/.test(value)) {
+      const [datePart, timePartRaw] = value.split("T");
+      const [y, m, d] = datePart.split("-").map((n) => parseInt(n, 10));
+      const [timeOnly] = timePartRaw.split(".");
+      const [hhStr, mmStr, ssStr] = timeOnly.split(":");
+      const hh = parseInt(hhStr || "0", 10);
+      const mm = parseInt(mmStr || "0", 10);
+      const ss = parseInt(ssStr || "0", 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        const result = new Date(y, (m || 1) - 1, d || 1, hh, mm, ss, 0);
+        console.log('[PARSE-LOCAL] Parsed ISO format without timezone:', {
+          input: value,
+          components: { y, m, d, hh, mm, ss },
+          result: result.toString(),
+          resultHours: result.getHours()
+        });
+        return result;
+      }
+    }
+
+    // Fallback: plain strings (already local) or non-ISO formats
+    const result = new Date(value);
+    console.log('[PARSE-LOCAL] Using fallback Date constructor:', {
+      input: value,
+      result: result.toString(),
+      resultHours: result.getHours()
+    });
+    return result;
   };
 
   const formatTime = (timeString: string | Date) => {
     try {
       // Handle both string and Date object
-      const date = timeString instanceof Date ? timeString : new Date(timeString);
-      // Use local time from Date object to avoid timezone conversion issues
+      const date = parseScheduledAtAsLocal(timeString);
       const hours = date.getHours();
       const minutes = date.getMinutes();
       const period = hours >= 12 ? 'PM' : 'AM';
@@ -1223,8 +1458,7 @@ export default function PatientAppointments({
   const formatDate = (timeString: string | Date) => {
     try {
       // Handle both string and Date object
-      const date = timeString instanceof Date ? timeString : new Date(timeString);
-      // Use date-fns format which respects the Date object's local time
+      const date = parseScheduledAtAsLocal(timeString);
       return format(date, "EEEE, MMMM d, yyyy");
     } catch {
       return "Invalid date";
@@ -1255,7 +1489,7 @@ export default function PatientAppointments({
     // Filter by date if selected (compare only date, not time)
     if (dateTimeFilter) {
       filtered = filtered.filter((apt: any) => {
-        const aptDateTime = new Date(apt.scheduledAt);
+        const aptDateTime = parseScheduledAtAsLocal(apt.scheduledAt);
         const filterDate = new Date(dateTimeFilter);
         return isSameDay(aptDateTime, filterDate);
       });
@@ -1273,7 +1507,7 @@ export default function PatientAppointments({
   const base = user?.role === "patient" ? getPatientFilteredAppointments : appointments;
   const filteredAppointments = base
     .filter((apt: any) => {
-      const appointmentDate = new Date(apt.scheduledAt);
+      const appointmentDate = parseScheduledAtAsLocal(apt.scheduledAt);
 
       if (selectedFilter === "upcoming") {
         return isFuture(appointmentDate) || isToday(appointmentDate);
@@ -1284,12 +1518,12 @@ export default function PatientAppointments({
     })
     .sort(
       (a: any, b: any) =>
-        new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime(),
+        parseScheduledAtAsLocal(b.scheduledAt).getTime() - parseScheduledAtAsLocal(a.scheduledAt).getTime(),
     );
 
   // Get upcoming appointments for the logged-in patient
   const upcomingAppointments = appointments.filter((apt: any) => {
-    const appointmentDate = new Date(apt.scheduledAt);
+    const appointmentDate = parseScheduledAtAsLocal(apt.scheduledAt);
     return (isFuture(appointmentDate) || isToday(appointmentDate)) && apt.status?.toLowerCase() === 'scheduled';
   });
 
@@ -1297,8 +1531,8 @@ export default function PatientAppointments({
     upcomingAppointments.length > 0
       ? upcomingAppointments.sort(
           (a: any, b: any) =>
-            new Date(a.scheduledAt).getTime() -
-            new Date(b.scheduledAt).getTime(),
+            parseScheduledAtAsLocal(a.scheduledAt).getTime() -
+            parseScheduledAtAsLocal(b.scheduledAt).getTime(),
         )[0]
       : null;
 
@@ -1309,12 +1543,12 @@ export default function PatientAppointments({
     // Filter and sort upcoming appointments
     const sortedUpcomingAppointments = appointments
       .filter((appointment: any) => {
-        const appointmentDate = new Date(appointment.scheduledAt);
+        const appointmentDate = parseScheduledAtAsLocal(appointment.scheduledAt);
         return appointmentDate > now || isToday(appointmentDate);
       })
       .sort((a: any, b: any) => {
         return (
-          new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+          parseScheduledAtAsLocal(a.scheduledAt).getTime() - parseScheduledAtAsLocal(b.scheduledAt).getTime()
         );
       });
 
@@ -2323,7 +2557,7 @@ export default function PatientAppointments({
                         </button>
                         <span className="font-medium text-gray-900 dark:text-gray-100">
                           {format(
-                            new Date(editingAppointment.scheduledAt),
+                            parseScheduledAtAsLocal(editingAppointment.scheduledAt),
                             "MMMM yyyy",
                           )}
                         </span>
@@ -2380,7 +2614,7 @@ export default function PatientAppointments({
                           const isSelected =
                             format(cellDate, "yyyy-MM-dd") ===
                             format(
-                              new Date(editingAppointment.scheduledAt),
+                              parseScheduledAtAsLocal(editingAppointment.scheduledAt),
                               "yyyy-MM-dd",
                             );
 
@@ -2390,7 +2624,8 @@ export default function PatientAppointments({
                               type="button"
                               onClick={() => {
                                 // Preserve the current time when changing the date
-                                const currentDate = new Date(editingAppointment.scheduledAt);
+                                // Parse scheduledAt as local time to avoid timezone conversion
+                                const currentDate = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
                                 const newDate = new Date(
                                   cellDate.getFullYear(),
                                   cellDate.getMonth(),
@@ -2431,17 +2666,30 @@ export default function PatientAppointments({
                     <div className="mt-1 h-[280px] overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-3 bg-white dark:bg-gray-700 relative z-0">
                       <div className="grid grid-cols-2 gap-2 relative z-0">
                         {(() => {
-                          // Generate all 15-minute time slots from 9:00 AM to 5:00 PM
-                          const timeSlots: string[] = [];
-                          for (let hour = 9; hour <= 17; hour++) {
-                            for (let minute = 0; minute < 60; minute += 15) {
-                              if (hour === 17 && minute > 0) break; // Stop at 5:00 PM
-                              const period = hour >= 12 ? 'PM' : 'AM';
-                              const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-                              const timeSlot = `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
-                              timeSlots.push(timeSlot);
+                          // Generate time slots based on shift boundaries (custom shifts first, then default shifts by role)
+                          const providerId = editingAppointment?.providerId || editingAppointment?.provider_id;
+                          const provider = providerId ? getProviderWithRole(providerId) : null;
+                          const roleName = provider?.role;
+                          // Parse scheduledAt as local time to avoid timezone conversion
+                          const selectedDate = editingAppointment?.scheduledAt ? parseScheduledAtAsLocal(editingAppointment.scheduledAt) : new Date();
+                          
+                          // Generate time slots from shifts
+                          const timeSlots = generateTimeSlotsFromShifts(providerId, selectedDate, roleName);
+                          
+                          // Fallback to default 9 AM - 5 PM if no shifts found
+                          if (timeSlots.length === 0) {
+                            console.log('[TIME-SLOTS] No shifts found, using default 9 AM - 5 PM');
+                            for (let hour = 9; hour <= 17; hour++) {
+                              for (let minute = 0; minute < 60; minute += 15) {
+                                if (hour === 17 && minute > 0) break; // Stop at 5:00 PM
+                                const period = hour >= 12 ? 'PM' : 'AM';
+                                const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                                const timeSlot = `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
+                                timeSlots.push(timeSlot);
+                              }
                             }
                           }
+                          
                           return timeSlots;
                         })().map((timeSlot) => {
                           // Get duration in minutes (default to 30 if not set)
@@ -2458,7 +2706,8 @@ export default function PatientAppointments({
                           const slotEndMinutes = slotStartMinutes + 15; // Each displayed slot is 15 minutes
                           
                           // Get the selected appointment's time in minutes
-                          const selectedDate = new Date(editingAppointment.scheduledAt);
+                          // Parse scheduledAt as local time to avoid timezone conversion
+                          const selectedDate = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
                           const selectedHour24 = selectedDate.getHours();
                           const selectedMinutes = selectedDate.getMinutes();
                           const selectedStartMinutes = selectedHour24 * 60 + selectedMinutes;
@@ -2507,25 +2756,35 @@ export default function PatientAppointments({
                                 if (period === "AM" && hour24 === 12)
                                   hour24 = 0;
 
-                                // Create a new date from the current scheduledAt to preserve the date
-                                const currentDate = new Date(editingAppointment.scheduledAt);
-                                // Set the time in local timezone (no conversion)
+                                // Parse the current scheduledAt as local time (no timezone conversion)
+                                const currentDate = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
+                                // Create new Date with LOCAL time components (no timezone conversion)
+                                // Using Date constructor with individual components creates a LOCAL date
                                 const newDate = new Date(
                                   currentDate.getFullYear(),
                                   currentDate.getMonth(),
                                   currentDate.getDate(),
-                                  hour24,
-                                  parseInt(minutes),
-                                  0,
-                                  0
+                                  hour24, // Local hour (1 for 1:00 AM)
+                                  parseInt(minutes), // Local minutes
+                                  0, // Local seconds
+                                  0 // Local milliseconds
                                 );
                                 
-                                console.log('[TIME-SLOT] Selected time slot:', {
+                                // Verify no timezone conversion occurred
+                                const formattedForSave = formatLocalISOString(newDate);
+                                
+                                console.log('[TIME-SLOT] Selected time slot (NO timezone conversion):', {
                                   timeSlot,
                                   hour24,
                                   minutes: parseInt(minutes),
+                                  originalScheduledAt: editingAppointment.scheduledAt,
+                                  currentDate: currentDate.toString(),
                                   newDate: newDate.toString(),
-                                  formattedTime: formatTime(newDate)
+                                  newDateLocalHours: newDate.getHours(), // Should match hour24
+                                  newDateUTCHours: newDate.getUTCHours(), // May differ - this is expected
+                                  formattedForSave, // Will be sent to backend
+                                  formattedTime: formatTime(newDate),
+                                  note: 'newDate.getHours() should equal hour24 (no conversion)'
                                 });
                                 
                                 setEditingAppointment({
