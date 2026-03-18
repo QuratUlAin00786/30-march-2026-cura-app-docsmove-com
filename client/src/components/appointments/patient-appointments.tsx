@@ -2537,60 +2537,61 @@ export default function PatientAppointments({
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Date *
                     </Label>
-                    <div className="mt-1 h-[280px] p-4 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 overflow-y-auto">
-                      <div className="flex items-center justify-between mb-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const currentDate = new Date(
-                              editingAppointment.scheduledAt,
-                            );
-                            currentDate.setMonth(currentDate.getMonth() - 1);
-                            setEditingAppointment({
-                              ...editingAppointment,
-                              scheduledAt: currentDate,
-                            });
-                          }}
-                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        <span className="font-medium text-gray-900 dark:text-gray-100">
-                          {format(
-                            parseScheduledAtAsLocal(editingAppointment.scheduledAt),
-                            "MMMM yyyy",
+                    <div className="mt-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 overflow-hidden">
+                      <div className="p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const currentDate = new Date(
+                                editingAppointment.scheduledAt,
+                              );
+                              currentDate.setMonth(currentDate.getMonth() - 1);
+                              setEditingAppointment({
+                                ...editingAppointment,
+                                scheduledAt: currentDate,
+                              });
+                            }}
+                            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {format(
+                              parseScheduledAtAsLocal(editingAppointment.scheduledAt),
+                              "MMMM yyyy",
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const currentDate = new Date(
+                                editingAppointment.scheduledAt,
+                              );
+                              currentDate.setMonth(currentDate.getMonth() + 1);
+                              setEditingAppointment({
+                                ...editingAppointment,
+                                scheduledAt: currentDate,
+                              });
+                            }}
+                            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-7 gap-0.5 text-xs mb-1">
+                          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(
+                            (day) => (
+                              <div
+                                key={day}
+                                className="p-1.5 text-center font-medium text-gray-500 dark:text-gray-400"
+                              >
+                                {day}
+                              </div>
+                            ),
                           )}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const currentDate = new Date(
-                              editingAppointment.scheduledAt,
-                            );
-                            currentDate.setMonth(currentDate.getMonth() + 1);
-                            setEditingAppointment({
-                              ...editingAppointment,
-                              scheduledAt: currentDate,
-                            });
-                          }}
-                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300"
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-7 gap-1 text-xs mb-2">
-                        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(
-                          (day) => (
-                            <div
-                              key={day}
-                              className="p-2 text-center font-medium text-gray-500 dark:text-gray-400"
-                            >
-                              {day}
-                            </div>
-                          ),
-                        )}
-                      </div>
-                      <div className="grid grid-cols-7 gap-1">
+                        </div>
+                        <div className="grid grid-cols-7 gap-0.5">
                         {Array.from({ length: 42 }, (_, i) => {
                           const currentMonth = new Date(
                             editingAppointment.scheduledAt,
@@ -2642,7 +2643,7 @@ export default function PatientAppointments({
                                 // Fetch appointments for the new date to update time slot availability
                                 fetchAppointmentsForDate(cellDate);
                               }}
-                              className={`p-2 text-sm rounded hover:bg-blue-50 dark:hover:bg-blue-900 ${
+                              className={`p-1.5 text-xs rounded hover:bg-blue-50 dark:hover:bg-blue-900 ${
                                 isSelected
                                   ? "bg-blue-500 text-white"
                                   : isCurrentMonth
@@ -2654,6 +2655,7 @@ export default function PatientAppointments({
                             </button>
                           );
                         })}
+                        </div>
                       </div>
                     </div>
                   </div>

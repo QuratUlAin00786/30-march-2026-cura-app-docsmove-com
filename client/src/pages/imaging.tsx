@@ -3856,8 +3856,10 @@ export default function ImagingPage() {
                               <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>File Name</th>
                               <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Radiologist</th>
                               <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Priority</th>
-                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Status</th>
-                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Actions</th>
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Status</th>
+                                {user?.role !== "patient" && activeTab === "order-study" && (
+                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Actions</th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="bg-white dark:bg-card divide-y divide-gray-200 dark:divide-gray-700">
@@ -3907,8 +3909,10 @@ export default function ImagingPage() {
                                 {activeTab === "order-study" && (
                                   <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Order Ready</th>
                                 )}
-                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '4%' }}>Signed</th>
-                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Actions</th>
+                                  <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '4%' }}>Signed</th>
+                                  {user?.role !== "patient" && activeTab === "order-study" && (
+                                    <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Actions</th>
+                                  )}
                               </tr>
                             </thead>
                             <tbody className="bg-white dark:bg-card divide-y divide-gray-200 dark:divide-gray-700">
@@ -4576,9 +4580,10 @@ export default function ImagingPage() {
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-1 py-1.5 text-[11px] min-w-0" data-actions-cell>
-                                    <div className="flex items-center gap-0.5 justify-center flex-shrink-0 flex-wrap">
-                                      {activeTab === "imaging-results" && user?.role !== 'patient' ? (
+                                  {user?.role !== "patient" && activeTab === "order-study" ? (
+                                    <td className="px-1 py-1.5 text-[11px] min-w-0" data-actions-cell>
+                                      <div className="flex items-center gap-0.5 justify-center flex-shrink-0 flex-wrap">
+                                        {activeTab === "imaging-results" && user?.role !== 'patient' ? (
                                         <DropdownMenu open={openActionsStudyId === study.id} onOpenChange={(open) => setOpenActionsStudyId(open ? study.id : null)}>
                                           <DropdownMenuTrigger asChild>
                                             <Button
@@ -4717,8 +4722,9 @@ export default function ImagingPage() {
                                           <Save className="h-2.5 w-2.5 text-blue-600 dark:text-blue-400" />
                                         </Button>
                                       )}
-                                    </div>
-                                  </td>
+                                      </div>
+                                    </td>
+                                  ) : null}
                                 </tr>
                               ))}
                             </tbody>

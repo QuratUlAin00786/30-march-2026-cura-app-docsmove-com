@@ -1366,6 +1366,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
 }
 
 export default function Telemedicine() {
+  const { user } = useAuth();
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("start");
   const [currentCall, setCurrentCall] = useState<Consultation | null>(null);
@@ -2453,14 +2454,15 @@ export default function Telemedicine() {
             </Dialog>
           )}
 
-          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                <Settings className="w-4 h-4 mr-2" />
-                Settings
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-[min(42rem,calc(100vw-2rem))] max-h-[min(90vh,calc(100dvh-2rem))] flex flex-col overflow-hidden p-4 sm:p-6">
+          {user?.role !== "patient" && (
+            <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Settings
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-[min(42rem,calc(100vw-2rem))] max-h-[min(90vh,calc(100dvh-2rem))] flex flex-col overflow-hidden p-4 sm:p-6">
               <DialogHeader className="flex-shrink-0">
                 <DialogTitle>Telemedicine Settings</DialogTitle>
               </DialogHeader>
@@ -2720,6 +2722,7 @@ export default function Telemedicine() {
               </div>
             </DialogContent>
           </Dialog>
+          )}
         </div>
       </div>
 
