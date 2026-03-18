@@ -7109,10 +7109,42 @@ This treatment plan should be reviewed and adjusted based on individual patient 
 
       console.log(`Updating appointment ${appointmentId} with data:`, updateData);
 
-      // Convert scheduledAt string to Date object for database
+      // IMPORTANT: Do NOT convert scheduledAt with new Date(...) here.
+      // That applies timezone conversion and causes time shifts (e.g. 12:00 AM -> 7:00 AM).
+      // Instead, convert to a timezone-naive PostgreSQL timestamp string and store as-is.
       const updatePayload: any = { ...updateData };
-      if (updateData.scheduledAt) {
-        updatePayload.scheduledAt = new Date(updateData.scheduledAt);
+      if (updateData.scheduledAt !== undefined) {
+        const scheduledAt = updateData.scheduledAt;
+        if (scheduledAt === null) {
+          updatePayload.scheduledAt = null;
+        } else if (typeof scheduledAt === "string") {
+          // If string doesn't have timezone (no Z or +/-), treat as exact time components
+          if (!scheduledAt.includes("Z") && !/[+-]\d{2}:\d{2}$/.test(scheduledAt)) {
+            const [datePart, timePart] = scheduledAt.split("T");
+            if (!datePart || !timePart) {
+              throw new Error(`Invalid scheduledAt date format: ${scheduledAt}`);
+            }
+            const [timeOnly] = timePart.split(".");
+            const [hours, minutes, seconds = 0] = timeOnly.split(":").map(Number);
+            const pgTimestamp = `${datePart} ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds || 0).padStart(2, "0")}`;
+            updatePayload.scheduledAt = pgTimestamp;
+          } else {
+            // Timezone-aware string - extract LOCAL components and store as timestamp string
+            const dateObj = new Date(scheduledAt);
+            if (isNaN(dateObj.getTime())) {
+              throw new Error(`Invalid scheduledAt date format: ${scheduledAt}`);
+            }
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, "0");
+            const day = String(dateObj.getDate()).padStart(2, "0");
+            const hours = String(dateObj.getHours()).padStart(2, "0");
+            const minutes = String(dateObj.getMinutes()).padStart(2, "0");
+            const seconds = String(dateObj.getSeconds()).padStart(2, "0");
+            updatePayload.scheduledAt = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+          }
+        } else {
+          throw new Error(`Invalid scheduledAt type: ${typeof scheduledAt}`);
+        }
       }
 
       const updated = await storage.updateAppointment(appointmentId, req.tenant!.id, updatePayload);

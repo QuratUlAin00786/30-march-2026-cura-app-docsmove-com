@@ -3538,6 +3538,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                             <SelectContent>
                               <SelectItem value="15">15 minutes</SelectItem>
                               <SelectItem value="30">30 minutes</SelectItem>
+                              <SelectItem value="45">45 minutes</SelectItem>
                               <SelectItem value="60">60 minutes</SelectItem>
                               <SelectItem value="90">90 minutes</SelectItem>
                               <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -4286,6 +4287,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                             <SelectContent>
                               <SelectItem value="15">15 minutes</SelectItem>
                               <SelectItem value="30">30 minutes</SelectItem>
+                              <SelectItem value="45">45 minutes</SelectItem>
                               <SelectItem value="60">60 minutes</SelectItem>
                               <SelectItem value="90">90 minutes</SelectItem>
                           <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -4885,6 +4887,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           <SelectContent>
                             <SelectItem value="15">15 minutes</SelectItem>
                             <SelectItem value="30">30 minutes</SelectItem>
+                            <SelectItem value="45">45 minutes</SelectItem>
                             <SelectItem value="60">60 minutes</SelectItem>
                             <SelectItem value="90">90 minutes</SelectItem>
                             <SelectItem value="120">120 minutes (2 hours)</SelectItem>

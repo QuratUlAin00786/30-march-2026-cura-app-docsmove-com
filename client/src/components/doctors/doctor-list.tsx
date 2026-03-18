@@ -2175,6 +2175,7 @@ export function DoctorList({
                     <SelectContent>
                       <SelectItem value="15">15 minutes</SelectItem>
                       <SelectItem value="30">30 minutes</SelectItem>
+                      <SelectItem value="45">45 minutes</SelectItem>
                       <SelectItem value="60">60 minutes</SelectItem>
                       <SelectItem value="90">90 minutes</SelectItem>
                       <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -2199,6 +2200,7 @@ export function DoctorList({
                   <SelectContent>
                     <SelectItem value="15">15 minutes</SelectItem>
                     <SelectItem value="30">30 minutes</SelectItem>
+                    <SelectItem value="45">45 minutes</SelectItem>
                     <SelectItem value="60">60 minutes</SelectItem>
                     <SelectItem value="90">90 minutes</SelectItem>
                     <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -2359,7 +2361,7 @@ export function DoctorList({
                 <Label className="text-sm font-medium">Description</Label>
                 <Input
                   type="text"
-                  placeholder="Enter appointment description"
+                  placeholder="e.g. wheelchair, assistance, special needs"
                   value={appointmentDescription}
                   onChange={(e) => setAppointmentDescription(e.target.value)}
                   className="mt-1"
@@ -2509,7 +2511,7 @@ export function DoctorList({
               {/* Select Date */}
               <div>
                 <Label className="text-sm font-medium mb-1 block">Select Date</Label>
-                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-2 h-[320px] overflow-y-auto">
                   <Calendar
                     mode="single"
                     selected={selectedDate}

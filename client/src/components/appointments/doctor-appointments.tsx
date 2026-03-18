@@ -82,11 +82,13 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   });
 
   // Fetch users for patient names and doctor info
-  const { data: usersData, isLoading: usersLoading } = useQuery({
+  const usersQuery = useQuery({
     queryKey: ["/api/users"],
     staleTime: 60000,
     enabled: !!user?.id,
   });
+  const usersData: any[] = Array.isArray(usersQuery.data) ? usersQuery.data : [];
+  const usersLoading = usersQuery.isLoading;
 
   const nurseUserRecord = React.useMemo(() => {
     if (!user || user.role !== "nurse" || !usersData || !Array.isArray(usersData)) {
@@ -104,11 +106,13 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   }, [nurseUserRecord]);
 
   // Fetch patients
-  const { data: patientsData, isLoading: patientsLoading } = useQuery({
+  const patientsQuery = useQuery({
     queryKey: ["/api/patients"],
     staleTime: 60000,
     enabled: !!user?.id,
   });
+  const patientsData: any[] = Array.isArray(patientsQuery.data) ? patientsQuery.data : [];
+  const patientsLoading = patientsQuery.isLoading;
 
   const { data: treatmentsList = [] } = useQuery({
     queryKey: ["/api/pricing/treatments"],
@@ -129,6 +133,38 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
       const response = await apiRequest("GET", "/api/pricing/doctors-fees");
       const data = await response.json();
       return Array.isArray(data) ? data : [];
+    },
+  });
+
+  // Fetch shifts data for shift-based time slot generation (custom shifts first, then default shifts)
+  const { data: shiftsData = [] } = useQuery({
+    queryKey: ["/api/shifts"],
+    enabled: !!user?.id && isDoctorLike(user?.role),
+    queryFn: async () => {
+      try {
+        const response = await apiRequest("GET", "/api/shifts");
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error("[EDIT-APPOINTMENT] Error fetching shifts:", error);
+        return [];
+      }
+    },
+  });
+
+  const { data: defaultShiftsData = [] } = useQuery({
+    queryKey: ["/api/default-shifts"],
+    staleTime: 60000,
+    enabled: !!user?.id && isDoctorLike(user?.role),
+    queryFn: async () => {
+      try {
+        const response = await apiRequest("GET", "/api/default-shifts?forBooking=true");
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error("[EDIT-APPOINTMENT] Error fetching default shifts:", error);
+        return [];
+      }
     },
   });
 
@@ -215,7 +251,45 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
     return null;
   };
 
+  const timeSlotToMinutes = (timeSlot: string): number => {
+    const [time, period] = timeSlot.split(" ");
+    const [hoursStr, minutesStr] = time.split(":");
+    let hour24 = parseInt(hoursStr, 10);
+    const minute = parseInt(minutesStr, 10);
+    if (period === "PM" && hour24 !== 12) hour24 += 12;
+    if (period === "AM" && hour24 === 12) hour24 = 0;
+    return hour24 * 60 + minute;
+  };
+
+  const minutesToTimeSlot = (minutes: number): string => {
+    const hour24 = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    const period = hour24 >= 12 ? "PM" : "AM";
+    const displayHour = hour24 % 12 || 12;
+    return `${displayHour}:${minute.toString().padStart(2, "0")} ${period}`;
+  };
+
+  // Convert scheduledAt to local minutes (e.g., 8:00 PM -> 1200 minutes)
+  // Uses getHours() and getMinutes() (NOT getUTCHours()) to extract local time components
+  // This ensures booked slots match the appointment time shown in the header
+  const scheduledAtToLocalMinutes = (value: any): number | null => {
+    try {
+      if (!value) return null;
+      const dt = parseScheduledAtAsLocal(value instanceof Date ? value : value.toString());
+      if (Number.isNaN(dt.getTime())) return null;
+      // Use getHours() and getMinutes() to get local time (not UTC)
+      // Example: If appointment is stored as "2026-03-24 20:00:00" (8:00 PM),
+      // getHours() returns 20, not 1 (which would be UTC)
+      return dt.getHours() * 60 + dt.getMinutes();
+    } catch {
+      return null;
+    }
+  };
+
   // Fetch appointments for a specific date to check booked time slots
+  // Uses parseScheduledAtAsLocal() to parse scheduledAt as local time
+  // Uses getHours() and getMinutes() (not getUTCHours()) to extract local time components
+  // This ensures grey slots match the appointment time shown in the header
   const fetchAppointmentsForDate = async (date: Date) => {
     try {
       const dateStr = format(date, "yyyy-MM-dd");
@@ -224,16 +298,28 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
 
       // Filter appointments for the selected date (excluding the current appointment being edited)
       // Only include SCHEDULED appointments - CANCELLED appointments should not block time slots
+      // Uses parseScheduledAtAsLocal() to parse as local time (ignores timezone conversion)
       const dayAppointments = data.filter((apt: any) => {
-        const aptDate = format(new Date(apt.scheduledAt), "yyyy-MM-dd");
+        const aptDate = format(parseScheduledAtAsLocal(apt.scheduledAt), "yyyy-MM-dd");
         return aptDate === dateStr && apt.id !== editingAppointment?.id && apt.status?.toLowerCase() === 'scheduled';
       });
 
-      // Extract booked time slots
-      const bookedSlots = dayAppointments.map((apt: any) => {
-        const aptTime = new Date(apt.scheduledAt);
-        return format(aptTime, "h:mm a");
+      // Extract booked 15-minute slots based on appointment duration (same idea as patient modal)
+      // Uses scheduledAtToLocalMinutes() which uses getHours() and getMinutes() (not getUTCHours())
+      // Example: If appointment is stored as "2026-03-24 20:00:00" (8:00 PM) in database,
+      // and API returns "2026-03-24T20:00:00.000Z", parseScheduledAtAsLocal() extracts local components,
+      // getHours() returns 20 (8:00 PM local), and grey slots show "8:00 PM" and "8:15 PM" correctly
+      const bookedSlotsSet = new Set<string>();
+      dayAppointments.forEach((apt: any) => {
+        const startMinutes = scheduledAtToLocalMinutes(apt.scheduledAt);
+        if (startMinutes === null) return;
+        const duration = apt.duration || 30;
+        const endMinutes = startMinutes + duration;
+        for (let m = startMinutes; m < endMinutes; m += 15) {
+          bookedSlotsSet.add(minutesToTimeSlot(m));
+        }
       });
+      const bookedSlots = Array.from(bookedSlotsSet);
 
       setBookedTimeSlots(bookedSlots);
       console.log("📅 Booked time slots for", dateStr, ":", bookedSlots);
@@ -246,7 +332,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   // Fetch appointments when editing appointment date changes
   React.useEffect(() => {
     if (editingAppointment?.scheduledAt) {
-      const selectedDate = new Date(editingAppointment.scheduledAt);
+      const selectedDate = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
       fetchAppointmentsForDate(selectedDate);
     }
   }, [editingAppointment?.scheduledAt, editingAppointment?.id]);
@@ -424,7 +510,10 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
     const updateData: any = {
       title: editingAppointment.title || "",
       appointmentType: editAppointmentType,
-      scheduledAt: editingAppointment.scheduledAt,
+      scheduledAt: (() => {
+        const dt = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
+        return formatLocalISOString(dt);
+      })(),
       status: editingAppointment.status || "scheduled",
       description: editingAppointment.description || "",
     };
@@ -560,17 +649,218 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
     return name ? `${name} (${formattedRole})` : `User ${createdById}`;
   };
 
-  const formatTime = (timeString: string) => {
+  const formatTime = (timeValue: string | Date) => {
     try {
-      // Extract time directly from ISO string without timezone conversion
-      const time = timeString.split('T')[1]?.substring(0, 5) || '00:00';
-      const [hours, minutes] = time.split(':').map(Number);
+      let hours: number, minutes: number;
+      
+      if (timeValue instanceof Date) {
+        // If it's a Date object, use getHours() and getMinutes() to get local time
+        hours = timeValue.getHours();
+        minutes = timeValue.getMinutes();
+      } else {
+        // If it's a string, extract time directly from ISO string without timezone conversion
+        const time = timeValue.split('T')[1]?.substring(0, 5) || '00:00';
+        [hours, minutes] = time.split(':').map(Number);
+      }
+      
       const period = hours >= 12 ? 'PM' : 'AM';
       const displayHours = hours % 12 || 12;
       return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
     } catch {
       return "Invalid time";
     }
+  };
+
+  const formatAppointmentDate = (dateValue: string | Date) => {
+    try {
+      let localDate: Date;
+      
+      if (dateValue instanceof Date) {
+        // If it's a Date object, use it directly
+        localDate = dateValue;
+      } else {
+        // If it's a string, extract date directly from ISO string without timezone conversion
+        const datePart = dateValue.split("T")[0];
+        const [year, month, day] = datePart.split("-").map(Number);
+        if (!year || !month || !day) return "Invalid date";
+        localDate = new Date(year, month - 1, day);
+      }
+      
+      return format(localDate, "EEEE, MMMM dd, yyyy");
+    } catch {
+      return "Invalid date";
+    }
+  };
+
+  // Format date as local ISO string (no timezone conversion; no Z/+offset)
+  const formatLocalISOString = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  };
+
+  // Parse scheduledAt WITHOUT applying JS timezone conversion (mirrors patient-appointments.tsx approach)
+  const parseScheduledAtAsLocal = (value: string | Date): Date => {
+    if (value instanceof Date) return value;
+    if (typeof value !== "string") return new Date(value as any);
+
+    // PostgreSQL timestamp without timezone: "YYYY-MM-DD HH:mm:ss"
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
+      const [datePart, timePart] = value.split(" ");
+      const [y, m, d] = datePart.split("-").map((n) => parseInt(n, 10));
+      const [hhStr, mmStr, ssStr] = timePart.split(":");
+      const hh = parseInt(hhStr || "0", 10);
+      const mm = parseInt(mmStr || "0", 10);
+      const ss = parseInt((ssStr || "0").split(".")[0], 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        return new Date(y, (m || 1) - 1, d || 1, hh, mm, ss, 0);
+      }
+    }
+
+    // ISO-like string: extract date+time components as-is (ignore timezone indicators like 'Z' or '+00:00')
+    // Handles formats like: "2026-03-24T20:00:00.000Z", "2026-03-24T20:00:00Z", "2026-03-24T20:00:00"
+    // Uses getHours() and getMinutes() to extract local time components
+    const match = value.match(
+      /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/i,
+    );
+    if (match) {
+      const [, yStr, mStr, dStr, hhStr, mmStr, ssStr] = match;
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10);
+      const d = parseInt(dStr, 10);
+      const hh = parseInt(hhStr, 10);
+      const mm = parseInt(mmStr, 10);
+      const ss = parseInt(ssStr || "0", 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        // Create local Date object using the extracted components (ignoring timezone)
+        // This ensures getHours() returns the correct local hour (e.g., 20 for 8:00 PM)
+        return new Date(y, m - 1, d, hh, mm, ss, 0);
+      }
+    }
+
+    // Fallback: if string parsing fails, try standard Date constructor
+    // But extract local components to avoid timezone conversion
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      // If it's a valid date, extract local components to avoid timezone issues
+      return new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate(),
+        parsed.getHours(), // Use getHours() not getUTCHours()
+        parsed.getMinutes(), // Use getMinutes() not getUTCMinutes()
+        parsed.getSeconds(),
+        0
+      );
+    }
+    return parsed;
+  };
+
+  // Parse shift time to minutes (e.g., "09:30" -> 570)
+  const parseShiftTimeToMinutes = (time?: string): number => {
+    if (!time) return 0;
+    const cleaned = time.split(".")[0];
+    const parts = cleaned.split(":").map((part) => parseInt(part, 10));
+    if (parts.length < 2 || parts.some((num) => Number.isNaN(num))) return 0;
+    const [hours, minutes] = parts;
+    return hours * 60 + minutes;
+  };
+
+  const getProviderRoleById = (providerId: number | string | null | undefined): string | undefined => {
+    if (!providerId || !usersData || !Array.isArray(usersData)) return undefined;
+    const provider = usersData.find((u: any) => u.id?.toString() === providerId.toString());
+    return provider?.role?.toString();
+  };
+
+  // Get provider shift bounds for a given date (custom shifts first, then default shifts)
+  const getProviderShiftBounds = (
+    providerId: number | string,
+    date: Date,
+    roleName?: string,
+  ): { start: number; end: number } | null => {
+    if (!providerId) return null;
+    const selectedDateStr = format(date, "yyyy-MM-dd");
+
+    // TIER 1: Custom shifts for this date + provider
+    if (shiftsData && Array.isArray(shiftsData)) {
+      const customShift = shiftsData.find((shift: any) => {
+        if (shift.staffId?.toString() !== providerId.toString()) return false;
+        const shiftDateStr =
+          shift.date instanceof Date ? format(shift.date, "yyyy-MM-dd") : shift.date?.substring(0, 10);
+        return shiftDateStr === selectedDateStr;
+      });
+
+      if (customShift) {
+        let endMinutes = parseShiftTimeToMinutes(customShift.endTime);
+        const endTimeStr = customShift.endTime?.toString().toLowerCase() || "";
+        if (endMinutes === 0 && (endTimeStr.includes("00:00") || endTimeStr.includes("24:00"))) {
+          endMinutes = 1440;
+        } else if (endMinutes === 1439) {
+          endMinutes = 1440;
+        }
+        return {
+          start: parseShiftTimeToMinutes(customShift.startTime),
+          end: endMinutes,
+        };
+      }
+    }
+
+    // TIER 2: Default shifts (by provider + optional role)
+    if (defaultShiftsData && Array.isArray(defaultShiftsData) && defaultShiftsData.length > 0) {
+      const defaultShift = defaultShiftsData.find((ds: any) => {
+        if (ds.userId?.toString() !== providerId.toString()) return false;
+        if (roleName && ds.roleName) {
+          return ds.roleName.toLowerCase() === roleName.toLowerCase();
+        }
+        return true;
+      });
+
+      if (defaultShift) {
+        const dayName = format(date, "EEEE");
+        if ((defaultShift.workingDays || []).includes(dayName)) {
+          let endMinutes = parseShiftTimeToMinutes(defaultShift.endTime || "23:59");
+          const endTimeStr = (defaultShift.endTime || "23:59").toString().toLowerCase();
+          if (endMinutes === 0 && (endTimeStr.includes("00:00") || endTimeStr.includes("24:00"))) {
+            endMinutes = 1440;
+          } else if (endMinutes === 1439) {
+            endMinutes = 1440;
+          }
+          return {
+            start: parseShiftTimeToMinutes(defaultShift.startTime || "00:00"),
+            end: endMinutes,
+          };
+        }
+      }
+    }
+
+    return null;
+  };
+
+  // Generate 15-minute time slots based on shift bounds
+  const generateTimeSlotsFromShifts = (
+    providerId: number | string | null,
+    date: Date,
+    roleName?: string,
+  ): string[] => {
+    if (!providerId || !date) return [];
+    const shiftBounds = getProviderShiftBounds(providerId, date, roleName);
+    if (!shiftBounds) return [];
+
+    const slots: string[] = [];
+    for (let minutes = shiftBounds.start; minutes < shiftBounds.end; minutes += 15) {
+      // stop at exact end
+      if (minutes + 15 > shiftBounds.end) break;
+      const hour24 = Math.floor(minutes / 60);
+      const min = minutes % 60;
+      const period = hour24 >= 12 ? "PM" : "AM";
+      const displayHour = hour24 % 12 || 12;
+      slots.push(`${displayHour}:${min.toString().padStart(2, "0")} ${period}`);
+    }
+    return slots;
   };
 
   const getAppointmentsForDate = (date: Date) => {
@@ -1088,15 +1378,24 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                       {/* Header with Title and Actions */}
                       <div className="flex items-start justify-between mb-4">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          {appointment.title || (() => {
-                            // For nurse/doctor roles, always show "Appointment with [Role] [Name]" (logged-in user)
-                            if (isDoctorLike(user?.role || '')) {
-                              const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
-                              const loggedInUserName = `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
-                              return `Appointment with ${loggedInUserName}`;
+                          {(() => {
+                            // For nurse/doctor roles, ALWAYS show computed heading (ignore appointment.title)
+                            // so we don't end up with just "Appointment with" when title is set but not useful.
+                            if (isDoctorLike(user?.role || "")) {
+                              const rolePrefix = user?.role?.toLowerCase() === "nurse" ? "Nurse." : "Dr.";
+                              const loggedInUserName = `${rolePrefix} ${user?.firstName || ""} ${user?.lastName || ""}`.trim();
+                              const patientName = patient
+                                ? `${patient.firstName} ${patient.lastName}`.trim()
+                                : getPatientName(appointment.patientId);
+                              const duration = appointment.duration || 30;
+                              return `Appointment with ${loggedInUserName} - Patient ${patientName || "Patient"} (${duration} min)`;
                             }
-                            // For other roles, show patient name
-                            return `Appointment with ${patient ? `${patient.firstName} ${patient.lastName}` : 'Patient'}`;
+
+                            // For other roles, keep existing behavior
+                            return (
+                              appointment.title ||
+                              `Appointment with ${patient ? `${patient.firstName} ${patient.lastName}` : "Patient"}`
+                            );
                           })()}
                         </h3>
                         <div className="flex items-center gap-2">
@@ -1327,15 +1626,25 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
           <CardContent>
             <div className="flex items-start justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {nextAppointment.title || (() => {
-                  // For nurse/doctor roles, always show "Appointment with [Role] [Name]" (logged-in user)
-                  if (isDoctorLike(user?.role || '')) {
-                    const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
-                    const loggedInUserName = `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
-                    return `Appointment with ${loggedInUserName}`;
+                {(() => {
+                  // For nurse/doctor roles, ALWAYS show computed heading (ignore nextAppointment.title)
+                  if (isDoctorLike(user?.role || "")) {
+                    const rolePrefix = user?.role?.toLowerCase() === "nurse" ? "Nurse." : "Dr.";
+                    const loggedInUserName = `${rolePrefix} ${user?.firstName || ""} ${user?.lastName || ""}`.trim();
+                    const patientName = nextAppointmentPatient
+                      ? `${nextAppointmentPatient.firstName} ${nextAppointmentPatient.lastName}`.trim()
+                      : nextAppointment?.patientId
+                        ? getPatientName(nextAppointment.patientId)
+                        : "";
+                    const duration = nextAppointment?.duration || 30;
+                    return `Appointment with ${loggedInUserName} - Patient ${patientName || "Patient"} (${duration} min)`;
                   }
-                  // For other roles, show doctor name
-                  return `Appointment with ${nextAppointmentDoctor ? `${nextAppointmentDoctor.firstName} ${nextAppointmentDoctor.lastName}` : 'Doctor'}`;
+
+                  // For other roles, keep existing behavior
+                  return (
+                    nextAppointment.title ||
+                    `Appointment with ${nextAppointmentDoctor ? `${nextAppointmentDoctor.firstName} ${nextAppointmentDoctor.lastName}` : "Doctor"}`
+                  );
                 })()}
               </h3>
               <Badge 
@@ -1464,15 +1773,23 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                     {/* Header with Title and Actions */}
                     <div className="flex items-start justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {appointment.title || (() => {
-                          // For nurse/doctor roles, always show "Appointment with [Role] [Name]" (logged-in user)
-                          if (isDoctorLike(user?.role || '')) {
-                            const rolePrefix = user?.role?.toLowerCase() === 'nurse' ? 'Nurse.' : 'Dr.';
-                            const loggedInUserName = `${rolePrefix} ${user?.firstName || ''} ${user?.lastName || ''}`.trim();
-                            return `Appointment with ${loggedInUserName}`;
+                        {(() => {
+                          // For nurse/doctor roles, ALWAYS show computed heading (ignore appointment.title)
+                          if (isDoctorLike(user?.role || "")) {
+                            const rolePrefix = user?.role?.toLowerCase() === "nurse" ? "Nurse." : "Dr.";
+                            const loggedInUserName = `${rolePrefix} ${user?.firstName || ""} ${user?.lastName || ""}`.trim();
+                            const patientName = patient
+                              ? `${patient.firstName} ${patient.lastName}`.trim()
+                              : getPatientName(appointment.patientId);
+                            const duration = appointment.duration || 30;
+                            return `Appointment with ${loggedInUserName} - Patient ${patientName || "Patient"} (${duration} min)`;
                           }
-                          // For other roles, show doctor name
-                          return `Appointment with ${doctor ? `${doctor.firstName} ${doctor.lastName}` : 'Doctor'}`;
+
+                          // For other roles, keep existing behavior
+                          return (
+                            appointment.title ||
+                            `Appointment with ${doctor ? `${doctor.firstName} ${doctor.lastName}` : "Doctor"}`
+                          );
                         })()}
                       </h3>
                       <div className="flex items-center gap-2">
@@ -1625,12 +1942,73 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                    Edit Appointment
-                  </h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                      Edit Appointment
+                    </h2>
+                    {editingAppointment?.appointmentId || editingAppointment?.appointment_id || editingAppointment?.id ? (
+                      <Badge
+                        variant="outline"
+                        className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700 text-xs font-medium"
+                      >
+                        {editingAppointment.appointmentId || editingAppointment.appointment_id || editingAppointment.id}
+                      </Badge>
+                    ) : null}
+                  </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     Update appointment details
                   </p>
+
+                  {/* Appointment Information (match patient edit modal style) */}
+                  {editingAppointment?.scheduledAt && (
+                    <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-600 dark:text-gray-300">
+                      <div>
+                        <p className="text-[0.7rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Appointment Date &amp; Time
+                        </p>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {formatAppointmentDate(editingAppointment.scheduledAt)}{" "}
+                          {formatTime(editingAppointment.scheduledAt)}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[0.7rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Role
+                        </p>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {(
+                            editingAppointment?.assignedRole ||
+                            editingAppointment?.role ||
+                            user?.role ||
+                            ""
+                          )
+                            ?.toString()
+                            .charAt(0)
+                            .toUpperCase() +
+                            (
+                              editingAppointment?.assignedRole ||
+                              editingAppointment?.role ||
+                              user?.role ||
+                              ""
+                            )
+                              ?.toString()
+                              .slice(1)}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[0.7rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Provider
+                        </p>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {editingAppointment?.providerId
+                            ? getDoctorNameWithSpecialization(Number(editingAppointment.providerId))
+                            : "Unknown"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <Button
                   variant="ghost"
@@ -1696,6 +2074,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                       <SelectContent>
                         <SelectItem value="15">15 minutes</SelectItem>
                         <SelectItem value="30">30 minutes</SelectItem>
+                        <SelectItem value="45">45 minutes</SelectItem>
                         <SelectItem value="60">60 minutes (1 hour)</SelectItem>
                         <SelectItem value="90">90 minutes (1.5 hours)</SelectItem>
                         <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -1943,7 +2322,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                       }
                       className="mt-1 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-gray-100"
                       rows={3}
-                      placeholder="Enter appointment description"
+                      placeholder="e.g. wheelchair, assistance, special needs"
                     />
                   </div>
                 </div>
@@ -1955,7 +2334,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Date *
                     </Label>
-                    <div className="mt-1 p-4 border border-gray-300 dark:border-gray-600 rounded-md">
+                    <div className="mt-1 h-[280px] overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-4 bg-white dark:bg-gray-700">
                       <div className="flex items-center justify-between mb-2">
                         <Button
                           type="button"
@@ -1968,7 +2347,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                             currentDate.setMonth(currentDate.getMonth() - 1);
                             setEditingAppointment({
                               ...editingAppointment,
-                              scheduledAt: currentDate.toISOString(),
+                              scheduledAt: currentDate,
                             });
                           }}
                           className="p-1"
@@ -1992,7 +2371,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                             currentDate.setMonth(currentDate.getMonth() + 1);
                             setEditingAppointment({
                               ...editingAppointment,
-                              scheduledAt: currentDate.toISOString(),
+                              scheduledAt: currentDate,
                             });
                           }}
                           className="p-1"
@@ -2036,7 +2415,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                           const isSelected =
                             format(cellDate, "yyyy-MM-dd") ===
                             format(
-                              new Date(editingAppointment.scheduledAt),
+                              parseScheduledAtAsLocal(editingAppointment.scheduledAt),
                               "yyyy-MM-dd",
                             );
 
@@ -2047,17 +2426,19 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                               variant="ghost"
                               size="sm"
                               onClick={() => {
+                                const current = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
                                 const newDate = new Date(
-                                  editingAppointment.scheduledAt,
-                                );
-                                newDate.setFullYear(
                                   cellDate.getFullYear(),
                                   cellDate.getMonth(),
                                   cellDate.getDate(),
+                                  current.getHours(),
+                                  current.getMinutes(),
+                                  current.getSeconds(),
+                                  0,
                                 );
                                 setEditingAppointment({
                                   ...editingAppointment,
-                                  scheduledAt: newDate.toISOString(),
+                                  scheduledAt: newDate,
                                 });
                                 fetchAppointmentsForDate(cellDate);
                               }}
@@ -2082,41 +2463,97 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                     <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Select Time Slot *
                     </Label>
-                    <div className="mt-1 max-h-64 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-3">
+                    <div className="mt-1 h-[280px] overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-3 bg-white dark:bg-gray-700">
                       <div className="grid grid-cols-2 gap-2">
-                        {[
-                          "9:00 AM",
-                          "9:30 AM",
-                          "10:00 AM",
-                          "10:30 AM",
-                          "11:00 AM",
-                          "11:30 AM",
-                          "12:00 PM",
-                          "12:30 PM",
-                          "1:00 PM",
-                          "1:30 PM",
-                          "2:00 PM",
-                          "2:30 PM",
-                          "3:00 PM",
-                          "3:30 PM",
-                          "4:00 PM",
-                          "4:30 PM",
-                          "5:00 PM",
-                        ].map((timeSlot) => {
+                        {(() => {
+                          const providerId = editingAppointment?.providerId || editingAppointment?.provider_id;
+                          const roleName =
+                            editingAppointment?.assignedRole ||
+                            editingAppointment?.role ||
+                            getProviderRoleById(providerId);
+                          const selectedDate = editingAppointment?.scheduledAt
+                            ? new Date(editingAppointment.scheduledAt)
+                            : new Date();
+
+                          const slots = generateTimeSlotsFromShifts(providerId, selectedDate, roleName);
+
+                          // Fallback to legacy 9 AM - 5 PM if no shifts are found
+                          if (slots.length === 0) {
+                            return [
+                              "9:00 AM",
+                              "9:30 AM",
+                              "10:00 AM",
+                              "10:30 AM",
+                              "11:00 AM",
+                              "11:30 AM",
+                              "12:00 PM",
+                              "12:30 PM",
+                              "1:00 PM",
+                              "1:30 PM",
+                              "2:00 PM",
+                              "2:30 PM",
+                              "3:00 PM",
+                              "3:30 PM",
+                              "4:00 PM",
+                              "4:30 PM",
+                              "5:00 PM",
+                            ];
+                          }
+
+                          return slots;
+                        })().map((timeSlot) => {
                           const currentTime = format(
-                            new Date(editingAppointment.scheduledAt),
+                            parseScheduledAtAsLocal(editingAppointment.scheduledAt),
                             "h:mm a",
                           );
                           const isSelected = timeSlot === currentTime;
-                          const isBooked = bookedTimeSlots.includes(timeSlot);
+                          const bookedSet = new Set(bookedTimeSlots);
+                          const durationMinutes = editingAppointment.duration || 30;
+                          const slotsNeeded = Math.ceil(durationMinutes / 15);
+
+                          const slotStartMinutes = timeSlotToMinutes(timeSlot);
+                          const selectedStartMinutes = timeSlotToMinutes(currentTime);
+                          const selectedEndMinutes = selectedStartMinutes + durationMinutes;
+                          const slotEndMinutes = slotStartMinutes + 15;
+
+                          // Orange highlight for all slots that fall within the selected appointment duration
+                          const isInSelectedDuration =
+                            slotStartMinutes < selectedEndMinutes &&
+                            slotEndMinutes > selectedStartMinutes;
+
+                          // Determine if this start time can fit the selected duration without overlaps
+                          const providerId = editingAppointment?.providerId || editingAppointment?.provider_id;
+                          const roleName =
+                            editingAppointment?.assignedRole ||
+                            editingAppointment?.role ||
+                            getProviderRoleById(providerId);
+                          const selectedDate = editingAppointment?.scheduledAt
+                            ? new Date(editingAppointment.scheduledAt)
+                            : new Date();
+                          const shiftBounds = providerId ? getProviderShiftBounds(providerId, selectedDate, roleName) : null;
+                          const fitsInShift = shiftBounds
+                            ? slotStartMinutes >= shiftBounds.start && slotStartMinutes + durationMinutes <= shiftBounds.end
+                            : true;
+
+                          let hasConflict = false;
+                          for (let i = 0; i < slotsNeeded; i++) {
+                            const m = slotStartMinutes + (i * 15);
+                            const label = minutesToTimeSlot(m);
+                            if (bookedSet.has(label)) {
+                              hasConflict = true;
+                              break;
+                            }
+                          }
+
+                          const isUnavailable = !fitsInShift || hasConflict;
 
                           return (
                             <Button
                               key={timeSlot}
                               type="button"
-                              disabled={isBooked}
+                              disabled={isUnavailable}
                               onClick={() => {
-                                if (isBooked) return;
+                                if (isUnavailable) return;
 
                                 const [time, period] = timeSlot.split(" ");
                                 const [hours, minutes] = time.split(":");
@@ -2127,7 +2564,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                                   hour24 = 0;
 
                                 const newDate = new Date(
-                                  editingAppointment.scheduledAt,
+                                  parseScheduledAtAsLocal(editingAppointment.scheduledAt),
                                 );
                                 newDate.setHours(
                                   hour24,
@@ -2137,28 +2574,23 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                                 );
                                 setEditingAppointment({
                                   ...editingAppointment,
-                                  scheduledAt: newDate.toISOString(),
+                                  scheduledAt: newDate,
                                 });
                               }}
                               className={`p-2 text-sm rounded border text-center ${
-                                isSelected
-                                  ? "bg-yellow-500 text-white border-yellow-500 hover:bg-yellow-600"
-                                  : isBooked
-                                    ? "bg-gray-400 text-gray-600 border-gray-400 cursor-not-allowed"
+                                isInSelectedDuration
+                                  ? "bg-orange-500 text-white border-orange-500 hover:bg-orange-600"
+                                  : isUnavailable
+                                    ? "bg-gray-300 text-gray-600 border-gray-300 cursor-not-allowed"
                                     : "bg-green-500 text-white border-green-500 hover:bg-green-600"
                               }`}
                               title={
-                                isBooked
-                                  ? "Time slot already booked"
+                                isUnavailable
+                                  ? "Time slot not available for selected duration"
                                   : "Available time slot"
                               }
                             >
                               {timeSlot}
-                              {isBooked && (
-                                <span className="block text-xs mt-1">
-                                  Booked
-                                </span>
-                              )}
                             </Button>
                           );
                         })}

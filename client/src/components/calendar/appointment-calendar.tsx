@@ -365,6 +365,7 @@ export default function AppointmentCalendar({ onNewAppointment }: { onNewAppoint
   const [editConsultationSelectionError, setEditConsultationSelectionError] = useState<string>("");
   const [showInsufficientTimeWarning, setShowInsufficientTimeWarning] = useState(false);
   const [insufficientTimeMessage, setInsufficientTimeMessage] = useState<string>("");
+  const [editBookedTimeSlots, setEditBookedTimeSlots] = useState<string[]>([]);
   
   
   // State for appointment ID filter (admin only)
@@ -406,10 +407,20 @@ const parseShiftTimeToMinutes = (time?: string): number => {
 };
 
   // Check if time slot is within staff's working hours/shift
-  const isTimeSlotInShift = (timeSlot: string, date: Date): boolean => {
-    if (!selectedProviderId || !usersData) return true;
+  // If providerIdOverride is provided (Edit Appointment), use it instead of selectedProviderId (New Appointment)
+  const isTimeSlotInShift = (
+    timeSlot: string,
+    date: Date,
+    providerIdOverride?: number | string | null,
+  ): boolean => {
+    const providerId =
+      providerIdOverride !== undefined && providerIdOverride !== null
+        ? providerIdOverride.toString()
+        : selectedProviderId;
+
+    if (!providerId || !usersData) return true;
     
-    const provider = usersData.find((user: any) => user.id.toString() === selectedProviderId);
+    const provider = usersData.find((user: any) => user.id.toString() === providerId);
     if (!provider) return true;
     
     const slotMinutes = timeSlotToMinutes(timeSlot);
@@ -422,7 +433,7 @@ const parseShiftTimeToMinutes = (time?: string): number => {
         const shiftDateStr = shift.date instanceof Date 
           ? format(shift.date, 'yyyy-MM-dd')
           : shift.date.substring(0, 10);
-        return shift.staffId.toString() === selectedProviderId && shiftDateStr === selectedDateStr;
+        return shift.staffId.toString() === providerId && shiftDateStr === selectedDateStr;
       });
       
       if (providerShift) {
@@ -451,7 +462,7 @@ const parseShiftTimeToMinutes = (time?: string): number => {
     // TIER 2: If no custom shifts, fall back to default shifts from doctor_default_shifts
     if (defaultShiftsData && defaultShiftsData.length > 0) {
       const defaultShift = defaultShiftsData.find((ds: any) => 
-        ds.userId.toString() === selectedProviderId
+        ds.userId.toString() === providerId
       );
       
       if (defaultShift) {
@@ -510,13 +521,18 @@ const parseShiftTimeToMinutes = (time?: string): number => {
     return slotMinutes >= startMinutes && slotEndMinutes <= endMinutes;
   };
 
-  const getProviderShiftBounds = (date: Date) => {
-    if (!selectedProviderId || !usersData) return null;
+  const getProviderShiftBounds = (date: Date, providerIdOverride?: number | string | null) => {
+    const providerId =
+      providerIdOverride !== undefined && providerIdOverride !== null
+        ? providerIdOverride.toString()
+        : selectedProviderId;
+
+    if (!providerId || !usersData) return null;
     const selectedDateStr = format(date, "yyyy-MM-dd");
 
     if (shiftsData && Array.isArray(shiftsData)) {
       const customShift = shiftsData.find((shift: any) => {
-        if (shift.staffId?.toString() !== selectedProviderId) return false;
+        if (shift.staffId?.toString() !== providerId) return false;
         const shiftDateStr =
           shift.date instanceof Date ? format(shift.date, "yyyy-MM-dd") : shift.date?.substring(0, 10);
         return shiftDateStr === selectedDateStr;
@@ -539,7 +555,7 @@ const parseShiftTimeToMinutes = (time?: string): number => {
     }
 
     if (defaultShiftsData && defaultShiftsData.length > 0) {
-      const defaultShift = defaultShiftsData.find((ds: any) => ds.userId.toString() === selectedProviderId);
+      const defaultShift = defaultShiftsData.find((ds: any) => ds.userId.toString() === providerId);
       if (defaultShift) {
         const dayName = format(date, "EEEE");
         if ((defaultShift.workingDays || []).includes(dayName)) {
@@ -560,7 +576,7 @@ const parseShiftTimeToMinutes = (time?: string): number => {
       }
     }
 
-    const provider = usersData.find((user: any) => user.id.toString() === selectedProviderId);
+    const provider = usersData.find((user: any) => user.id.toString() === providerId);
     if (provider?.workingHours) {
       let endMinutes = parseShiftTimeToMinutes(provider.workingHours.end || "23:59");
       // Handle midnight - if end time is 00:00, treat as 1440 (end of day)
@@ -588,10 +604,10 @@ const parseShiftTimeToMinutes = (time?: string): number => {
     const providerForShift = editingAppointment ? editingAppointment.providerId : (selectedProviderId ? parseInt(selectedProviderId) : null);
     
     // Check if slot is within staff's working hours
-    if (providerForShift && !isTimeSlotInShift(timeSlot, date)) {
+    if (providerForShift && !isTimeSlotInShift(timeSlot, date, providerForShift)) {
       console.log('[Availability Check] Slot not in shift for provider:', providerForShift, 'Time:', timeSlot);
       // Additional debug: log shift bounds for troubleshooting
-      const shiftBounds = getProviderShiftBounds(date);
+      const shiftBounds = getProviderShiftBounds(date, providerForShift);
       if (shiftBounds) {
         const slotMins = timeSlotToMinutes(timeSlot);
         console.log('[Availability Check] Shift bounds:', {
@@ -643,17 +659,16 @@ const parseShiftTimeToMinutes = (time?: string): number => {
         return false;
       }
       
-      // Parse the scheduledAt directly without timezone conversion
-      // Format: "2025-10-05T00:00:00.000Z" or "2025-10-05T22:00:00.000Z"
-      const aptDateString = apt.scheduledAt.substring(0, 10); // Extract "2025-10-05"
+      // Parse scheduledAt as local time (handles ISO and PostgreSQL timestamp formats)
+      const aptDate = parseScheduledAtAsLocal(apt.scheduledAt);
+      if (Number.isNaN(aptDate.getTime())) return false;
+      const aptDateString = format(aptDate, "yyyy-MM-dd");
       
       // Only check appointments on the same date
       if (aptDateString !== selectedDateString) return false;
       
-      // Extract time in 24-hour format directly from the ISO string (no timezone conversion)
-      const timeString = apt.scheduledAt.substring(11, 16); // Extract "00:00" or "22:00"
-      const [aptHour, aptMinute] = timeString.split(':').map(Number);
-      const aptStartMinutes = aptHour * 60 + aptMinute;
+      // Extract local time components (no timezone conversion)
+      const aptStartMinutes = aptDate.getHours() * 60 + aptDate.getMinutes();
       const aptDuration = apt.duration || 30; // Default to 30 if duration not set
       const aptEndMinutes = aptStartMinutes + aptDuration;
       
@@ -669,7 +684,7 @@ const parseShiftTimeToMinutes = (time?: string): number => {
           conflictingAppointment: {
             id: apt.id,
             providerId: apt.providerId,
-            time: timeString,
+            time: `${aptDate.getHours().toString().padStart(2, "0")}:${aptDate.getMinutes().toString().padStart(2, "0")}`,
             range: `${aptStartMinutes}-${aptEndMinutes} mins`,
             duration: aptDuration
           }
@@ -681,6 +696,72 @@ const parseShiftTimeToMinutes = (time?: string): number => {
     
     return !isBooked;
   };
+
+  // Fetch booked time slots for Edit Appointment (grey slots), like patient Edit modal:
+  // - same provider
+  // - same day
+  // - exclude the appointment being edited
+  // - exclude cancelled
+  const fetchEditBookedTimeSlotsForDate = async (date: Date): Promise<string[]> => {
+    try {
+      if (!editingAppointment?.providerId) {
+        setEditBookedTimeSlots([]);
+        return [];
+      }
+
+      const dateStr = format(date, "yyyy-MM-dd");
+      const response = await apiRequest("GET", "/api/appointments");
+      const data = await response.json();
+
+      const providerId = editingAppointment.providerId;
+
+      const dayAppointments = (Array.isArray(data) ? data : []).filter((apt: any) => {
+        if (!apt?.scheduledAt) return false;
+        if (apt.id === editingAppointment.id) return false;
+        if ((apt.status || "").toLowerCase() === "cancelled") return false;
+        if (apt.providerId !== providerId) return false;
+
+        const aptDate = parseScheduledAtAsLocal(apt.scheduledAt);
+        if (Number.isNaN(aptDate.getTime())) return false;
+        return format(aptDate, "yyyy-MM-dd") === dateStr;
+      });
+
+      const minutesToTimeSlot = (minutesFromMidnight: number): string => {
+        const hh24 = Math.floor(minutesFromMidnight / 60);
+        const mm = minutesFromMidnight % 60;
+        const period = hh24 >= 12 ? "PM" : "AM";
+        const displayHours = hh24 % 12 || 12;
+        return `${displayHours}:${mm.toString().padStart(2, "0")} ${period}`;
+      };
+
+      const bookedSlotsSet = new Set<string>();
+      dayAppointments.forEach((apt: any) => {
+        const aptDate = parseScheduledAtAsLocal(apt.scheduledAt);
+        if (Number.isNaN(aptDate.getTime())) return;
+        const startMinutes = aptDate.getHours() * 60 + aptDate.getMinutes();
+        const duration = apt.duration || 30;
+        const endMinutes = startMinutes + duration;
+        for (let m = startMinutes; m < endMinutes; m += 15) {
+          bookedSlotsSet.add(minutesToTimeSlot(m));
+        }
+      });
+
+      const bookedSlots = Array.from(bookedSlotsSet);
+      setEditBookedTimeSlots(bookedSlots);
+      return bookedSlots;
+    } catch (e) {
+      console.error("[Edit Appointment] Failed to fetch booked slots:", e);
+      setEditBookedTimeSlots([]);
+      return [];
+    }
+  };
+
+  useEffect(() => {
+    if (!showEditAppointment) return;
+    if (!editAppointmentDate) return;
+    if (!editingAppointment?.providerId) return;
+    fetchEditBookedTimeSlotsForDate(editAppointmentDate);
+  }, [showEditAppointment, editAppointmentDate, editingAppointment?.id, editingAppointment?.providerId]);
 
   // Function to check if consecutive slots are available for the selected duration
   const checkConsecutiveSlotsAvailable = (date: Date, startTimeSlot: string, duration: number): { available: boolean; availableMinutes: number } => {
@@ -932,27 +1013,16 @@ const parseShiftTimeToMinutes = (time?: string): number => {
     setOpenEditTreatmentCombo(false);
     setOpenEditConsultationCombo(false);
     
-    // *** FIX: Parse ISO string without timezone conversion ***
-    // Extract date and time components directly from ISO string
-    const isoString = appointment.scheduledAt;
-    const dateMatch = isoString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+    // *** FIX: Parse scheduledAt as local time (no timezone conversion) ***
+    // Use parseScheduledAtAsLocal to handle all date formats correctly
+    const appointmentDate = parseScheduledAtAsLocal(appointment.scheduledAt);
     
-    if (dateMatch) {
-      const [, year, month, day, hour, minute] = dateMatch;
-      // Create date using local timezone (no conversion)
-      const appointmentDate = new Date(
-        parseInt(year),
-        parseInt(month) - 1, // JavaScript months are 0-indexed
-        parseInt(day),
-        parseInt(hour),
-        parseInt(minute),
-        0
-      );
+    if (!isNaN(appointmentDate.getTime())) {
       setEditAppointmentDate(appointmentDate);
       
-      // Convert to 12-hour format for display
-      const hours = parseInt(hour);
-      const minutes = parseInt(minute);
+      // Convert to 12-hour format for display using local time components
+      const hours = appointmentDate.getHours(); // Use getHours() not getUTCHours()
+      const minutes = appointmentDate.getMinutes(); // Use getMinutes() not getUTCMinutes()
       const period = hours >= 12 ? 'PM' : 'AM';
       const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
       const timeString = `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
@@ -961,8 +1031,11 @@ const parseShiftTimeToMinutes = (time?: string): number => {
       console.log('[Edit Appointment] Opening edit dialog with appointment:', {
         id: appointment.id,
         scheduledAt: appointment.scheduledAt,
+        parsedDate: appointmentDate.toString(),
         selectedDate: appointmentDate,
-        selectedTimeSlot: timeString
+        selectedTimeSlot: timeString,
+        localHours: hours,
+        localMinutes: minutes
       });
     }
     
@@ -1710,6 +1783,95 @@ Medical License: [License Number]
       }
       return 0;
     });
+
+  // Parse scheduledAt values WITHOUT applying JS timezone conversion.
+  // Handles multiple formats: PostgreSQL timestamp, ISO with timezone, ISO without timezone
+  const parseScheduledAtAsLocal = (value: string | Date): Date => {
+    if (value instanceof Date) {
+      return value;
+    }
+    if (typeof value !== "string") {
+      return new Date(value as any);
+    }
+
+    // Handle PostgreSQL timestamp format: "2026-03-24 15:00:00" (space-separated, no timezone)
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
+      const [datePart, timePart] = value.split(' ');
+      const [y, m, d] = datePart.split("-").map((n) => parseInt(n, 10));
+      const [hhStr, mmStr, ssStr] = timePart.split(":");
+      const hh = parseInt(hhStr || "0", 10);
+      const mm = parseInt(mmStr || "0", 10);
+      const ss = parseInt((ssStr || "0").split(".")[0], 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        return new Date(y, (m || 1) - 1, d || 1, hh, mm, ss, 0);
+      }
+    }
+
+    // Handle ISO format with timezone: "2026-03-26T00:00:00.000Z" or "2026-03-26T15:00:00.000Z"
+    // Extract components and treat them as local time (no UTC conversion)
+    const isoLike = value.includes("T") && (value.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(value));
+    if (isoLike) {
+      const [datePart, timePartRaw] = value.split("T");
+      const [y, m, d] = datePart.split("-").map((n) => parseInt(n, 10));
+      // Remove timezone indicators (Z or +/-HH:mm)
+      const timePart = (timePartRaw || "").replace("Z", "").replace(/[+-]\d{2}:\d{2}$/, "");
+      const [hhStr, mmStr, ssStr] = timePart.split(":");
+      const hh = parseInt(hhStr || "0", 10);
+      const mm = parseInt(mmStr || "0", 10);
+      const ss = parseInt((ssStr || "0").split(".")[0], 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        return new Date(y, m - 1, d, hh, mm, ss, 0);
+      }
+    }
+
+    // Handle ISO-like string without timezone: "2026-03-24T00:00:00"
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/i);
+    if (match) {
+      const [, yStr, mStr, dStr, hhStr, mmStr, ssStr] = match;
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10);
+      const d = parseInt(dStr, 10);
+      const hh = parseInt(hhStr, 10);
+      const mm = parseInt(mmStr, 10);
+      const ss = parseInt(ssStr || "0", 10);
+      if (![y, m, d, hh, mm, ss].some((n) => Number.isNaN(n))) {
+        return new Date(y, m - 1, d, hh, mm, ss, 0);
+      }
+    }
+
+    // Fallback: if string parsing fails, try standard Date constructor
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      // Extract local components to avoid timezone issues
+      return new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate(),
+        parsed.getHours(), // Use getHours() not getUTCHours()
+        parsed.getMinutes(), // Use getMinutes() not getUTCMinutes()
+        parsed.getSeconds(),
+        0
+      );
+    }
+    return parsed;
+  };
+
+  // Format date as local ISO string (no timezone conversion; no Z/+offset)
+  // Format: "YYYY-MM-DDTHH:mm:ss" (no timezone indicator, backend should treat as-is)
+  // IMPORTANT: Uses getHours(), getMinutes(), etc. (local time) NOT getUTCHours(), getUTCMinutes() (UTC)
+  const formatLocalISOString = (date: Date): string => {
+    // Use LOCAL time methods (not UTC methods) to avoid timezone conversion
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0'); // Local hours, not UTC
+    const minutes = String(date.getMinutes()).padStart(2, '0'); // Local minutes, not UTC
+    const seconds = String(date.getSeconds()).padStart(2, '0'); // Local seconds, not UTC
+    
+    // Return without timezone indicator (no Z, no +/- offset)
+    // Backend will parse this as local time components
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  };
 
   // Helper functions
   const getPatientName = (patientId: number | string) => {
@@ -3172,6 +3334,7 @@ Medical License: [License Number]
                       <SelectContent>
                       <SelectItem value="15">15 minutes</SelectItem>
                       <SelectItem value="30">30 minutes</SelectItem>
+                      <SelectItem value="45">45 minutes</SelectItem>
                       <SelectItem value="60">60 minutes</SelectItem>
                       <SelectItem value="90">90 minutes</SelectItem>
                       <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -3186,7 +3349,7 @@ Medical License: [License Number]
                   {/* Date Selection */}
                   <div>
                     <Label className="text-sm font-medium text-gray-600 mb-2 block">Select Date</Label>
-                    <div className="border rounded-lg p-3 bg-gray-50">
+                    <div className="border rounded-lg p-3 bg-gray-50 h-[320px] overflow-y-auto">
                       <CalendarComponent
                         mode="single"
                         selected={newAppointmentDate}
@@ -3371,6 +3534,7 @@ Medical License: [License Number]
                       <SelectContent>
                         <SelectItem value="15">15 minutes</SelectItem>
                         <SelectItem value="30">30 minutes</SelectItem>
+                      <SelectItem value="45">45 minutes</SelectItem>
                         <SelectItem value="60">60 minutes</SelectItem>
                         <SelectItem value="90">90 minutes</SelectItem>
                       </SelectContent>
@@ -3380,7 +3544,7 @@ Medical License: [License Number]
                   {/* Date Selection */}
                   <div>
                     <Label className="text-sm font-medium text-gray-600 mb-2 block">Select Date</Label>
-                    <div className="border rounded-lg p-3 bg-gray-50">
+                    <div className="border rounded-lg p-3 bg-gray-50 h-[320px] overflow-y-auto">
                       <CalendarComponent
                         mode="single"
                         selected={newAppointmentDate}
@@ -4267,6 +4431,7 @@ Medical License: [License Number]
                       <SelectContent>
                         <SelectItem value="15">15 minutes</SelectItem>
                         <SelectItem value="30">30 minutes</SelectItem>
+                        <SelectItem value="45">45 minutes</SelectItem>
                         <SelectItem value="60">60 minutes (1 hour)</SelectItem>
                         <SelectItem value="90">90 minutes (1.5 hours)</SelectItem>
                         <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -4472,12 +4637,47 @@ Medical License: [License Number]
                   </div>
                 </div>
 
+                {/* Status and Description Row */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">Status</Label>
+                    <Select 
+                      defaultValue={editingAppointment.status}
+                      onValueChange={(value) => {
+                        setEditingAppointment({ ...editingAppointment, status: value });
+                      }}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="scheduled">Scheduled</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                        <SelectItem value="no_show">No Show</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Description</Label>
+                    <Textarea 
+                      defaultValue={editingAppointment.description || ''}
+                      onChange={(e) => {
+                        setEditingAppointment({ ...editingAppointment, description: e.target.value });
+                      }}
+                      className="mt-1"
+                      rows={3}
+                      placeholder="e.g. wheelchair, assistance, special needs"
+                    />
+                  </div>
+                </div>
+
                 {/* Date and Time Selection - Side by Side Layout */}
                 <div className="grid grid-cols-2 gap-8">
                   {/* Date Selection */}
                   <div>
-                    <Label className="text-lg font-semibold text-gray-800 mb-3 block">Select Date</Label>
-                    <div className="border rounded-lg p-4 bg-gray-50">
+                    <Label className="text-lg font-semibold text-gray-800 mb-3 block">Select Date *</Label>
+                    <div className="border rounded-lg p-4 bg-gray-50 h-[300px] overflow-y-auto">
                       <CalendarComponent
                         mode="single"
                         selected={editAppointmentDate}
@@ -4493,7 +4693,9 @@ Medical License: [License Number]
                             // Create new date with correct local time (no timezone conversion)
                             const newDateTime = new Date(date);
                             newDateTime.setHours(hour24, minutes, 0, 0);
-                            setEditingAppointment({ ...editingAppointment, scheduledAt: newDateTime.toISOString() });
+                            // DO NOT use toISOString() - it converts to UTC!
+                            // Store as Date object in state, will be formatted when saving
+                            setEditingAppointment({ ...editingAppointment, scheduledAt: newDateTime });
                           }
                         }}
                         disabled={(date: Date) => {
@@ -4513,7 +4715,7 @@ Medical License: [License Number]
 
                   {/* Time Slot Selection */}
                   <div>
-                    <Label className="text-lg font-semibold text-gray-800 mb-3 block">Select Time Slot</Label>
+                    <Label className="text-lg font-semibold text-gray-800 mb-3 block">Select Time Slot *</Label>
                     {/* Color Legend */}
                     <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
                       <div className="text-xs font-medium text-gray-700 mb-1">Legend:</div>
@@ -4545,43 +4747,48 @@ Medical License: [License Number]
                       ) : (
                         <div className="grid grid-cols-2 gap-2">
                           {editTimeSlots.map((slot) => {
-                            const isAvailable = editAppointmentDate ? isTimeSlotAvailable(editAppointmentDate, slot) : true;
-                            
+                            const providerForShift = editingAppointment?.providerId;
+                            const isInShift =
+                              !!editAppointmentDate && providerForShift
+                                ? isTimeSlotInShift(slot, editAppointmentDate, providerForShift)
+                                : true;
+                            const isBooked = editBookedTimeSlots.includes(slot);
+                            const isUnavailable = !isInShift || isBooked;
+
                             // Get the original appointment time slot (read as local time)
                             const originalTimeSlot = (() => {
-                              const date = new Date(editingAppointment.scheduledAt);
+                              const date = parseScheduledAtAsLocal(editingAppointment.scheduledAt);
                               const hours = date.getHours();
                               const minutes = date.getMinutes();
-                              const period = hours >= 12 ? 'PM' : 'AM';
-                              const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
-                              return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+                              const period = hours >= 12 ? "PM" : "AM";
+                              const displayHours = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+                              return `${displayHours}:${minutes.toString().padStart(2, "0")} ${period}`;
                             })();
-                            const isOriginalSlot = slot === originalTimeSlot;
-                            
-                            // Check if this slot is selected (newly chosen by user)
-                            const isSelected = editSelectedTimeSlot === slot || 
-                              (editSelectedTimeSlot === "" && isOriginalSlot);
-                            
-                            // Determine if user changed to a different slot
-                            const isNewlySelected = editSelectedTimeSlot === slot && !isOriginalSlot;
+
+                            // Patient-style selection: highlight the whole selected duration range in orange.
+                            // If user hasn't clicked a new slot yet, use the original slot as the start.
+                            const startSlot = editSelectedTimeSlot || originalTimeSlot;
+                            const duration = editingAppointment.duration || 30;
+                            const startMinutes = timeSlotToMinutes(startSlot);
+                            const slotMinutes = timeSlotToMinutes(slot);
+                            const isInSelectedDuration =
+                              slotMinutes >= startMinutes && slotMinutes < startMinutes + duration;
                             
                             return (
                               <Button
                                 key={slot}
-                                variant={isSelected ? "default" : "outline"}
+                                variant="outline"
                                 className={`h-12 text-sm font-medium ${
-                                  !isAvailable 
-                                    ? "bg-gray-600 text-white cursor-not-allowed border-gray-700 opacity-60 line-through" 
-                                    : isNewlySelected
-                                      ? "bg-blue-500 hover:bg-blue-600 text-white border-blue-500"
-                                    : isOriginalSlot 
-                                      ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-500" 
+                                  isInSelectedDuration
+                                    ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-500"
+                                    : isUnavailable
+                                      ? "bg-gray-600 text-white cursor-not-allowed border-gray-700 opacity-60"
                                       : "bg-green-500 hover:bg-green-600 text-white border-green-500"
                                 }`}
-                                disabled={!isAvailable}
+                                disabled={isUnavailable}
                                 onClick={() => {
+                                  if (isUnavailable) return;
                                   // Validate if enough consecutive slots are available for the appointment duration
-                                  const duration = editingAppointment.duration || 30;
                                   const availabilityCheck = checkConsecutiveSlotsAvailable(editAppointmentDate!, slot, duration);
                                   
                                   if (!availabilityCheck.available) {
@@ -4603,7 +4810,9 @@ Medical License: [License Number]
                                     // Create new date with correct local time (no timezone conversion)
                                     const newDateTime = new Date(editAppointmentDate);
                                     newDateTime.setHours(hour24, minutes, 0, 0);
-                                    setEditingAppointment({ ...editingAppointment, scheduledAt: newDateTime.toISOString() });
+                                    // DO NOT use toISOString() - it converts to UTC!
+                                    // Store as Date object in state, will be formatted when saving
+                                    setEditingAppointment({ ...editingAppointment, scheduledAt: newDateTime });
                                   }
                                 }}
                               >
@@ -4614,41 +4823,6 @@ Medical License: [License Number]
                         </div>
                       )}
                     </div>
-                  </div>
-                </div>
-
-                {/* Status and Description Row */}
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">Status</Label>
-                    <Select 
-                      defaultValue={editingAppointment.status}
-                      onValueChange={(value) => {
-                        setEditingAppointment({ ...editingAppointment, status: value });
-                      }}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="scheduled">Scheduled</SelectItem>
-                        <SelectItem value="completed">Completed</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                        <SelectItem value="no_show">No Show</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600 dark:text-gray-300">Description</Label>
-                    <Textarea 
-                      defaultValue={editingAppointment.description || ''}
-                      onChange={(e) => {
-                        setEditingAppointment({ ...editingAppointment, description: e.target.value });
-                      }}
-                      className="mt-1"
-                      rows={3}
-                      placeholder="Add appointment notes or description..."
-                    />
                   </div>
                 </div>
 
@@ -4705,24 +4879,34 @@ Medical License: [License Number]
                       console.log('[Edit Appointment] Validation passed - proceeding with update');
                       
                       // Create new datetime without timezone conversion
-                      const selectedDate = format(editAppointmentDate, 'yyyy-MM-dd');
+                      // Parse time slot to get hours and minutes
                       const [time, period] = editSelectedTimeSlot.split(' ');
-                      const [hours, minutes] = time.split(':');
-                      let hour24 = parseInt(hours);
+                      const [hours, minutes] = time.split(':').map(Number);
+                      let hour24 = hours;
                       
-                      if (period === 'PM' && hour24 !== 12) {
+                      if (period === 'PM' && hours !== 12) {
                         hour24 += 12;
-                      } else if (period === 'AM' && hour24 === 12) {
+                      } else if (period === 'AM' && hours === 12) {
                         hour24 = 0;
                       }
                       
-                      const newScheduledAt = `${selectedDate}T${hour24.toString().padStart(2, '0')}:${minutes}:00.000Z`;
+                      // Create Date object with local time components (no timezone conversion)
+                      const newDateTime = new Date(editAppointmentDate);
+                      newDateTime.setHours(hour24, minutes, 0, 0);
+                      
+                      // Format as local ISO string (no timezone conversion)
+                      // DO NOT use toISOString() - it converts to UTC!
+                      const scheduledAtString = formatLocalISOString(newDateTime);
                       
                       console.log('[Edit Appointment] Submitting update:', {
                         appointmentId: editingAppointment.id,
-                        newScheduledAt,
-                        title: editingAppointment.title,
-                        status: editingAppointment.status
+                        selectedDate: format(editAppointmentDate, 'yyyy-MM-dd'),
+                        selectedTimeSlot: editSelectedTimeSlot,
+                        hour24,
+                        minutes,
+                        scheduledAtString,
+                        hasTimezone: scheduledAtString.includes('Z') || /[+-]\d{2}:\d{2}$/.test(scheduledAtString),
+                        note: 'Should be FALSE - no timezone indicator means backend treats as local time'
                       });
                       
                       const normalizedEditAppointmentType = editAppointmentType || "consultation";
@@ -4744,8 +4928,8 @@ Medical License: [License Number]
                           appointmentType: normalizedEditAppointmentType,
                           treatmentId,
                           consultationId,
-                          // *** FIX: Convert ISO string to Date object for database ***
-                          scheduledAt: new Date(newScheduledAt),
+                          // *** FIX: Send timezone-naive ISO string (backend will convert to PostgreSQL format) ***
+                          scheduledAt: scheduledAtString,
                           description: editingAppointment.description,
                           duration: editingAppointment.duration,
                         }

@@ -104,6 +104,18 @@ export default function PatientAppointments({
   // Helper function to normalize status values for case-insensitive filtering
   const normalizeStatus = (s?: string) => (s || '').toLowerCase().replace(/\s+/g, '_');
 
+  // Fetch users early to avoid temporal-dead-zone issues in downstream hooks/memos
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ["/api/users"],
+    staleTime: 300000, // 5 minutes cache
+    retry: false,
+    enabled: !!user,
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/users");
+      return response.json();
+    },
+  });
+
   // Fetch patients to find the current user's patient record
   const { data: patientsData, isLoading: patientsLoading } = useQuery({
     queryKey: ["/api/patients"],
@@ -247,21 +259,6 @@ export default function PatientAppointments({
     enabled: !!user,
   });
 
-  // Fetch users to display appointment creator information AND for role-based filtering
-  const { data: usersData, isLoading: usersLoading } = useQuery({
-    queryKey: ["/api/users"],
-    staleTime: 300000, // 5 minutes cache
-    retry: false,
-    enabled: !!user, // Fetch for all users to filter by creator role
-    queryFn: async () => {
-      console.log('🔍 FETCHING /api/users for role filtering');
-      const response = await apiRequest('GET', '/api/users');
-      const data = await response.json();
-      console.log('✅ USERS DATA FETCHED:', data?.length, 'users');
-      return data;
-    },
-  });
-
   // Fetch roles from roles table for role filter
   const { data: rolesData, isLoading: rolesLoading } = useQuery({
     queryKey: ["/api/roles"],
@@ -384,6 +381,112 @@ export default function PatientAppointments({
       role: providerRole,
     };
   };
+
+  // Filter treatments based on selected provider (role and ID/name) for Edit Appointment modal
+  const filteredTreatmentsForEdit = React.useMemo(() => {
+    try {
+      if (!editingAppointment?.providerId) {
+        return treatmentsList;
+      }
+
+      // Safely check if usersData is available before using it
+      const currentUsersData = usersData;
+      if (!currentUsersData || !Array.isArray(currentUsersData)) {
+        return treatmentsList;
+      }
+
+      const provider = getProviderWithRole(editingAppointment.providerId);
+      if (!provider) {
+        return treatmentsList;
+      }
+
+      const providerRole = provider.role?.toLowerCase() || "";
+      const providerId = editingAppointment.providerId.toString();
+      const providerFullName = `${provider.firstName || ""} ${provider.lastName || ""}`.trim().toLowerCase();
+
+      return treatmentsList.filter((treatment: any) => {
+        // Check role match
+        const treatmentRole = (treatment.doctorRole || treatment.doctor_role || "").toString().toLowerCase();
+        const roleMatch = !treatmentRole || treatmentRole === providerRole;
+        if (!roleMatch) return false;
+
+        // Check provider ID match
+        const treatmentDoctorId = treatment.doctorId || treatment.doctor_id;
+        if (treatmentDoctorId && treatmentDoctorId.toString() === providerId) {
+          return true;
+        }
+
+        // Check provider name match
+        const treatmentDoctorName = (treatment.doctorName || "").toString().trim().toLowerCase();
+        if (treatmentDoctorName && treatmentDoctorName === providerFullName) {
+          return true;
+        }
+
+        // If no doctorId or doctorName specified, show it (fallback for treatments without specific provider)
+        if (!treatmentDoctorId && !treatmentDoctorName) {
+          return roleMatch;
+        }
+
+        return false;
+      });
+    } catch (error) {
+      // If usersData is not available yet, return all treatments
+      return treatmentsList;
+    }
+  }, [treatmentsList, editingAppointment?.providerId]);
+
+  // Filter consultations based on selected provider (role and ID/name) for Edit Appointment modal
+  const filteredConsultationsForEdit = React.useMemo(() => {
+    try {
+      if (!editingAppointment?.providerId) {
+        return consultationServices;
+      }
+
+      // Safely check if usersData is available before using it
+      const currentUsersData = usersData;
+      if (!currentUsersData || !Array.isArray(currentUsersData)) {
+        return consultationServices;
+      }
+
+      const provider = getProviderWithRole(editingAppointment.providerId);
+      if (!provider) {
+        return consultationServices;
+      }
+
+      const providerRole = provider.role?.toLowerCase() || "";
+      const providerId = editingAppointment.providerId.toString();
+      const providerFullName = `${provider.firstName || ""} ${provider.lastName || ""}`.trim().toLowerCase();
+
+      return consultationServices.filter((service: any) => {
+        // Check role match
+        const serviceRole = (service.doctorRole || service.doctor_role || "").toString().toLowerCase();
+        const roleMatch = !serviceRole || serviceRole === providerRole;
+        if (!roleMatch) return false;
+
+        // Check provider ID match
+        const serviceDoctorId = service.doctorId || service.doctor_id;
+        if (serviceDoctorId && serviceDoctorId.toString() === providerId) {
+          return true;
+        }
+
+        // Check provider name match
+        const serviceDoctorName = (service.doctorName || "").toString().trim().toLowerCase();
+        if (serviceDoctorName && serviceDoctorName === providerFullName) {
+          return true;
+        }
+
+        // If no doctorId or doctorName specified, show it (fallback for consultations without specific provider)
+        if (!serviceDoctorId && !serviceDoctorName) {
+          return roleMatch;
+        }
+
+        return false;
+      });
+    } catch (error) {
+      // If usersData is not available yet, return all consultations
+      return consultationServices;
+    }
+  }, [consultationServices, editingAppointment?.providerId]);
 
   // Format appointment title with role prefix
   const formatAppointmentTitle = (appointment: any) => {
@@ -2269,6 +2372,7 @@ export default function PatientAppointments({
                       <SelectContent>
                         <SelectItem value="15">15 minutes</SelectItem>
                         <SelectItem value="30">30 minutes</SelectItem>
+                        <SelectItem value="45">45 minutes</SelectItem>
                         <SelectItem value="60">60 minutes (1 hour)</SelectItem>
                         <SelectItem value="90">90 minutes (1.5 hours)</SelectItem>
                         <SelectItem value="120">120 minutes (2 hours)</SelectItem>
@@ -2404,7 +2508,7 @@ export default function PatientAppointments({
                           <Command>
                             <CommandInput placeholder="Search treatments..." />
                             <CommandList>
-                              {treatmentsList.length === 0 ? (
+                              {filteredTreatmentsForEdit.length === 0 ? (
                                 <CommandItem disabled>
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                   Loading treatments...
@@ -2413,7 +2517,7 @@ export default function PatientAppointments({
                                 <>
                                   <CommandEmpty>No treatments found.</CommandEmpty>
                                   <CommandGroup>
-                                    {treatmentsList.map((treatment: any) => (
+                                    {filteredTreatmentsForEdit.map((treatment: any) => (
                                       <CommandItem
                                         key={treatment.id}
                                         value={treatment.id.toString()}
@@ -2477,7 +2581,7 @@ export default function PatientAppointments({
                           <Command>
                             <CommandInput placeholder="Search consultations..." />
                             <CommandList>
-                              {consultationServices.length === 0 ? (
+                              {filteredConsultationsForEdit.length === 0 ? (
                                 <CommandItem disabled>
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                   Loading consultations...
@@ -2486,7 +2590,7 @@ export default function PatientAppointments({
                                 <>
                                   <CommandEmpty>No consultations found.</CommandEmpty>
                                   <CommandGroup>
-                                    {consultationServices.map((service: any) => (
+                                    {filteredConsultationsForEdit.map((service: any) => (
                                       <CommandItem
                                         key={service.id}
                                         value={service.id.toString()}
