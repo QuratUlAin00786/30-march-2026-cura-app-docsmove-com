@@ -929,6 +929,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         medicalSpecialtyCategory: userDetails.medicalSpecialtyCategory,
         subSpecialty: userDetails.subSpecialty,
         lastLoginAt: userDetails.lastLoginAt,
+        professionalRegistrationId: (userDetails as any).professionalRegistrationId,
       };
 
       console.log("[GET /api/users/current] Returning response with", Object.keys(response).length, "fields");
@@ -3791,7 +3792,9 @@ The Cura EMR Team`,
   // Get current organization's subscription (latest subscription, check expiration on client)
   app.get("/api/subscriptions/current", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
-      const organizationId = req.tenant!.id;
+      // Invoices are scoped by organization_id. Prefer orgId from the JWT (most reliable),
+      // fallback to tenant id (some deployments equate tenant.id to organization id).
+      const organizationId = (req.user as any)?.organizationId ?? req.tenant!.id;
 
       // Query the database for the latest subscription (ordered by createdAt DESC) regardless of expiration
       const result = await db
@@ -3870,7 +3873,19 @@ The Cura EMR Team`,
   // Get billing history (payment history) for current organization
   app.get("/api/billing-history", authMiddleware, requireRole(["admin"]), async (req: TenantRequest, res) => {
     try {
-      const organizationId = req.tenant!.id;
+      // Invoices are scoped by organization_id. In some environments `req.user.organizationId`
+      // and `req.tenant.id` can differ, so try both to avoid false "not found".
+      const orgIdsRaw = [(req.user as any)?.organizationId, req.tenant?.id];
+      const organizationIds = Array.from(
+        new Set(
+          orgIdsRaw
+            .map((v) => (v == null ? NaN : Number(v)))
+            .filter((n) => Number.isFinite(n))
+        )
+      ) as number[];
+      if (organizationIds.length === 0) {
+        return res.status(400).json({ error: "Organization ID is required" });
+      }
       const { saasPayments } = await import("../shared/schema");
 
       // Get the latest subscription's expiresAt to use as invoice end date
@@ -15269,8 +15284,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         const placeholders = idsToMatch.map((_, i) => `$${i + 3}`).join(", ");
         try {
           const { rows } = await pool.query(
-            `SELECT * FROM invoices WHERE organization_id = $1 AND service_type = $2 AND service_id IN (${placeholders}) LIMIT 1`,
-            [organizationId, String(serviceType), ...idsToMatch]
+            `SELECT * FROM invoices WHERE organization_id = ANY($1::int[]) AND service_type = $2 AND service_id IN (${placeholders})
+             ORDER BY (CASE WHEN status = 'paid' THEN 1 ELSE 0 END) DESC, COALESCE(updated_at, created_at) DESC
+             LIMIT 1`,
+            [organizationIds, String(serviceType), ...idsToMatch]
           );
           if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
         } catch (_) { /* ignore */ }
@@ -15278,8 +15295,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         if (!invoice && idsToMatch.length === 1) {
           try {
             const { rows } = await pool.query(
-              `SELECT * FROM invoices WHERE organization_id = $1 AND service_type = $2 AND TRIM(service_id) = TRIM($3) LIMIT 1`,
-              [organizationId, String(serviceType), idsToMatch[0]]
+              `SELECT * FROM invoices WHERE organization_id = ANY($1::int[]) AND service_type = $2 AND TRIM(service_id) = TRIM($3)
+               ORDER BY (CASE WHEN status = 'paid' THEN 1 ELSE 0 END) DESC, COALESCE(updated_at, created_at) DESC
+               LIMIT 1`,
+              [organizationIds, String(serviceType), idsToMatch[0]]
             );
             if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
           } catch (_) { /* ignore */ }
@@ -15288,8 +15307,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         if (!invoice && String(serviceType).toLowerCase() === "appointments" && idsToMatch.length === 1) {
           try {
             const { rows } = await pool.query(
-              `SELECT * FROM invoices WHERE organization_id = $1 AND (service_type = $2 OR service_type IS NULL) AND TRIM(COALESCE(service_id, '')) = TRIM($3) LIMIT 1`,
-              [organizationId, String(serviceType), idsToMatch[0]]
+              `SELECT * FROM invoices WHERE organization_id = ANY($1::int[]) AND (service_type = $2 OR service_type IS NULL) AND TRIM(COALESCE(service_id, '')) = TRIM($3)
+               ORDER BY (CASE WHEN status = 'paid' THEN 1 ELSE 0 END) DESC, COALESCE(updated_at, created_at) DESC
+               LIMIT 1`,
+              [organizationIds, String(serviceType), idsToMatch[0]]
             );
             if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
           } catch (_) { /* ignore */ }
@@ -15302,8 +15323,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         try {
           const placeholders = idsToMatch.map((_, i) => `$${i + 3}`).join(", ");
           const { rows } = await pool.query(
-            `SELECT * FROM "${schemaName}".invoices WHERE organization_id = $1 AND service_type = $2 AND service_id IN (${placeholders}) LIMIT 1`,
-            [organizationId, String(serviceType), ...idsToMatch]
+            `SELECT * FROM "${schemaName}".invoices WHERE organization_id = ANY($1::int[]) AND service_type = $2 AND service_id IN (${placeholders})
+             ORDER BY (CASE WHEN status = 'paid' THEN 1 ELSE 0 END) DESC, COALESCE(updated_at, created_at) DESC
+             LIMIT 1`,
+            [organizationIds, String(serviceType), ...idsToMatch]
           );
           if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
         } catch (schemaErr: any) {
@@ -15317,8 +15340,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           await client.query({ text: "SET LOCAL search_path TO curauser24nov25" });
           const placeholders = idsToMatch.map((_, i) => `$${i + 3}`).join(", ");
           const { rows } = await client.query(
-            `SELECT * FROM invoices WHERE organization_id = $1 AND service_type = $2 AND service_id IN (${placeholders}) LIMIT 1`,
-            [organizationId, String(serviceType), ...idsToMatch]
+            `SELECT * FROM invoices WHERE organization_id = ANY($1::int[]) AND service_type = $2 AND service_id IN (${placeholders})
+             ORDER BY (CASE WHEN status = 'paid' THEN 1 ELSE 0 END) DESC, COALESCE(updated_at, created_at) DESC
+             LIMIT 1`,
+            [organizationIds, String(serviceType), ...idsToMatch]
           );
           if (rows[0]) invoice = mapRowToInvoice(rows[0] as Record<string, unknown>);
         } finally {
@@ -15327,7 +15352,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       }
 
       if (!invoice) {
-        invoice = await storage.getInvoiceByService(organizationId, String(serviceType), idsToMatch);
+        for (const orgId of organizationIds) {
+          invoice = await storage.getInvoiceByService(orgId, String(serviceType), idsToMatch);
+          if (invoice) break;
+        }
       }
 
       if (!invoice) {
@@ -15353,7 +15381,17 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(404).json({ error: "Invoice not found" });
       }
 
-      res.json(invoice);
+      // Normalize status: compute "overdue" when dueDate passed and invoice isn't paid/cancelled.
+      const rawStatus = String((invoice as any).status ?? "").toLowerCase();
+      const dueDate = (invoice as any).dueDate ? new Date((invoice as any).dueDate) : null;
+      const isPaid = rawStatus === "paid";
+      const isCancelled = rawStatus === "cancelled";
+      const computedStatus =
+        !isPaid && !isCancelled && dueDate && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now()
+          ? "overdue"
+          : (invoice as any).status;
+
+      res.json({ ...(invoice as any), status: computedStatus });
     } catch (error) {
       console.error("Error fetching invoice by service:", error);
       res.status(500).json({ error: "Failed to fetch invoice" });

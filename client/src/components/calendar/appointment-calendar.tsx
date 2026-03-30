@@ -151,8 +151,8 @@ function AppointmentCardInvoice({ appointmentId }: { appointmentId: string | nul
     },
   });
 
-  if (!appointmentId || isLoading) return null;
-  if (!invoice) return null;
+  // Per requirement: do not show any badge if invoice doesn't exist (or is still loading).
+  if (!appointmentId || isLoading || !invoice) return null;
 
   const statusLabel = String(invoice.status ?? "—").toLowerCase();
   const statusBadgeClass =

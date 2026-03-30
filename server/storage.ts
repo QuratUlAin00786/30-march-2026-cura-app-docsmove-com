@@ -1892,6 +1892,8 @@ export class DatabaseStorage implements IStorage {
         eq(invoices.serviceType, serviceType),
         or(...trimmed.map((id) => eq(invoices.serviceId, id)))
       ))
+      // Prefer the most recently updated invoice if multiple exist for same service_id
+      .orderBy(desc(invoices.updatedAt), desc(invoices.createdAt))
       .limit(1);
     return invoice || undefined;
   }

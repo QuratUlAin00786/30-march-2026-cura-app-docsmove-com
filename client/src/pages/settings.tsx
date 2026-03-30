@@ -1406,6 +1406,14 @@ export default function Settings() {
                       <Label className="text-sm text-gray-500 dark:text-gray-400">Username</Label>
                       <p className="text-base font-medium mt-1">{currentUserDetails.username || "N/A"}</p>
                     </div>
+                    {(currentUserDetails.role === "doctor" || currentUserDetails.role === "nurse") && (
+                      <div>
+                        <Label className="text-sm text-gray-500 dark:text-gray-400">Professional Registration ID</Label>
+                        <p className="text-base font-medium mt-1">
+                          {(currentUserDetails as any).professionalRegistrationId || "N/A"}
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <Label className="text-sm text-gray-500 dark:text-gray-400">Email</Label>
                       <p className="text-base font-medium mt-1">{currentUserDetails.email || "N/A"}</p>
