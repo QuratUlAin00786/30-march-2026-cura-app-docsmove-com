@@ -77,6 +77,7 @@ import {
   Trash2,
   ChevronsUpDown,
   Check,
+  LogOut,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -1366,7 +1367,7 @@ function PatientList({ telemedicineSettings }: { telemedicineSettings?: Telemedi
 }
 
 export default function Telemedicine() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("start");
   const [currentCall, setCurrentCall] = useState<Consultation | null>(null);
@@ -2462,6 +2463,20 @@ export default function Telemedicine() {
                   Settings
                 </Button>
               </DialogTrigger>
+              {/* Sign out button placed immediately after Settings */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2"
+                onClick={() => {
+                  try { logout(); } catch {}
+                  window.location.href = "/auth/login";
+                }}
+                title="Sign out"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign out
+              </Button>
               <DialogContent className="max-w-[min(42rem,calc(100vw-2rem))] max-h-[min(90vh,calc(100dvh-2rem))] flex flex-col overflow-hidden p-4 sm:p-6">
               <DialogHeader className="flex-shrink-0">
                 <DialogTitle>Telemedicine Settings</DialogTitle>

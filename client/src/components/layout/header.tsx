@@ -1,4 +1,4 @@
-import { Globe, ArrowLeft } from "lucide-react";
+import { Globe, ArrowLeft, LogOut } from "lucide-react";
 import { useTenant } from "@/hooks/use-tenant";
 import { useAuth } from "@/hooks/use-auth";
 import { NotificationBell } from "@/components/layout/notification-bell";
@@ -17,6 +17,7 @@ interface HeaderProps {
   hideNotificationBell?: boolean;
   hideAiStatus?: boolean;
   hideRegionalSettings?: boolean;
+  hideSignOut?: boolean;
 }
 
 export function Header({
@@ -26,10 +27,11 @@ export function Header({
   updatedBy,
   hideNotificationBell = false,
   hideAiStatus = false,
-  hideRegionalSettings = false
+  hideRegionalSettings = false,
+  hideSignOut = false
 }: HeaderProps) {
   const { tenant } = useTenant();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
 
   // Fetch users data to get names from IDs
@@ -114,6 +116,22 @@ export function Header({
 
           {/* Notifications */}
           {!hideNotificationBell && <NotificationBell />}
+
+          {/* Sign out */}
+          {!hideSignOut && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                try { logout(); } catch {}
+                window.location.href = "/auth/login";
+              }}
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </Button>
+          )}
         </div>
       </div>
     </header>

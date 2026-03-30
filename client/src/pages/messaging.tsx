@@ -48,7 +48,8 @@ import {
   X,
   Calendar,
   ChevronDown,
-  Globe
+  Globe,
+  LogOut
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -59,6 +60,7 @@ import { Header } from "@/components/layout/header";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useTenant } from "@/hooks/use-tenant";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import { useAuth } from "@/hooks/use-auth";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { createRemoteLiveKitRoom } from "@/lib/livekit-room-service";
 import { buildSocketUserIdentifier, socketManager } from "@/lib/socket-manager";
@@ -312,6 +314,7 @@ const formatTimestampNoConversion = (timestamp: string): string => {
 export default function MessagingPage() {
   const { canCreate, canEdit, canDelete } = useRolePermissions();
   const { tenant } = useTenant();
+  const { logout } = useAuth();
 
   // State for success modal (used by showSuccess)
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
@@ -3911,6 +3914,7 @@ export default function MessagingPage() {
           hideNotificationBell={true}
           hideAiStatus={true}
           hideRegionalSettings={true}
+          hideSignOut={true}
         />
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -3933,6 +3937,19 @@ export default function MessagingPage() {
           <NotificationBell />
           <span className="text-xs text-neutral-600 dark:text-neutral-400">Theme:</span>
           <ThemeToggle />
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-1.5"
+            onClick={() => {
+              try { logout(); } catch {}
+              window.location.href = "/auth/login";
+            }}
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Sign out</span>
+          </Button>
         </div>
       </div>
 

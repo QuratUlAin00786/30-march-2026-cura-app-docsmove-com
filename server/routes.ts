@@ -356,6 +356,47 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
     }
   });
 
+  // Health check: verify DB connectivity and responsiveness quickly
+  app.get("/api/health/db", async (_req: Request, res: Response) => {
+    const start = Date.now();
+    let ok = false;
+    let errorMessage: string | null = null;
+    let serverTime: string | null = null;
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // Keep very short to avoid hanging the app if DB is congested
+        await client.query("SET LOCAL statement_timeout = 2000");
+        const r = await client.query<{ now: string }>("SELECT NOW()::text as now");
+        serverTime = Array.isArray(r.rows) && r.rows[0]?.now ? String(r.rows[0].now) : null;
+        await client.query("COMMIT");
+        ok = true;
+      } catch (err: any) {
+        try { await client.query("ROLLBACK"); } catch {}
+        errorMessage = err?.message || String(err);
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      errorMessage = err?.message || String(err);
+    }
+    const durationMs = Date.now() - start;
+    // Pool stats (pg exposes these counters on Pool)
+    const poolStats = {
+      total: (pool as any)?.totalCount ?? undefined,
+      idle: (pool as any)?.idleCount ?? undefined,
+      waiting: (pool as any)?.waitingCount ?? undefined,
+    };
+    res.json({
+      ok,
+      durationMs,
+      serverTime,
+      pool: poolStats,
+      error: errorMessage,
+    });
+  });
+
   // Parse lifestyle factors from patient data
   if (patientData.medicalHistory?.socialHistory) {
     const social = patientData.medicalHistory.socialHistory;
@@ -10087,6 +10128,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         firstName: z.string().min(1),
         lastName: z.string().min(1),
         role: z.string().min(1), // Accept any role from database
+        professionalRegistrationId: z.string().optional(),
         department: z.string().optional(),
         medicalSpecialtyCategory: z.string().optional(),
         subSpecialty: z.string().optional(),
@@ -10118,6 +10160,14 @@ This treatment plan should be reviewed and adjusted based on individual patient 
           planType: z.string().optional(),
           effectiveDate: z.string().optional(),
         }).optional(),
+      }).superRefine((data, ctx) => {
+        if (data.role !== 'patient' && (!data.professionalRegistrationId || data.professionalRegistrationId.trim() === "")) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Please enter Professional Registration ID",
+            path: ["professionalRegistrationId"],
+          });
+        }
       }).parse(req.body);
 
       // Check subscription limits based on role
@@ -37369,6 +37419,1435 @@ Cura EMR Team
     } catch (error) {
       console.error("Error fetching appointment analytics:", error);
       res.status(500).json({ error: "Failed to fetch appointment analytics", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Custom appointments report for charts (scheduled_at range + appointment_type + join service name)
+  // - If appointment_type = treatment: joins treatments via treatment_id -> treatments.name
+  // - If appointment_type = consultation: joins doctors_fee via consultation_id -> doctors_fee.service_name
+  // Aggregates by scheduled_at date + service name, returns counts
+  app.get("/api/analytics/appointments-custom-report", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    const debugId = `acr_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    try {
+      const organizationId = requireOrgId(req);
+
+      const startDate = (req.query.startDate as string | undefined) || undefined; // YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      const endDate = (req.query.endDate as string | undefined) || undefined; // YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      const appointmentTypeRaw = (req.query.appointmentType as string | undefined) || "treatment"; // treatment | consultation
+
+      const appointmentType = appointmentTypeRaw.toLowerCase() === "consultation" ? "consultation" : "treatment";
+
+      const normalizeToTs = (value?: string, mode: "start" | "end" = "start") => {
+        if (!value) return undefined;
+        // date only -> expand to full-day bounds
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          return mode === "start" ? `${value} 00:00:00` : `${value} 23:59:59`;
+        }
+        // datetime-local -> "YYYY-MM-DDTHH:mm" -> "YYYY-MM-DD HH:mm:SS"
+        const v = value.replace("T", " ");
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) {
+          return mode === "start" ? `${v}:00` : `${v}:59`;
+        }
+        return v;
+      };
+
+      const startTs = normalizeToTs(startDate, "start");
+      const endTs = normalizeToTs(endDate, "end");
+
+      console.log("[APPOINTMENTS-CUSTOM-REPORT] Request:", {
+        debugId,
+        organizationId,
+        startDate,
+        endDate,
+        appointmentType,
+      });
+      console.log("[APPOINTMENTS-CUSTOM-REPORT] Range normalized:", { debugId, startTs, endTs });
+
+      // Build date condition against scheduled_at (timestamp w/o tz in DB)
+      let dateCondition = sql``;
+      if (startTs && endTs) {
+        dateCondition = sql`AND a.scheduled_at >= ${startTs}::timestamp AND a.scheduled_at <= ${endTs}::timestamp`;
+      } else if (startTs) {
+        dateCondition = sql`AND a.scheduled_at >= ${startTs}::timestamp`;
+      } else if (endTs) {
+        dateCondition = sql`AND a.scheduled_at <= ${endTs}::timestamp`;
+      } else {
+        // default last 30 days
+        dateCondition = sql`AND a.scheduled_at >= CURRENT_DATE - INTERVAL '30 days'`;
+      }
+
+      // Limit points to keep the endpoint fast (prevents long-running group-bys on large datasets).
+      // Keep default small for "instant" UX.
+      const maxPointsRaw = req.query.maxPoints as string | undefined;
+      const maxPoints = Math.min(Math.max(parseInt(maxPointsRaw || "600", 10) || 600, 100), 2000);
+
+      // Adaptive bucketing: wider ranges -> coarser buckets (much faster + fewer points)
+      // Use SQL fragments directly to avoid heavy post-processing.
+      const bucket =
+        startTs && endTs
+          ? (() => {
+              const startMs = Date.parse(startTs.replace(" ", "T"));
+              const endMs = Date.parse(endTs.replace(" ", "T"));
+              const days = Number.isFinite(startMs) && Number.isFinite(endMs) ? (endMs - startMs) / (1000 * 60 * 60 * 24) : 30;
+              if (days > 45) return "day";
+              if (days > 7) return "hour";
+              return "minute";
+            })()
+          : "hour";
+
+      // Use single-statement SQL (index-friendly) to avoid multi-statement issues with node-postgres.
+      const t0 = Date.now();
+      console.log("[APPOINTMENTS-CUSTOM-REPORT] DB query start", { debugId, appointmentType, maxPoints });
+
+      const params: any[] = [organizationId];
+      let p = 1;
+      const where: string[] = [`a.organization_id = $${++p}`]; // overwritten below for clarity
+      // We'll rebuild properly to keep numbering correct
+      params.length = 0;
+      params.push(organizationId); // $1
+      where.length = 0;
+      where.push(`a.organization_id = $1`);
+      // IMPORTANT: use appointment_type directly (index-friendly) to keep this fast.
+      // appointment_type is NOT NULL with default in our schema migrations.
+      where.push(`a.appointment_type = $2`);
+      params.push(appointmentType); // $2 ('treatment' | 'consultation')
+
+      if (startTs) {
+        params.push(startTs);
+        where.push(`a.scheduled_at >= $${params.length}::timestamp`);
+      }
+      if (endTs) {
+        params.push(endTs);
+        where.push(`a.scheduled_at <= $${params.length}::timestamp`);
+      }
+      params.push(maxPoints); // last param for LIMIT
+      const limitParam = `$${params.length}`;
+
+      // Validate bucket (defense-in-depth since it's interpolated)
+      const safeBucket = bucket === "minute" || bucket === "hour" || bucket === "day" ? bucket : "hour";
+
+      const reportSql =
+        appointmentType === "treatment"
+          ? `
+            WITH base AS (
+              SELECT
+                date_trunc('${safeBucket}', a.scheduled_at) AS scheduled_bucket,
+                a.organization_id,
+                a.treatment_id
+              FROM appointments a
+              WHERE ${where.join(" AND ")}
+            ),
+            grouped AS (
+              SELECT
+                b.scheduled_bucket,
+                t.id as service_id,
+                COALESCE(t.name, 'Unknown Treatment') as service_name,
+                COUNT(*)::integer as appointment_count
+              FROM base b
+              LEFT JOIN treatments t
+                ON t.id = b.treatment_id
+                AND t.organization_id = b.organization_id
+              GROUP BY b.scheduled_bucket, t.id, t.name
+              ORDER BY b.scheduled_bucket DESC
+              LIMIT ${limitParam}
+            )
+            SELECT
+              TO_CHAR(scheduled_bucket, 'YYYY-MM-DD HH24:MI:SS') as scheduled_at,
+              service_id,
+              service_name,
+              appointment_count
+            FROM grouped
+            ORDER BY scheduled_at ASC, service_name ASC
+          `
+          : `
+            WITH base AS (
+              SELECT
+                date_trunc('${safeBucket}', a.scheduled_at) AS scheduled_bucket,
+                a.organization_id,
+                a.consultation_id
+              FROM appointments a
+              WHERE ${where.join(" AND ")}
+            ),
+            grouped AS (
+              SELECT
+                b.scheduled_bucket,
+                df.id as service_id,
+                COALESCE(df.service_name, 'Unknown Consultation') as service_name,
+                COUNT(*)::integer as appointment_count
+              FROM base b
+              LEFT JOIN doctors_fee df
+                ON df.id = b.consultation_id
+                AND df.organization_id = b.organization_id
+              GROUP BY b.scheduled_bucket, df.id, df.service_name
+              ORDER BY b.scheduled_bucket DESC
+              LIMIT ${limitParam}
+            )
+            SELECT
+              TO_CHAR(scheduled_bucket, 'YYYY-MM-DD HH24:MI:SS') as scheduled_at,
+              service_id,
+              service_name,
+              appointment_count
+            FROM grouped
+            ORDER BY scheduled_at ASC, service_name ASC
+          `;
+
+      console.log("[APPOINTMENTS-CUSTOM-REPORT] SQL preview:", {
+        debugId,
+        appointmentType,
+        // Keep logs readable
+        sqlPreview: reportSql.replace(/\s+/g, " ").trim().slice(0, 400) + "...",
+        params,
+      });
+
+      const reportRes = await pool.query(reportSql, params);
+      console.log("[APPOINTMENTS-CUSTOM-REPORT] DB query done", {
+        debugId,
+        ms: Date.now() - t0,
+        rows: reportRes.rows?.length || 0,
+      });
+
+      console.log("[APPOINTMENTS-CUSTOM-REPORT] Response:", {
+        debugId,
+        rows: reportRes.rows?.length || 0,
+        sample: (reportRes.rows || []).slice(0, 5),
+        maxPoints,
+      });
+      res.json(reportRes.rows || []);
+    } catch (error) {
+      console.error("Error fetching custom appointments report:", { debugId, error });
+      res.status(500).json({
+        error: "Failed to fetch custom appointments report",
+        details: error instanceof Error ? error.message : String(error),
+        debugId,
+      });
+    }
+  });
+
+  // Treatments analytics report (appointments + treatments_info) for selected date-time range
+  app.get("/api/analytics/treatments-report", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    const hardTimeoutMs = 10000;
+    const hardTimeout = setTimeout(() => {
+      if (!res.headersSent) {
+        console.warn("[TREATMENTS-REPORT] Hard timeout reached; returning safe empty payload");
+        res.json({
+          totalBookings: 0,
+          topTreatment: null,
+          insightText: "No treatment bookings found in selected date range",
+          treatments: [],
+        });
+      }
+    }, hardTimeoutMs);
+    try {
+      const organizationId = requireOrgId(req);
+      const startDate = (req.query.startDate as string | undefined) || undefined; // YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      const endDate = (req.query.endDate as string | undefined) || undefined; // YYYY-MM-DD or YYYY-MM-DDTHH:mm
+
+      const normalizeToTs = (value?: string, mode: "start" | "end" = "start") => {
+        if (!value) return undefined;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          return mode === "start" ? `${value} 00:00:00` : `${value} 23:59:59`;
+        }
+        const v = value.replace("T", " ");
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) {
+          return mode === "start" ? `${v}:00` : `${v}:59`;
+        }
+        return v;
+      };
+
+      const startTs = normalizeToTs(startDate, "start");
+      const endTs = normalizeToTs(endDate, "end");
+
+      const params: any[] = [organizationId];
+      const where: string[] = [
+        "a.organization_id = $1",
+        // Source of truth for treatment analytics: treatment_id presence.
+        // Some legacy rows may have missing/inconsistent appointment_type.
+        "a.treatment_id IS NOT NULL",
+      ];
+      if (startTs) {
+        params.push(startTs);
+        where.push(`a.scheduled_at >= $${params.length}::timestamp`);
+      }
+      if (endTs) {
+        params.push(endTs);
+        where.push(`a.scheduled_at <= $${params.length}::timestamp`);
+      }
+
+      const reportSql = `
+        WITH filtered AS (
+          SELECT
+            a.organization_id,
+            a.treatment_id
+          FROM appointments a
+          WHERE ${where.join(" AND ")}
+        ),
+        counts AS (
+          SELECT
+            treatment_id,
+            COUNT(*)::integer AS booking_count
+          FROM filtered
+          GROUP BY treatment_id
+        )
+        SELECT
+          c.treatment_id as id,
+          COALESCE(t.name, 'Unknown Treatment') as treatment_name,
+          COALESCE(t.color_code, '#2563eb') as color_code,
+          c.booking_count
+        FROM counts c
+        LEFT JOIN treatments t
+          ON t.id = c.treatment_id
+          AND t.organization_id = $1
+        ORDER BY c.booking_count DESC, treatment_name ASC
+      `;
+
+      const dbStart = Date.now();
+      const startDay = startTs ? String(startTs).slice(0, 10) : undefined;
+      const endDay = endTs ? String(endTs).slice(0, 10) : undefined;
+      const client = await pool.connect();
+      let result: any;
+      try {
+        await client.query("BEGIN");
+        // Fail fast on slow plans to avoid 60s+ frontend timeouts.
+        await client.query("SET LOCAL statement_timeout = 12000");
+        result = await client.query(reportSql, params);
+        if ((result.rows?.length || 0) === 0 && startDay && endDay) {
+          // Fallback for datetime-local vs DB timezone boundary mismatch.
+          const dateOnlySql = `
+            SELECT
+              a.treatment_id as id,
+              COALESCE(t.name, 'Unknown Treatment') as treatment_name,
+              COALESCE(t.color_code, '#2563eb') as color_code,
+              COUNT(*)::integer AS booking_count
+            FROM appointments a
+            LEFT JOIN treatments t
+              ON t.id = a.treatment_id
+              AND t.organization_id = a.organization_id
+            WHERE a.organization_id = $1
+              AND a.treatment_id IS NOT NULL
+              AND DATE(a.scheduled_at) BETWEEN $2::date AND $3::date
+            GROUP BY a.treatment_id, t.name, t.color_code
+            ORDER BY booking_count DESC, treatment_name ASC
+          `;
+          result = await client.query(dateOnlySql, [organizationId, startDay, endDay]);
+        }
+        await client.query("COMMIT");
+      } catch (queryError: any) {
+        try { await client.query("ROLLBACK"); } catch {}
+        if (queryError?.code === "57014") {
+          console.warn("[TREATMENTS-REPORT] statement_timeout hit; returning empty payload", {
+            organizationId,
+            startTs,
+            endTs,
+          });
+          return res.json({
+            totalBookings: 0,
+            topTreatment: null,
+            insightText: "No treatment bookings found in selected date range",
+            treatments: [],
+          });
+        }
+        throw queryError;
+      } finally {
+        client.release();
+      }
+      const elapsedMs = Date.now() - dbStart;
+
+      const treatments = (result.rows || []).map((r: any) => ({
+        id: r.id,
+        treatmentName: r.treatment_name,
+        colorCode: r.color_code,
+        bookingCount: Number(r.booking_count || 0),
+        percentage: 0,
+      }));
+
+      const totalBookings = treatments.reduce((acc: number, t: any) => acc + t.bookingCount, 0);
+      const treatmentsWithPct = treatments.map((t: any) => ({
+        ...t,
+        percentage: totalBookings > 0 ? Number(((t.bookingCount / totalBookings) * 100).toFixed(2)) : 0,
+      }));
+
+      const topTreatment = treatmentsWithPct[0]
+        ? {
+            id: treatmentsWithPct[0].id,
+            treatmentName: treatmentsWithPct[0].treatmentName,
+            bookingCount: treatmentsWithPct[0].bookingCount,
+            percentage: treatmentsWithPct[0].percentage,
+          }
+        : null;
+
+      const insightText = topTreatment
+        ? `Top treatment is ${topTreatment.treatmentName} with ${topTreatment.percentage}% of total bookings`
+        : "No treatment bookings found in selected date range";
+
+      console.log("[TREATMENTS-REPORT] Response:", {
+        organizationId,
+        startTs,
+        endTs,
+        rows: treatmentsWithPct.length,
+        totalBookings,
+        elapsedMs,
+        topTreatment,
+      });
+
+      if (!res.headersSent) {
+        res.json({
+          totalBookings,
+          topTreatment,
+          insightText,
+          treatments: treatmentsWithPct,
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching treatments report:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Failed to fetch treatments report",
+          details: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } finally {
+      clearTimeout(hardTimeout);
+    }
+  });
+
+  // List appointments within scheduled_at date range + appointment_type (for "See appointments")
+  app.get("/api/analytics/appointments-custom-list", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    const debugId = `acl_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const hardTimeoutMs = 10000;
+    const hardTimeout = setTimeout(() => {
+      if (!res.headersSent) {
+        console.warn("[APPOINTMENTS-CUSTOM-LIST] Hard timeout reached; returning empty rows", { debugId });
+        res.json([]);
+      }
+    }, hardTimeoutMs);
+    try {
+      const organizationId = requireOrgId(req);
+
+      const startDate = (req.query.startDate as string | undefined) || undefined; // YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      const endDate = (req.query.endDate as string | undefined) || undefined; // YYYY-MM-DD or YYYY-MM-DDTHH:mm
+      const appointmentTypeRaw = (req.query.appointmentType as string | undefined) || "all";
+      const forChart = String(req.query.forChart || "") === "1";
+      const normalizedType = appointmentTypeRaw.toLowerCase();
+      const appointmentType =
+        normalizedType === "consultation" ? "consultation" :
+        normalizedType === "treatment" ? "treatment" :
+        "all";
+
+      const normalizeToTs = (value?: string, mode: "start" | "end" = "start") => {
+        if (!value) return undefined;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          return mode === "start" ? `${value} 00:00:00` : `${value} 23:59:59`;
+        }
+        const v = value.replace("T", " ");
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) {
+          return mode === "start" ? `${v}:00` : `${v}:59`;
+        }
+        return v;
+      };
+
+      const startTs = normalizeToTs(startDate, "start");
+      const endTs = normalizeToTs(endDate, "end");
+
+      console.log("[APPOINTMENTS-CUSTOM-LIST] Request:", {
+        debugId,
+        organizationId,
+        startDate,
+        endDate,
+        appointmentType,
+        forChart,
+      });
+      console.log("[APPOINTMENTS-CUSTOM-LIST] Range normalized:", { debugId, startTs, endTs });
+
+      const baseDateConds: string[] = [];
+      if (startTs) baseDateConds.push(`a.scheduled_at >= $${startTs && endTs ? 2 : 2}::timestamp`);
+      if (endTs) baseDateConds.push(`a.scheduled_at <= $${startTs ? 3 : 2}::timestamp`);
+      const dateSql = baseDateConds.length > 0 ? `AND ${baseDateConds.join(" AND ")}` : "";
+
+      let listSql: string;
+      if (appointmentType === "treatment") {
+        // Filter first, then join only the limited subset to keep runtime predictable.
+        listSql = `
+          WITH filtered AS (
+            SELECT
+              a.id,
+              a.appointment_id,
+              a.patient_id,
+              a.provider_id,
+              a.status,
+              a.duration,
+              a.appointment_type,
+              a.treatment_id,
+              a.organization_id,
+              a.scheduled_at
+            FROM appointments a
+            WHERE a.organization_id = $1
+              ${dateSql}
+              AND a.treatment_id IS NOT NULL
+            ORDER BY a.scheduled_at DESC
+            LIMIT ${forChart ? 2000 : 500}
+          )
+          SELECT
+            f.id,
+            f.appointment_id,
+            f.patient_id,
+            f.provider_id,
+            f.status,
+            f.duration,
+            f.appointment_type,
+            f.treatment_id,
+            f.scheduled_at,
+            COALESCE(t.name, 'Unknown Treatment') as treatment_name,
+            COALESCE(t.name, 'Unknown Treatment') as service_name
+          FROM filtered f
+          LEFT JOIN treatments t
+            ON t.id = f.treatment_id
+            AND t.organization_id = f.organization_id;
+        `;
+      } else if (appointmentType === "consultation") {
+        listSql = `
+          SELECT
+            a.id,
+            a.appointment_id,
+            a.patient_id,
+            a.provider_id,
+            a.status,
+            a.duration,
+            a.appointment_type,
+            a.treatment_id,
+            a.scheduled_at,
+            'Unknown Treatment' as treatment_name,
+            COALESCE(df.service_name, 'Unknown Consultation') as service_name
+          FROM appointments a
+          LEFT JOIN doctors_fee df
+            ON df.id = a.consultation_id
+            AND df.organization_id = a.organization_id
+          WHERE a.organization_id = $1
+            ${dateSql}
+            AND a.consultation_id IS NOT NULL
+          LIMIT 500;
+        `;
+      } else {
+        listSql = `
+          SELECT
+            a.id,
+            a.appointment_id,
+            a.patient_id,
+            a.provider_id,
+            a.status,
+            a.duration,
+            a.appointment_type,
+            a.treatment_id,
+            a.scheduled_at,
+            COALESCE(t.name, 'Unknown Treatment') as treatment_name,
+            CASE
+              WHEN a.treatment_id IS NOT NULL THEN COALESCE(t.name, 'Unknown Treatment')
+              WHEN a.consultation_id IS NOT NULL THEN COALESCE(df.service_name, 'Unknown Consultation')
+              ELSE 'Unknown'
+            END as service_name
+          FROM appointments a
+          LEFT JOIN treatments t
+            ON t.id = a.treatment_id
+            AND t.organization_id = a.organization_id
+          LEFT JOIN doctors_fee df
+            ON df.id = a.consultation_id
+            AND df.organization_id = a.organization_id
+          WHERE a.organization_id = $1
+            ${dateSql}
+          LIMIT 500;
+        `;
+      }
+
+      const t0 = Date.now();
+      const startDay = startTs ? String(startTs).slice(0, 10) : undefined;
+      const endDay = endTs ? String(endTs).slice(0, 10) : undefined;
+      console.log("[APPOINTMENTS-CUSTOM-LIST] DB query start", { debugId, appointmentType });
+      const listParams: any[] = [organizationId];
+      if (startTs) listParams.push(startTs);
+      if (endTs) listParams.push(endTs);
+      console.log("[APPOINTMENTS-CUSTOM-LIST] SQL params:", { debugId, listParams });
+      const client = await pool.connect();
+      let listRes: any;
+      try {
+        await client.query("BEGIN");
+        // Keep this endpoint responsive even when DB is under load.
+        await client.query("SET LOCAL statement_timeout = 12000");
+        listRes = await client.query(listSql, listParams);
+        if (appointmentType === "treatment" && (listRes.rows?.length || 0) === 0 && startDay && endDay) {
+          // Fallback for timezone/local datetime boundary mismatches.
+          const dateOnlyListSql = `
+            SELECT
+              a.id,
+              a.appointment_id,
+              a.patient_id,
+              a.provider_id,
+              a.status,
+              a.duration,
+              a.appointment_type,
+              a.treatment_id,
+              a.scheduled_at,
+              COALESCE(t.name, 'Unknown Treatment') as treatment_name,
+              COALESCE(t.name, 'Unknown Treatment') as service_name
+            FROM appointments a
+            LEFT JOIN treatments t
+              ON t.id = a.treatment_id
+              AND t.organization_id = a.organization_id
+            WHERE a.organization_id = $1
+              AND a.treatment_id IS NOT NULL
+              AND DATE(a.scheduled_at) BETWEEN $2::date AND $3::date
+            LIMIT 500;
+          `;
+          listRes = await client.query(dateOnlyListSql, [organizationId, startDay, endDay]);
+        }
+        await client.query("COMMIT");
+      } catch (queryError: any) {
+        try { await client.query("ROLLBACK"); } catch {}
+        if (queryError?.code === "57014") {
+          console.warn("[APPOINTMENTS-CUSTOM-LIST] statement_timeout hit; returning empty rows", {
+            debugId,
+            organizationId,
+            appointmentType,
+          });
+          return res.json([]);
+        }
+        throw queryError;
+      } finally {
+        client.release();
+      }
+      console.log("[APPOINTMENTS-CUSTOM-LIST] DB query done", {
+        debugId,
+        ms: Date.now() - t0,
+        rows: listRes.rows?.length || 0,
+      });
+
+      console.log("[APPOINTMENTS-CUSTOM-LIST] Response:", {
+        debugId,
+        rows: listRes.rows?.length || 0,
+        sample: (listRes.rows || []).slice(0, 5),
+      });
+      if (!res.headersSent) {
+        res.json(listRes.rows || []);
+      }
+    } catch (error) {
+      console.error("Error fetching custom appointments list:", { debugId, error });
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Failed to fetch custom appointments list",
+          details: error instanceof Error ? error.message : String(error),
+          debugId,
+        });
+      }
+    } finally {
+      clearTimeout(hardTimeout);
+    }
+  });
+
+  // Custom treatment analytics timeseries for chart rendering (labels + datasets)
+  app.get("/api/analytics/custom-treatment-graph", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    const debugId = `ctg_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    try {
+      const organizationId = requireOrgId(req);
+      const startDate = (req.query.startDate as string | undefined) || undefined;
+      const endDate = (req.query.endDate as string | undefined) || undefined;
+      const appointmentTypeRaw = (req.query.appointmentType as string | undefined) || "treatment";
+      const appointmentType = String(appointmentTypeRaw).toLowerCase() === "consultation" ? "consultation" : "treatment";
+
+      const normalizeToTs = (value?: string, mode: "start" | "end" = "start") => {
+        if (!value) return undefined;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          return mode === "start" ? `${value} 00:00:00` : `${value} 23:59:59`;
+        }
+        const v = value.replace("T", " ");
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) {
+          return mode === "start" ? `${v}:00` : `${v}:59`;
+        }
+        return v;
+      };
+
+      const startTs = normalizeToTs(startDate, "start");
+      const endTs = normalizeToTs(endDate, "end");
+      if (!startTs || !endTs) {
+        return res.status(400).json({ error: "startDate and endDate are required", debugId });
+      }
+
+      const startMs = Date.parse(startTs.replace(" ", "T"));
+      const endMs = Date.parse(endTs.replace(" ", "T"));
+      const diffDays = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.abs(endMs - startMs) / (1000 * 60 * 60 * 24) : 30;
+      const groupBy: "hour" | "day" | "month" = diffDays <= 2 ? "hour" : diffDays <= 60 ? "day" : "month";
+
+      const bucketExpr = `date_trunc('${groupBy}', a.scheduled_at)`;
+      const bucketLabelExpr =
+        groupBy === "hour"
+          ? `TO_CHAR(${bucketExpr}, 'YYYY-MM-DD HH24:00')`
+          : groupBy === "day"
+            ? `TO_CHAR(${bucketExpr}, 'YYYY-MM-DD')`
+            : `TO_CHAR(${bucketExpr}, 'YYYY-MM')`;
+
+      const where: string[] = [
+        "a.organization_id = $1",
+        "a.scheduled_at >= $2::timestamp",
+        "a.scheduled_at <= $3::timestamp",
+      ];
+      if (appointmentType === "treatment") {
+        // Assume appointment_type is stored lowercase for performance; avoids LOWER() to keep index usable
+        where.push("a.appointment_type = 'treatment'");
+      } else {
+        where.push("a.appointment_type = 'consultation'");
+      }
+
+      const sqlText =
+        appointmentType === "treatment"
+          ? `
+            WITH grouped AS (
+              SELECT
+                ${bucketLabelExpr} AS bucket_label,
+                t.id AS service_id,
+                COUNT(*)::integer AS total
+              FROM appointments a
+              JOIN treatments t
+                ON t.id = a.treatment_id
+                AND t.organization_id = $1
+              WHERE ${where.join(" AND ")}
+              GROUP BY bucket_label, t.id
+            )
+            SELECT
+              g.bucket_label,
+              g.service_id,
+              t.name AS service_name,
+              COALESCE(t.color_code, '#2563eb') AS color_code,
+              g.total
+            FROM grouped g
+            JOIN treatments t
+              ON t.id = g.service_id
+              AND t.organization_id = $1
+            ORDER BY g.bucket_label ASC, g.total DESC, service_name ASC
+          `
+          : `
+            WITH grouped AS (
+              SELECT
+                ${bucketLabelExpr} AS bucket_label,
+                a.consultation_id AS service_id,
+                COUNT(*)::integer AS total
+              FROM appointments a
+              WHERE ${where.join(" AND ")}
+              GROUP BY bucket_label, a.consultation_id
+            )
+            SELECT
+              g.bucket_label,
+              g.service_id,
+              COALESCE(df.service_name, 'Unknown Consultation') AS service_name,
+              '#2563eb' AS color_code,
+              g.total
+            FROM grouped g
+            LEFT JOIN doctors_fee df
+              ON df.id = g.service_id
+              AND df.organization_id = $1
+            ORDER BY g.bucket_label ASC, g.total DESC, service_name ASC
+          `;
+
+      // Build a fast COUNT(*) probe to validate filters quickly
+      const countSql =
+        appointmentType === "treatment"
+          ? `
+            SELECT COUNT(*)::integer AS c
+            FROM appointments a
+            JOIN treatments t
+              ON t.id = a.treatment_id
+              AND t.organization_id = $1
+            WHERE ${where.join(" AND ")}
+          `
+          : `
+            SELECT COUNT(*)::integer AS c
+            FROM appointments a
+            WHERE ${where.join(" AND ")}
+              AND a.consultation_id IS NOT NULL
+          `;
+
+      // Hard API timeout to avoid hanging responses
+      const hardTimeout = setTimeout(() => {
+        try {
+          if (!res.headersSent) {
+            res.status(200).json({
+              labels: [],
+              datasets: [],
+              totalBookings: 0,
+              groupBy,
+              timedOut: true,
+              debugId,
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }, 10000);
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL statement_timeout = 8000");
+        // Probe: count rows quickly with same filters
+        const countRes = await client.query<{ c: number }>(countSql, [organizationId, startTs, endTs]);
+        const rowCount = Number(countRes.rows?.[0]?.c || 0);
+        console.log("[CUSTOM-TREATMENT-GRAPH] Probe count:", {
+          debugId,
+          organizationId,
+          appointmentType,
+          startTs,
+          endTs,
+          groupBy,
+          rowCount,
+        });
+        if (rowCount === 0) {
+          await client.query("COMMIT");
+          return res.json({
+            debugId,
+            organizationId,
+            appointmentType,
+            groupBy,
+            startTs,
+            endTs,
+            labels: [],
+            datasets: [],
+            totalBookings: 0,
+            rowCount,
+          });
+        }
+        const result = await client.query(sqlText, [organizationId, startTs, endTs]);
+        await client.query("COMMIT");
+
+        const rows = result.rows || [];
+        const labelSet = new Set<string>();
+        const serviceMap = new Map<string, { id: number | null; name: string; colorCode: string; points: Map<string, number> }>();
+
+        for (const r of rows) {
+          const label = String(r.bucket_label);
+          labelSet.add(label);
+          const sid = r.service_id !== null && r.service_id !== undefined ? Number(r.service_id) : null;
+          const key = sid !== null && !Number.isNaN(sid) ? `id:${sid}` : `name:${String(r.service_name || "Unknown").toLowerCase()}`;
+          const entry = serviceMap.get(key) || {
+            id: sid !== null && !Number.isNaN(sid) ? sid : null,
+            name: String(r.service_name || "Unknown"),
+            colorCode: String(r.color_code || "#2563eb"),
+            points: new Map<string, number>(),
+          };
+          entry.points.set(label, Number(r.total || 0));
+          serviceMap.set(key, entry);
+        }
+
+        const labels = Array.from(labelSet.values()).sort((a, b) => a.localeCompare(b));
+        const datasets = Array.from(serviceMap.values())
+          .map((s) => ({
+            id: s.id,
+            label: s.name,
+            colorCode: s.colorCode,
+            data: labels.map((l) => Number(s.points.get(l) || 0)),
+          }))
+          .sort((a, b) => (b.data.reduce((x, y) => x + y, 0) - a.data.reduce((x, y) => x + y, 0)));
+
+        const totalBookings = datasets.reduce((acc, ds) => acc + ds.data.reduce((x, y) => x + y, 0), 0);
+        res.json({
+          debugId,
+          organizationId,
+          appointmentType,
+          groupBy,
+          startTs,
+          endTs,
+          labels,
+          datasets,
+          totalBookings,
+          rowCount,
+        });
+      } catch (queryError: any) {
+        try { await client.query("ROLLBACK"); } catch {}
+        if (queryError?.code === "57014") {
+          return res.json({
+            debugId,
+            organizationId,
+            appointmentType,
+            groupBy: "day",
+            startTs,
+            endTs,
+            labels: [],
+            datasets: [],
+            totalBookings: 0,
+            rowCount: 0,
+          });
+        }
+        throw queryError;
+      } finally {
+        clearTimeout(hardTimeout);
+        client.release();
+      }
+    } catch (error: any) {
+      console.error("[CUSTOM-TREATMENT-GRAPH] Error:", { debugId, error });
+      res.status(500).json({ error: "Failed to fetch custom treatment graph", details: error?.message || String(error), debugId });
+    }
+  });
+
+  // Latest appointments (for debug panel on "Create Treatments Analytics")
+  app.get("/api/analytics/latest-appointments", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    const debugId = `la_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    try {
+      const organizationId = requireOrgId(req);
+      const limit = Math.max(1, Math.min(50, Number(req.query.limit || 10)));
+      const hardTimeoutMs = 5000;
+
+      const sqlText = `
+        SELECT
+          a.id,
+          a.appointment_id,
+          a.patient_id,
+          a.provider_id,
+          a.status,
+          a.duration,
+          a.appointment_type,
+          a.treatment_id,
+          a.consultation_id,
+          a.scheduled_at
+        FROM appointments a
+        WHERE a.organization_id = $1
+        ORDER BY a.scheduled_at DESC NULLS LAST, a.id DESC
+        LIMIT $2;
+      `;
+
+      // Fail fast: if pool/query is congested, return an empty list quickly
+      // so the frontend does not hang waiting for this debug-only endpoint.
+      const timeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), hardTimeoutMs);
+      });
+
+      const queryPromise = pool
+        .query(sqlText, [organizationId, limit])
+        .then((result) => result)
+        .catch((queryError: any) => {
+          if (queryError?.code === "57014") return null;
+          throw queryError;
+        });
+
+      const raced = await Promise.race([queryPromise, timeoutPromise]);
+      if (raced === null) {
+        return res.json([]);
+      }
+      return res.json(Array.isArray((raced as any).rows) ? (raced as any).rows : []);
+    } catch (error: any) {
+      console.error("[LATEST-APPOINTMENTS] Error:", { debugId, error });
+      res.status(500).json({ error: "Failed to fetch latest appointments", details: error?.message || String(error), debugId });
+    }
+  });
+
+  // Lightweight, index-friendly appointments range endpoint (filters by scheduled_at)
+  app.get("/api/appointments/by-range", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const startDate = (req.query.startDate as string | undefined) || undefined;
+      const endDate = (req.query.endDate as string | undefined) || undefined;
+      const providerIdRaw = (req.query.providerId as string | undefined) || undefined;
+      const rawType = (req.query.appointmentType as string | undefined) || undefined; // 'treatment' | 'consultation' | undefined
+      const limit = Math.max(1, Math.min(5000, Number(req.query.limit || 2000)));
+      const offset = Math.max(0, Number(req.query.offset || 0));
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate and endDate are required" });
+      }
+
+      // Normalize inputs:
+      // - If date only (YYYY-MM-DD), treat start as 00:00:00 inclusive and end as next day 00:00:00 exclusive.
+      // - If datetime (YYYY-MM-DDTHH:mm or with seconds), use start as given and end as given + 1 second exclusive.
+      const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+      const normalizeStart = (v: string) => (isDateOnly(v) ? `${v} 00:00:00` : v.replace("T", " "));
+      const normalizeEndExclusive = (v: string) => {
+        if (isDateOnly(v)) return `${v} 00:00:00`; // will add 1 day below
+        const r = v.replace("T", " ");
+        return r; // will add 1 second below
+      };
+      const startTs = normalizeStart(startDate);
+      const endBase = normalizeEndExclusive(endDate);
+      const endExclusiveExpr = isDateOnly(endDate) ? `($3::timestamp + INTERVAL '1 day')` : `($3::timestamp + INTERVAL '1 second')`;
+
+      const where: string[] = [
+        "a.organization_id = $1",
+        "a.scheduled_at >= $2::timestamp",
+        `a.scheduled_at < ${endExclusiveExpr}`,
+      ];
+      if (rawType) {
+        const t = String(rawType).toLowerCase();
+        if (t === "treatment") where.push("a.treatment_id IS NOT NULL");
+        else if (t === "consultation") where.push("a.consultation_id IS NOT NULL");
+      }
+      // Optional provider filter (binds as $4 if present)
+      const providerId = providerIdRaw ? Number(providerIdRaw) : undefined;
+      if (!Number.isNaN(providerId as number) && providerId != null) {
+        where.push("a.provider_id = $4");
+      }
+
+      // Compute placeholder indexes for LIMIT/OFFSET depending on provider filter
+      const limitIdx = providerId != null ? 5 : 4;
+      const offsetIdx = providerId != null ? 6 : 5;
+
+      const sql = `
+        SELECT
+          a.id,
+          a.organization_id,
+          a.appointment_id,
+          a.appointment_type,
+          a.scheduled_at,
+          a.treatment_id,
+          a.consultation_id,
+          a.status,
+          a.provider_id,
+          a.patient_id
+        FROM appointments a
+        WHERE ${where.join(" AND ")}
+        ORDER BY a.scheduled_at ASC
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}
+      `;
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL statement_timeout = 6000");
+        const params: any[] = [organizationId, startTs, endBase];
+        if (providerId != null) params.push(providerId);
+        params.push(limit, offset);
+        const result = await client.query(sql, params);
+        await client.query("COMMIT");
+        return res.json(Array.isArray(result.rows) ? result.rows : []);
+      } catch (err) {
+        try { await client.query("ROLLBACK"); } catch {}
+        if ((err as any)?.code === "57014") {
+          return res.json([]); // fail fast on DB timeout
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (error: any) {
+      console.error("[APPOINTMENTS-BY-RANGE] Error:", error);
+      res.status(500).json({ error: "Failed to fetch appointments by range", details: error?.message || String(error) });
+    }
+  });
+
+  // Combined search: role (optional), providerId (optional), date range (required)
+  app.get("/api/appointments/search", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const roleRaw = (req.query.role as string | undefined) || undefined;          // e.g. 'doctor'
+      const providerIdRaw = (req.query.providerId as string | undefined) || undefined;
+      const startDate = (req.query.startDate as string | undefined) || undefined;   // 'YYYY-MM-DD'
+      const endDate = (req.query.endDate as string | undefined) || undefined;       // 'YYYY-MM-DD'
+      const limit = Math.max(1, Math.min(5000, Number(req.query.limit || 2000)));
+      const offset = Math.max(0, Number(req.query.offset || 0));
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate and endDate are required" });
+      }
+
+      // Always treat bounds as calendar dates to avoid tz skew in analytics filters
+      // We'll compare as: scheduled_at >= start::date AND scheduled_at < (end::date + 1 day)
+      // Parameter index planning:
+      // If role is present: $1=org, $2=role, $3=startDate, $4=endDate, [$5=provider?]
+      // If role is absent:  $1=org, $2=startDate, $3=endDate,  [$4=provider?]
+
+      const params: any[] = [organizationId];
+      const providerId = providerIdRaw ? Number(providerIdRaw) : undefined;
+      // If a specific providerId is provided, role filtering is redundant and can accidentally exclude valid results
+      // Skip role filter when providerId is present to ensure direct provider lookups always return
+      const shouldApplyRoleFilter = !!roleRaw && (providerId == null);
+
+      const where: string[] = [
+        "a.organization_id = $1",
+        `a.scheduled_at >= $${shouldApplyRoleFilter ? 3 : 2}::date`,
+        `a.scheduled_at < ($${shouldApplyRoleFilter ? 4 : 3}::date + INTERVAL '1 day')`,
+      ];
+
+      let joinUsers = "";
+      if (shouldApplyRoleFilter) {
+        joinUsers = "JOIN users u ON u.id = a.provider_id";
+        // Support doctor-like umbrella role to match all doctor variants
+        const roleLc = String(roleRaw).toLowerCase();
+        const doctorLikeSet = ["doctor", "physician", "general_physician", "gp", "dermatologist", "cardiologist", "surgeon"];
+        const roleArray = roleLc === "doctor" ? doctorLikeSet : [roleLc];
+        where.push("LOWER(u.role) = ANY($2)");
+        params.push(roleArray);
+      }
+
+      if (!Number.isNaN(providerId as number) && providerId != null) {
+        const providerParamIdx = shouldApplyRoleFilter ? 5 : 4;
+        where.push(`a.provider_id = $${providerParamIdx}`);
+      }
+
+      // Push start/end (always positions 3 and 4 when role filter is applied, otherwise 2 and 3)
+      if (shouldApplyRoleFilter) {
+        params.push(startDate, endDate);
+      } else {
+        // When no role param, start/end are $2 and $3
+        params.push(startDate, endDate);
+      }
+      if (providerId != null) params.push(providerId);
+
+      // Compute limit/offset indices dynamically
+      // Base param count before limit/offset:
+      // org (1) + (role?1:0) + start(1) + end(1) + (provider?1:0)
+      const baseCount = 1 + (shouldApplyRoleFilter ? 1 : 0) + 1 + 1 + (providerId != null ? 1 : 0);
+      const limitIdx = baseCount + 1;
+      const offsetIdx = baseCount + 2;
+
+      const sql = `
+        SELECT
+          a.id,
+          a.organization_id,
+          a.appointment_id,
+          a.appointment_type,
+          a.scheduled_at,
+          a.treatment_id,
+          a.consultation_id,
+          a.status,
+          a.provider_id,
+          a.patient_id,
+          a.title
+        FROM appointments a
+        ${joinUsers}
+        WHERE ${where.join(" AND ")}
+        ORDER BY a.scheduled_at ASC
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}
+      `;
+
+      const { rows } = await pool.query(sql, [...params, limit, offset]);
+      return res.json(Array.isArray(rows) ? rows : []);
+    } catch (error: any) {
+      console.error("[APPOINTMENTS-SEARCH] Error:", error);
+      res.status(500).json({ error: "Failed to fetch appointments", details: error?.message || String(error) });
+    }
+  });
+
+  // Appointments by date range (scheduled_at only, no role/provider filters)
+  app.get("/api/appointments/by-date-range", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const startDate = (req.query.startDate as string | undefined) || undefined;   // 'YYYY-MM-DD'
+      const endDate = (req.query.endDate as string | undefined) || undefined;       // 'YYYY-MM-DD'
+      const limit = Math.max(1, Math.min(5000, Number(req.query.limit || 5000)));
+      const offset = Math.max(0, Number(req.query.offset || 0));
+      const hardTimeoutMs = 8000;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate and endDate are required" });
+      }
+
+      // Date-only inclusive range: [startDate 00:00:00, endDate 23:59:59]
+      // Implemented as: scheduled_at >= start::date AND scheduled_at < (end::date + 1 day)
+      const sql = `
+        SELECT
+          a.id,
+          a.organization_id,
+          a.appointment_id,
+          a.appointment_type,
+          a.scheduled_at,
+          a.treatment_id,
+          a.consultation_id,
+          a.status,
+          a.provider_id,
+          a.patient_id,
+          a.title
+        FROM appointments a
+        WHERE a.organization_id = $1
+          AND a.scheduled_at >= $2::date
+          AND a.scheduled_at < ($3::date + INTERVAL '1 day')
+        ORDER BY a.scheduled_at ASC
+        LIMIT $4 OFFSET $5
+      `;
+
+      // Fail-fast timeout + DB statement timeout to avoid hanging requests
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), hardTimeoutMs));
+      const queryPromise = (async () => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL statement_timeout = 6000");
+          const result = await client.query(sql, [organizationId, startDate, endDate, limit, offset]);
+          await client.query("COMMIT");
+          return result;
+        } catch (qerr: any) {
+          try { await client.query("ROLLBACK"); } catch {}
+          if (qerr?.code === "57014") return null; // statement_timeout
+          throw qerr;
+        } finally {
+          client.release();
+        }
+      })();
+
+      const raced = await Promise.race([queryPromise, timeoutPromise]);
+      if (raced === null) {
+        return res.status(503).json({ error: "Database query timed out" });
+      }
+      const rows = Array.isArray((raced as any).rows) ? (raced as any).rows : [];
+      return res.json(rows);
+    } catch (error: any) {
+      console.error("[APPOINTMENTS-BY-DATE-RANGE] Error:", error);
+      res.status(500).json({ error: "Failed to fetch appointments by date range", details: error?.message || String(error) });
+    }
+  });
+
+  // ===================== Appointments Range Module (Controller/Service/Repository) =====================
+  // Repository: builds and executes the SQL with safe parameterization
+  const repoFetchAppointmentsByWindow = async (options: {
+    organizationId: number;
+    startTsUtc: string; // ISO UTC like '2026-03-23T00:00:00Z'
+    endTsUtc: string;   // ISO UTC like '2026-03-29T23:59:59Z'
+    limit: number;
+    offset: number;
+  }) => {
+    const { organizationId, startTsUtc, endTsUtc, limit, offset } = options;
+    const hardTimeoutMs = 8000;
+    // Use LEFT JOIN to keep appointments with NULL treatment_id; enforce org match when treatment exists
+    const sqlText = `
+      SELECT
+        a.id,
+        a.organization_id,
+        a.appointment_id,
+        a.appointment_type,
+        a.scheduled_at,
+        a.treatment_id,
+        a.status,
+        a.provider_id,
+        a.patient_id,
+        a.title,
+        t.id AS treatment_id_joined,
+        t.name AS treatment_name,
+        t.organization_id AS treatment_org_id
+      FROM appointments a
+      LEFT JOIN treatments t
+        ON t.id = a.treatment_id
+      WHERE a.organization_id = $1
+        AND a.scheduled_at >= $2::timestamp
+        AND a.scheduled_at <= $3::timestamp
+        AND (a.treatment_id IS NULL OR t.organization_id = $1)
+      ORDER BY a.scheduled_at ASC
+      LIMIT $4 OFFSET $5
+    `;
+    const params = [organizationId, startTsUtc, endTsUtc, Math.max(1, Math.min(5000, limit)), Math.max(0, offset)];
+    // Log the final SQL + params for transparency and debugging
+    console.log("[APPT-WINDOW][SQL]", sqlText.replace(/\s+/g, " ").trim(), { params });
+
+    // Fail-fast timeout so the frontend doesn't sit "pending" forever if DB is unreachable.
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), hardTimeoutMs));
+    const queryPromise = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL statement_timeout = 6000");
+        const result = await client.query(sqlText, params);
+        await client.query("COMMIT");
+        return result;
+      } catch (qerr: any) {
+        try { await client.query("ROLLBACK"); } catch {}
+        // If statement timeout (57014), treat as timeout
+        if (qerr?.code === "57014") return null;
+        throw qerr;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const raced = await Promise.race([queryPromise, timeoutPromise]);
+    if (raced === null) {
+      const err: any = new Error("Database query timed out");
+      err.statusCode = 503;
+      throw err;
+    }
+
+    const rows = Array.isArray((raced as any).rows) ? (raced as any).rows : [];
+    console.log("[APPT-WINDOW][SQL][ROWS]", { count: rows.length });
+    return rows;
+  };
+
+  // Service: validates inputs, normalizes to UTC boundaries, orchestrates repository access
+  const svcFetchAppointmentsByWindow = async (args: {
+    organizationId: number;
+    startDateTimeRaw: string;
+    endDateTimeRaw: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const { organizationId, startDateTimeRaw, endDateTimeRaw } = args;
+    const limit = Number.isFinite(args.limit) ? Number(args.limit) : 1000;
+    const offset = Number.isFinite(args.offset) ? Number(args.offset) : 0;
+
+    // Basic input validation for ISO-like datetime
+    const isoLike = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+    if (!isoLike.test(startDateTimeRaw) || !isoLike.test(endDateTimeRaw)) {
+      throw new Error("startDate and endDate must be in format YYYY-MM-DDTHH:mm:ss");
+    }
+
+    // IMPORTANT: `appointments.scheduled_at` is `timestamp without time zone` in this DB.
+    // Treat incoming datetimes as *plain timestamps* (no timezone coercion), otherwise ranges can shift.
+    // Convert "YYYY-MM-DDTHH:mm:ss" -> "YYYY-MM-DD HH:mm:ss" for Postgres `timestamp` casting.
+    const startTs = startDateTimeRaw.replace("T", " ");
+    const endTs = endDateTimeRaw.replace("T", " ");
+
+    // Be forgiving if reversed
+    const startCmp = new Date(startTs);
+    const endCmp = new Date(endTs);
+    const startFinal = !Number.isNaN(startCmp.getTime()) && !Number.isNaN(endCmp.getTime()) && endCmp < startCmp ? endTs : startTs;
+    const endFinal = !Number.isNaN(startCmp.getTime()) && !Number.isNaN(endCmp.getTime()) && endCmp < startCmp ? startTs : endTs;
+
+    // Execute
+    const rows = await repoFetchAppointmentsByWindow({
+      organizationId,
+      startTsUtc: startFinal,
+      endTsUtc: endFinal,
+      limit,
+      offset,
+    });
+    return rows;
+  };
+
+  // Controller: express handler with proper error handling
+  app.get("/api/appointments/window", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    try {
+      // organizationId can be provided or taken from tenant
+      // IMPORTANT: Do not throw if tenant middleware hasn't set it but the client provided it explicitly.
+      const tenantOrgId = (req.organizationId ?? req.tenant?.id) as number | undefined;
+      const organizationId = Number(
+        req.query.organizationId != null && req.query.organizationId !== ""
+          ? req.query.organizationId
+          : tenantOrgId
+      );
+      if (!Number.isFinite(organizationId)) {
+        return res.status(400).json({ error: "organizationId is required (tenant or query param)" });
+      }
+      const startDate = String(req.query.startDate || "");
+      const endDate = String(req.query.endDate || "");
+      const limit = Number(req.query.limit || 1000);
+      const offset = Number(req.query.offset || 0);
+
+      console.log("[APPT-WINDOW][REQUEST]", { organizationId, startDate, endDate, limit, offset, tenantOrgId });
+
+      const rows = await svcFetchAppointmentsByWindow({
+        organizationId,
+        startDateTimeRaw: startDate,
+        endDateTimeRaw: endDate,
+        limit,
+        offset,
+      });
+      console.log("[APPT-WINDOW][RESPONSE]", { organizationId, startDate, endDate, count: Array.isArray(rows) ? rows.length : 0 });
+      return res.json(rows);
+    } catch (err: any) {
+      console.error("[APPT-WINDOW] Error:", err);
+      if (/must be in format/.test(err?.message || "")) {
+        return res.status(400).json({ error: err.message });
+      }
+      const status = Number(err?.statusCode) || 500;
+      return res.status(status).json({
+        error: status === 503 ? "Database temporarily unavailable" : "Failed to fetch appointments window",
+        details: err?.message || String(err),
+      });
+    }
+  });
+  // Raw appointments within a date range for analytics (org + type filtered)
+  app.get("/api/analytics/appointments-range", authMiddleware, multiTenantEnforcer, async (req: TenantRequest, res: Response) => {
+    const debugId = `ar_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    try {
+      const organizationId = requireOrgId(req);
+      const startDate = (req.query.startDate as string | undefined) || undefined;
+      const endDate = (req.query.endDate as string | undefined) || undefined;
+      const appointmentTypeRaw = (req.query.appointmentType as string | undefined) || "treatment";
+      const appointmentType = String(appointmentTypeRaw).toLowerCase() === "consultation" ? "consultation" : "treatment";
+      const hardTimeoutMs = 8000;
+
+      const normalizeToTs = (value?: string, mode: "start" | "end" = "start") => {
+        if (!value) return undefined;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          return mode === "start" ? `${value} 00:00:00` : `${value} 23:59:59`;
+        }
+        const v = value.replace("T", " ");
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) {
+          return mode === "start" ? `${v}:00` : `${v}:59`;
+        }
+        return v;
+      };
+      const startTs = normalizeToTs(startDate, "start");
+      const endTs = normalizeToTs(endDate, "end");
+      // Date-only bounds (exclude time) to match “filter by date” behavior
+      const getDateOnly = (s?: string) => {
+        if (!s) return undefined;
+        const spaceIdx = s.indexOf(" ");
+        return spaceIdx > 0 ? s.slice(0, spaceIdx) : s.split("T")[0];
+      };
+      const startDateOnly = getDateOnly(startTs);
+      const endDateOnly = getDateOnly(endTs);
+      if (!startTs || !endTs) {
+        return res.status(400).json({ error: "startDate and endDate are required", debugId });
+      }
+
+      // Use sargable range on the timestamp column (keeps index usable)
+      // a.scheduled_at >= startDate (00:00:00) AND a.scheduled_at < (endDate + 1 day at 00:00:00)
+      const where: string[] = [
+        "a.organization_id = $1",
+        "a.scheduled_at >= $2::date",
+        "a.scheduled_at < ($3::date + INTERVAL '1 day')",
+      ];
+      if (appointmentType === "treatment") {
+        where.push("LOWER(a.appointment_type) = 'treatment'");
+      } else {
+        where.push("LOWER(a.appointment_type) = 'consultation'");
+      }
+
+      // Return appointments purely by date range and type without mandatory joins or null checks
+      const sqlText = `
+        SELECT
+          a.id,
+          a.organization_id,
+          a.appointment_id,
+          a.appointment_type,
+          a.scheduled_at,
+          a.treatment_id,
+          a.consultation_id,
+          a.status,
+          a.provider_id,
+          a.patient_id
+        FROM appointments a
+        WHERE ${where.join(" AND ")}
+        ORDER BY a.scheduled_at ASC
+        LIMIT 5000
+      `;
+
+      // Fail-fast timeout to avoid hangs + DB-level statement timeout
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), hardTimeoutMs));
+      const queryPromise = (async () => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL statement_timeout = 6000");
+          const result = await client.query(sqlText, [organizationId, startDateOnly, endDateOnly]);
+          await client.query("COMMIT");
+          return result;
+        } catch (qerr) {
+          try { await client.query("ROLLBACK"); } catch {}
+          // If DB timeout (57014), let race resolve to null fast
+          if ((qerr as any)?.code === "57014") return null;
+          throw qerr;
+        } finally {
+          client.release();
+        }
+      })();
+      const raced = await Promise.race([queryPromise, timeoutPromise]);
+      if (raced === null) {
+        return res.json([]);
+      }
+      const rows = Array.isArray((raced as any).rows) ? (raced as any).rows : [];
+      console.log("[APPOINTMENTS-RANGE] Result:", {
+        debugId,
+        organizationId,
+        appointmentType,
+        startDateOnly,
+        endDateOnly,
+        rows: rows.length,
+        sample: rows.slice(0, 3),
+      });
+      return res.json(rows);
+    } catch (error: any) {
+      console.error("[APPOINTMENTS-RANGE] Error:", { debugId, error });
+      res.status(500).json({ error: "Failed to fetch appointments range", details: error?.message || String(error), debugId });
     }
   });
 

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
+import dayjs from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,9 +8,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { 
   BarChart, 
   Bar, 
@@ -35,6 +38,8 @@ import {
   PoundSterling, 
   Clock,
   Download,
+  Filter,
+  RefreshCw,
   Activity,
   FileText,
   AlertTriangle,
@@ -53,13 +58,9 @@ import { isDoctorLike } from "@/lib/role-utils";
 import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { useCurrency } from "@/hooks/use-currency";
 import { CurrencyIcon } from "@/components/ui/currency-icon";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, buildUrl, getTenantSubdomain } from "@/lib/queryClient";
 import { useQueryClient } from "@tanstack/react-query";
-
-function 
-getTenantSubdomain(): string {
-  return localStorage.getItem('user_subdomain') || 'demo';
-}
+import { useToast } from "@/hooks/use-toast";
 
 // Custom Tooltip component with theme support
 const CustomTooltip = ({ active, payload }: any) => {
@@ -138,7 +139,1373 @@ interface AnalyticsData {
 const COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 // Custom Analytics Dashboard Component
-function CustomAnalyticsDashboard({ currencySymbol, user }: { currencySymbol: string; user: any }) {
+
+function CustomTreatmentAnalyticsModule() {
+  const formatSqlDate = (d: string | Date) => dayjs(d).format("YYYY-MM-DD HH:mm:ss");
+  // Align date bounds with appointments admin filter: day start/end using ISO-like strings without timezone conversion
+  const getBoundedIsoRange = (start: string, end: string) => {
+    const s = new Date(start);
+    const e = new Date(end);
+    const sDay = s.toISOString().split("T")[0];
+    const eDay = e.toISOString().split("T")[0];
+    return {
+      startIso: `${sDay}T00:00:00`,
+      endIso: `${eDay}T23:59:59`,
+    };
+  };
+  // Rebuilt data pipeline: unified series from DB with server fallback
+  function useAppointmentsSeries(params: {
+    startDate: string;
+    endDate: string;
+    appointmentType: "consultation" | "treatment";
+    enabled: boolean;
+  }) {
+    const { startDate: s, endDate: e, appointmentType: at, enabled } = params;
+    const orgId = (tenantInfoQuery.data as any)?.id ?? (user as any)?.organizationId ?? null;
+
+    const baseQuery = useQuery({
+      queryKey: ["/api/appointments", "series", { s, e, at, orgId, createRunId }],
+      enabled: !!user && enabled,
+      retry: false,
+      queryFn: async () => {
+        const res = await apiRequest("GET", "/api/appointments");
+        const data = await res.json();
+        const all: any[] = Array.isArray(data) ? data : [];
+        const startTs = new Date(s).getTime();
+        const endTs = new Date(e).getTime();
+        const startDay = String(s).slice(0, 10);
+        const endDay = String(e).slice(0, 10);
+        const rows = all.filter((a: any) => {
+          const rowOrg = a?.organization_id ?? a?.organizationId ?? null;
+          if (orgId != null && Number(rowOrg) !== Number(orgId)) return false;
+          const raw = a?.scheduledAt ?? a?.scheduled_at ?? null;
+          const ts = raw ? new Date(raw).getTime() : NaN;
+          const day = raw ? String(raw).slice(0, 10) : "";
+          const tsOk = !Number.isNaN(ts) && ts >= startTs && ts <= endTs;
+          const dayOk = day >= startDay && day <= endDay;
+          if (!tsOk && !dayOk) return false;
+          const t = String(a?.appointmentType ?? a?.appointment_type ?? "").toLowerCase().trim();
+          if (at === "treatment") return t === "treatment" || (a?.treatmentId ?? a?.treatment_id) != null;
+          return t === "consultation" || (a?.consultationId ?? a?.consultation_id) != null;
+        });
+        return rows.slice(0, 4000);
+      },
+    });
+
+    const fastQuery = useQuery({
+      queryKey: ["/api/analytics/appointments-custom-list", "fast", { s, e, at, orgId, createRunId }],
+      enabled: !!user && enabled && (Array.isArray(baseQuery.data) ? baseQuery.data.length === 0 : true),
+      retry: false,
+      queryFn: async () => {
+        const qs = new URLSearchParams({
+          startDate: String(s).slice(0, 10),
+          endDate: String(e).slice(0, 10),
+          appointmentType: at,
+          forChart: "1",
+        });
+        const url = `/api/analytics/appointments-custom-list?${qs.toString()}`;
+        console.log("[CustomTreatmentAnalytics] Fast path request:", {
+          url,
+          startDateSql: String(s).slice(0, 10),
+          endDateSql: String(e).slice(0, 10),
+          organizationId: orgId,
+        });
+        const res = await apiRequest("GET", url);
+        const json = await res.json();
+        const rows: any[] = Array.isArray(json) ? json : [];
+        return rows.map((r) => ({
+          id: r.id ?? r.appointment_id ?? undefined,
+          appointmentId: r.appointment_id ?? r.appointmentId,
+          scheduledAt: r.scheduled_at ?? r.scheduledAt,
+          appointmentType: String(r.appointment_type ?? r.appointmentType ?? "").toLowerCase(),
+          treatmentId: r.treatment_id ?? r.treatmentId ?? null,
+          consultationId: r.consultation_id ?? r.consultationId ?? null,
+          title: r.service_name ?? r.title ?? null,
+          // title intentionally not used per requirements
+          organizationId: r.organization_id ?? r.organizationId ?? orgId,
+          status: r.status ?? null,
+        }));
+      },
+    });
+
+    const effectiveRows = useMemo(() => {
+      const primary = Array.isArray(baseQuery.data) ? baseQuery.data : [];
+      if (primary.length > 0) return primary;
+      const fast = Array.isArray(fastQuery.data) ? fastQuery.data : [];
+      return fast;
+    }, [baseQuery.data, fastQuery.data]);
+
+    const series = useMemo(() => {
+      const rows = effectiveRows;
+      if (!rows || rows.length === 0) return { labels: [] as string[], datasets: [] as any[], groupBy: "day" as const };
+      const start = new Date(s);
+      const end = new Date(e);
+      const diffMs = end.getTime() - start.getTime();
+      const oneDay = 24 * 60 * 60 * 1000;
+      const groupBy: "hour" | "day" | "month" =
+        diffMs <= 2 * oneDay ? "hour" : diffMs <= 62 * oneDay ? "day" : "month";
+      const formatKey = (d: Date) => {
+        if (groupBy === "hour") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:00`;
+        if (groupBy === "day") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      };
+      const labels: string[] = [];
+      const cursor = new Date(start);
+      while (cursor.getTime() <= end.getTime()) {
+        labels.push(formatKey(cursor));
+        if (groupBy === "hour") cursor.setHours(cursor.getHours() + 1);
+        else if (groupBy === "day") cursor.setDate(cursor.getDate() + 1);
+        else cursor.setMonth(cursor.getMonth() + 1);
+      }
+      type Key = string;
+      const name = (a: any): string => {
+        if (at === "treatment") {
+          const sid = a?.treatmentId ?? a?.treatment_id ?? null;
+          const title = String(a?.title ?? "").trim();
+          return sid != null ? `Treatment ${sid}` : (title || "Treatment");
+        }
+        const sid = a?.consultationId ?? a?.consultation_id ?? null;
+        const title = String(a?.title ?? "").trim();
+        return sid != null ? `Consultation ${sid}` : (title || "Consultation");
+      };
+      const colorFor = new Map<string, string>();
+      const count = new Map<string, number>(); // `${service}__${label}` -> number
+      rows.forEach((a) => {
+        const raw = a?.scheduledAt ?? a?.scheduled_at ?? null;
+        if (!raw) return;
+        const d = new Date(raw);
+        const lab = formatKey(d);
+        const svc = name(a);
+        if (!colorFor.has(svc)) colorFor.set(svc, COLORS[colorFor.size % COLORS.length]);
+        const key = `${svc}__${lab}`;
+        count.set(key, (count.get(key) || 0) + 1);
+      });
+      const services = Array.from(new Set(rows.map(name)));
+      const datasets = services.map((svc) => ({
+        id: null,
+        label: svc,
+        colorCode: colorFor.get(svc),
+        data: labels.map((lab) => count.get(`${svc}__${lab}`) || 0),
+      }));
+      return { labels, datasets, groupBy };
+    }, [effectiveRows, s, e, at]);
+
+    useEffect(() => {
+      console.log("[CustomTreatmentAnalytics] Series input params:", {
+        startDateRaw: s,
+        endDateRaw: e,
+        startDateSql: formatSqlDate(s),
+        endDateSql: formatSqlDate(e),
+        appointmentType: at,
+        organizationId: orgId,
+      });
+      const primaryCount = Array.isArray(baseQuery.data) ? baseQuery.data.length : 0;
+      const fastCount = Array.isArray(fastQuery.data) ? fastQuery.data.length : 0;
+      const effCount = Array.isArray(effectiveRows) ? effectiveRows.length : 0;
+      console.log("[CustomTreatmentAnalytics] Rows count:", {
+        baseCount: primaryCount,
+        fastCount,
+        effectiveCount: effCount,
+        sample: Array.isArray(effectiveRows) ? effectiveRows.slice(0, 5) : [],
+      });
+    }, [s, e, at, orgId, baseQuery.data, fastQuery.data, effectiveRows]);
+
+    return {
+      rows: effectiveRows,
+      series,
+      isLoading: !!user && (baseQuery.isLoading || fastQuery.isLoading),
+      isFetching: !!user && (baseQuery.isFetching || fastQuery.isFetching),
+      error: baseQuery.error || fastQuery.error,
+    };
+  }
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const formatLocalYMD = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const formatLocalYMDHM = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    // for <input type="datetime-local"> => "YYYY-MM-DDTHH:mm"
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  };
+
+  const [subject, setSubject] = useState("Last 30 days treatments");
+  const [startDate, setStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return formatLocalYMDHM(d);
+  });
+  const [endDate, setEndDate] = useState<string>(() => {
+    const d = new Date();
+    return formatLocalYMDHM(d);
+  });
+  const [appointmentType, setAppointmentType] = useState<"consultation" | "treatment">("treatment");
+  const [graphType, setGraphType] = useState<"line" | "bar" | "pie">("bar");
+  const [appliedGraphType, setAppliedGraphType] = useState<"line" | "bar" | "pie">("bar");
+  // Keep list collapsed by default; it can be a heavy query and slows "instant chart" perception.
+  const [showAppointments, setShowAppointments] = useState(false);
+  const [useSampleData, setUseSampleData] = useState(true);
+  const [createRunId, setCreateRunId] = useState(0);
+
+  const tenantInfoQuery = useQuery({
+    queryKey: ["/api/tenant/info", "custom-treatment-analytics-debug"],
+    enabled: !!user,
+    retry: 1,
+    queryFn: async () => {
+      try {
+        const res = await apiRequest("GET", "/api/tenant/info");
+        return await res.json();
+      } catch {
+        const res = await fetch("/tenant/info", {
+      method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Tenant-Subdomain": getTenantSubdomain(),
+          },
+      credentials: "include",
+      cache: "no-store",
+    });
+        if (!res.ok) throw new Error(`HTTP ${res.status} for /tenant/info`);
+        return await res.json();
+      }
+    },
+  });
+
+  // Fetch latest 10 appointments for this org right after "Create Treatments Analytics"
+  const latestAppointmentsQuery = useQuery({
+    queryKey: ["/api/appointments", "latest-10", { createRunId }],
+    enabled: !!user && createRunId > 0,
+    retry: false,
+    queryFn: async () => {
+      try {
+        console.log("[CustomTreatmentAnalytics] Fetch latest appointments: /api/appointments");
+        const response = await apiRequest("GET", "/api/appointments");
+        const data = await response.json();
+        const all = Array.isArray(data) ? data : [];
+        console.log("[CustomTreatmentAnalytics] Latest appointments raw count:", all.length, {
+          sample: all.slice(0, 3),
+        });
+        const sorted = [...all].sort((a: any, b: any) => {
+          const ta = new Date(a?.scheduledAt ?? a?.scheduled_at ?? 0).getTime();
+          const tb = new Date(b?.scheduledAt ?? b?.scheduled_at ?? 0).getTime();
+          return tb - ta;
+        });
+        const top10 = sorted.slice(0, 10);
+        console.log("[CustomTreatmentAnalytics] Latest appointments top10 count:", top10.length, {
+          sample: top10.slice(0, 3),
+        });
+        return top10;
+    } catch (err: any) {
+        console.error("[CustomTreatmentAnalytics] Latest appointments fetch error:", {
+        message: err?.message || String(err),
+          error: err,
+        });
+        throw err;
+      }
+    },
+  });
+
+  // Fetch appointments from server by range/type/org to preview DB rows before chart
+  const rangeAppointmentsQuery = useQuery({
+    queryKey: ["/api/analytics/appointments-range", "range", { startDate, endDate, appointmentType, createRunId }],
+    enabled: !!user && createRunId > 0,
+    retry: false,
+    queryFn: async () => {
+      try {
+        const orgId =
+          (tenantInfoQuery.data as any)?.id ??
+          (user as any)?.organizationId ??
+          null;
+        const bounds = getBoundedIsoRange(startDate, endDate);
+        const qs = new URLSearchParams({
+          startDate: String(bounds.startIso).slice(0, 10),
+          endDate: String(bounds.endIso).slice(0, 10),
+          appointmentType,
+        });
+        const url = `/api/analytics/appointments-range?${qs.toString()}`;
+        console.log("[CustomTreatmentAnalytics] Fetch range appointments (server-filtered):", {
+          url,
+          startDate: String(bounds.startIso).slice(0, 10),
+          endDate: String(bounds.endIso).slice(0, 10),
+          appointmentType,
+          organizationId: orgId,
+        });
+        const resp = await apiRequest("GET", url);
+        const serverRows = await resp.json();
+        const allRows: any[] = Array.isArray(serverRows) ? serverRows : [];
+        // Admin calendar-style filtering: date-only, no timezone conversion
+        const startDay = String(bounds.startIso).slice(0, 10); // YYYY-MM-DD
+        const endDay = String(bounds.endIso).slice(0, 10);
+        const filteredRows = allRows.filter((a: any) => {
+          const raw = a?.scheduledAt ?? a?.scheduled_at ?? null;
+          const day = raw ? String(raw).slice(0, 10) : "";
+          if (!(day >= startDay && day <= endDay)) return false;
+          const apptType = String(a?.appointmentType ?? a?.appointment_type ?? "").toLowerCase().trim();
+          if (appointmentType === "treatment") {
+            return apptType === "treatment" || (a?.treatmentId ?? a?.treatment_id) != null;
+          } else if (appointmentType === "consultation") {
+            return apptType === "consultation" || (a?.consultationId ?? a?.consultation_id) != null;
+          }
+          return true;
+        });
+        console.log("[CustomTreatmentAnalytics] Range appointments server count (day-only filtered):", filteredRows.length, { sample: filteredRows.slice(0, 5) });
+        if (filteredRows.length > 0) {
+          return filteredRows.slice(0, 2000);
+        }
+        // Fallback: pull direct rows from optimized analytics endpoint (forChart=1)
+        const bounds2 = getBoundedIsoRange(startDate, endDate);
+        const qs2 = new URLSearchParams({
+          startDate: String(bounds2.startIso).slice(0, 10),
+          endDate: String(bounds2.endIso).slice(0, 10),
+          appointmentType,
+          forChart: "1",
+        });
+        const fastUrl = `/api/analytics/appointments-custom-list?${qs2.toString()}`;
+        console.warn("[CustomTreatmentAnalytics] Primary /api/appointments yielded 0; trying fast analytics rows:", { fastUrl });
+        const fastRes = await apiRequest("GET", fastUrl);
+        const fastJson = await fastRes.json();
+        const fastRows: any[] = Array.isArray(fastJson) ? fastJson : [];
+        console.log("[CustomTreatmentAnalytics] Fast analytics rows count:", fastRows.length, { sample: fastRows.slice(0, 5) });
+        // Normalize to /api/appointments-like shape for preview + client chart
+        const normalized = fastRows.map((r: any) => ({
+          id: r.id ?? r.appointment_id ?? undefined,
+          appointmentId: r.appointment_id ?? r.appointmentId,
+          scheduledAt: r.scheduled_at ?? r.scheduledAt,
+          appointmentType: String(r.appointment_type ?? r.appointmentType ?? "").toLowerCase(),
+          treatmentId: r.treatment_id ?? r.treatmentId ?? null,
+          consultationId: r.consultation_id ?? r.consultationId ?? null,
+          // title intentionally not used per requirements
+          organizationId: r.organization_id ?? r.organizationId ?? orgId,
+          status: r.status ?? null,
+        }));
+        return normalized.slice(0, 2000);
+      } catch (err: any) {
+        console.error("[CustomTreatmentAnalytics] Range appointments fetch error:", {
+          message: err?.message || String(err),
+          error: err,
+        });
+        throw err;
+      }
+    },
+  });
+
+  // Small debounce so typing/changing dates doesn't fire multiple requests instantly.
+  const [debouncedRange, setDebouncedRange] = useState({ startDate, endDate, appointmentType });
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedRange({ startDate, endDate, appointmentType }), 250);
+    return () => window.clearTimeout(t);
+  }, [startDate, endDate, appointmentType]);
+
+  const treatmentsReportQuery = useQuery({
+    queryKey: [
+      "/api/analytics/treatments-report",
+      { ...debouncedRange, createRunId },
+    ],
+    enabled: !!user && !useSampleData && createRunId > 0,
+    retry: false,
+    queryFn: async () => {
+      try {
+      const b = getBoundedIsoRange(debouncedRange.startDate, debouncedRange.endDate);
+      const qs = new URLSearchParams({
+        startDate: String(b.startIso).slice(0, 10),
+        endDate: String(b.endIso).slice(0, 10),
+          appointmentType,
+      });
+        const url = `/api/analytics/custom-treatment-graph?${qs.toString()}`;
+      console.log("[CustomTreatmentAnalytics] Fetch chart data:", {
+        url,
+        startDate: String(b.startIso).slice(0, 10),
+        endDate: String(b.endIso).slice(0, 10),
+          appointmentType,
+        });
+        const response = await Promise.race<Response>([
+          apiRequest("GET", url),
+          new Promise<Response>((_, reject) =>
+            window.setTimeout(() => reject(new Error("Chart request timeout after 15000ms")), 15000),
+          ),
+        ]);
+        const graph = (await response.json()) as any;
+        const labels: string[] = Array.isArray(graph?.labels) ? graph.labels : [];
+        const datasets: Array<{ id: number | null; label: string; colorCode?: string; data: number[] }> =
+          Array.isArray(graph?.datasets) ? graph.datasets : [];
+        console.log("[CustomTreatmentAnalytics] Chart graph summary:", {
+          labelsCount: labels.length,
+          datasetsCount: datasets.length,
+          totalBookingsRaw: graph?.totalBookings,
+          groupBy: graph?.groupBy,
+          sampleLabels: labels.slice(0, 5),
+          sampleDataset0: datasets[0],
+        });
+
+        const mapped = datasets.map((ds, idx) => {
+          const bookingCount = Array.isArray(ds.data) ? ds.data.reduce((a, b) => a + Number(b || 0), 0) : 0;
+            return {
+            id: ds.id ?? idx + 1,
+            treatmentName: String(ds.label || "Unknown"),
+            colorCode: String(ds.colorCode || "#2563eb"),
+              bookingCount,
+              percentage: 0,
+            };
+        });
+        console.log("[CustomTreatmentAnalytics] Datasets mapped (before filter):", {
+          count: mapped.length,
+          sample: mapped.slice(0, 3),
+        });
+        const treatments = mapped
+          .filter((t) => t.bookingCount > 0)
+          .sort((a, b) => b.bookingCount - a.bookingCount);
+        console.log("[CustomTreatmentAnalytics] Treatments after filter (bookingCount>0):", {
+          count: treatments.length,
+          sample: treatments.slice(0, 3),
+        });
+
+        const totalBookings = Number(graph?.totalBookings ?? treatments.reduce((acc, t) => acc + t.bookingCount, 0));
+        const treatmentsWithPct = treatments.map((t) => ({
+          ...t,
+          percentage: totalBookings > 0 ? Number(((t.bookingCount / totalBookings) * 100).toFixed(2)) : 0,
+        }));
+        const top = treatmentsWithPct[0] || null;
+
+        if (labels.length === 0 || datasets.length === 0) {
+          console.warn("[CustomTreatmentAnalytics] Empty chart data from backend", {
+            labelsCount: labels.length,
+            datasetsCount: datasets.length,
+            url,
+          });
+        }
+
+        return {
+          totalBookings,
+          topTreatment: top
+            ? {
+                id: top.id,
+                treatmentName: top.treatmentName,
+                bookingCount: top.bookingCount,
+                percentage: top.percentage,
+              }
+            : null,
+          insightText: top
+            ? `Top treatment is ${top.treatmentName} with ${top.percentage}% of total bookings`
+            : "No treatment bookings found in selected date range",
+          treatments: treatmentsWithPct,
+          series: { labels, datasets },
+          groupBy: graph?.groupBy,
+        };
+      } catch (err: any) {
+        console.error("[CustomTreatmentAnalytics] Chart fetch error:", {
+          message: err?.message || String(err),
+          error: err,
+        });
+        throw err;
+      }
+    },
+  });
+
+  const isLoading = treatmentsReportQuery.isLoading;
+  const isFetching = treatmentsReportQuery.isFetching;
+  const error = treatmentsReportQuery.error;
+  const data = treatmentsReportQuery.data as any;
+
+  useEffect(() => {
+    console.log("[CustomTreatmentAnalytics] Chart query state:", {
+      isLoading,
+      isFetching,
+      hasError: !!error,
+      startDate,
+      endDate,
+      appointmentType,
+    });
+  }, [isLoading, isFetching, error, startDate, endDate, appointmentType]);
+
+  // Intentionally no toast on analytics fetch errors.
+  // We render a non-blocking inline message ("No data available right now.") instead.
+
+  const sampleRows: Array<{ scheduled_at: string; service_id: number | null; service_name: string; appointment_count: number; color_code?: string }> =
+    useMemo(() => {
+      const raw = Array.isArray(latestAppointmentsQuery.data) ? latestAppointmentsQuery.data : [];
+      const orgId =
+        (tenantInfoQuery.data as any)?.id ??
+        (user as any)?.organizationId ??
+        null;
+      const filtered = raw.filter((a: any) => {
+        const rowOrgId = a?.organization_id ?? a?.organizationId ?? null;
+        if (orgId != null && Number(rowOrgId) !== Number(orgId)) return false;
+        const apptType = String(a?.appointmentType ?? a?.appointment_type ?? "").toLowerCase();
+        return appointmentType === "treatment"
+          ? apptType === "treatment" || (a?.treatmentId ?? a?.treatment_id) != null
+          : apptType === "consultation" || (a?.consultationId ?? a?.consultation_id) != null;
+      });
+
+      return filtered.slice(0, 200).map((a: any, idx: number) => {
+        const serviceId = appointmentType === "treatment"
+          ? (a?.treatmentId ?? a?.treatment_id ?? null)
+          : (a?.consultationId ?? a?.consultation_id ?? null);
+        const title = String(a?.title ?? "").trim();
+        return {
+          scheduled_at: String(a?.scheduledAt ?? a?.scheduled_at ?? ""),
+          service_id: serviceId,
+          service_name:
+            appointmentType === "treatment"
+              ? (serviceId != null ? `Treatment ${serviceId}` : (title || "Treatment"))
+              : (serviceId != null ? `Consultation ${serviceId}` : (title || "Consultation")),
+          appointment_count: 1,
+          color_code: COLORS[idx % COLORS.length],
+        };
+      });
+    }, [latestAppointmentsQuery.data, appointmentType, tenantInfoQuery.data, user]);
+
+  // Use rebuilt series pipeline
+  const rebuilt = useAppointmentsSeries({
+    startDate: debouncedRange.startDate,
+    endDate: debouncedRange.endDate,
+    appointmentType,
+    enabled: !useSampleData && createRunId > 0,
+  });
+  const liveSeries = !useSampleData ? rebuilt.series : null;
+  const liveLabels: string[] = Array.isArray(liveSeries?.labels) ? liveSeries.labels : [];
+  const liveDatasets: Array<{ label: string; colorCode?: string; data: number[] }> = Array.isArray(liveSeries?.datasets) ? liveSeries.datasets : [];
+
+  // Client-side fallback series computed from DB appointments when backend chart is unavailable
+  const clientSeries = useMemo(() => {
+    if (useSampleData) return null;
+    const rows = Array.isArray((rangeAppointmentsQuery as any)?.data) ? (rangeAppointmentsQuery as any).data : [];
+    if (rows.length === 0) return null;
+    // Determine groupBy based on range
+    const start = new Date(debouncedRange.startDate);
+    const end = new Date(debouncedRange.endDate);
+    const diffMs = end.getTime() - start.getTime();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const groupBy: "hour" | "day" | "month" =
+      diffMs <= 2 * oneDay ? "hour" : diffMs <= 62 * oneDay ? "day" : "month";
+
+    const formatKey = (d: Date) => {
+      if (groupBy === "hour") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:00`;
+      if (groupBy === "day") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
+
+    // Build label buckets between start and end
+    const labels: string[] = [];
+    const cursor = new Date(start);
+    while (cursor.getTime() <= end.getTime()) {
+      labels.push(formatKey(cursor));
+      if (groupBy === "hour") cursor.setHours(cursor.getHours() + 1);
+      else if (groupBy === "day") cursor.setDate(cursor.getDate() + 1);
+      else cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    // Aggregate counts per service per label
+    type ServiceKey = string; // use string key to allow fallback to title
+    const serviceToName = new Map<ServiceKey, string>();
+    const serviceToColor = new Map<ServiceKey, string>();
+    const serviceLabelToCount = new Map<string, number>(); // key: `${serviceKey}__${label}`
+
+    rows.forEach((a: any, idx: number) => {
+      const tsRaw = a?.scheduledAt ?? a?.scheduled_at ?? null;
+      const ts = tsRaw ? new Date(tsRaw) : null;
+      if (!ts) return;
+      const label = formatKey(ts);
+      let serviceKey: ServiceKey;
+      if (appointmentType === "treatment") {
+        const sid = a?.treatmentId ?? a?.treatment_id ?? null;
+        const title = String(a?.title ?? "").trim();
+        serviceKey = sid != null ? `Treatment ${sid}` : (title || "Treatment");
+      } else {
+        const sid = a?.consultationId ?? a?.consultation_id ?? null;
+        const title = String(a?.title ?? "").trim();
+        serviceKey = sid != null ? `Consultation ${sid}` : (title || "Consultation");
+      }
+      if (!serviceToName.has(serviceKey)) {
+        serviceToName.set(serviceKey, serviceKey);
+        serviceToColor.set(serviceKey, COLORS[serviceToName.size % COLORS.length]);
+      }
+      const key = `${serviceKey}__${label}`;
+      serviceLabelToCount.set(key, (serviceLabelToCount.get(key) || 0) + 1);
+    });
+
+    const serviceKeys = Array.from(serviceToName.keys());
+    const datasets = serviceKeys.map((sk) => {
+      const data = labels.map((lab) => serviceLabelToCount.get(`${sk}__${lab}`) || 0);
+      return {
+        id: null,
+        label: serviceToName.get(sk) || "Unknown",
+        colorCode: serviceToColor.get(sk),
+        data,
+      };
+    });
+
+    console.warn("[CustomTreatmentAnalytics] Using client-side DB fallback for chart", {
+      groupBy,
+      labelsCount: labels.length,
+      datasetsCount: datasets.length,
+      firstLabel: labels[0],
+      lastLabel: labels[labels.length - 1],
+    });
+
+    return { labels, datasets, groupBy };
+  }, [useSampleData, rangeAppointmentsQuery.data, debouncedRange.startDate, debouncedRange.endDate, appointmentType]);
+
+  const effectiveSeries = (!useSampleData && liveDatasets.length > 0 && liveLabels.length > 0)
+    ? { labels: liveLabels, datasets: liveDatasets }
+    : (!useSampleData && clientSeries && Array.isArray(clientSeries.labels) && Array.isArray(clientSeries.datasets) && clientSeries.labels.length > 0 && clientSeries.datasets.length > 0)
+      ? clientSeries
+      : null;
+
+  // Chart rows for rendering:
+  // - sample mode: use sampleRows (built from DB latest rows)
+  // - live mode: build timeseries rows from effectiveSeries (backend or client-side DB fallback)
+  const rows: Array<{ scheduled_at: string; service_id: number | null; service_name: string; appointment_count: number; color_code?: string }> =
+    useSampleData
+      ? sampleRows
+      : (effectiveSeries && effectiveSeries.labels.length > 0 && effectiveSeries.datasets.length > 0
+          ? effectiveSeries.labels.flatMap((label, idx) =>
+              effectiveSeries.datasets.map((ds: any, j: number) => ({
+                scheduled_at: label,
+                service_id: (ds.id as number | null) ?? (j + 1),
+                service_name: String(ds.label || "Unknown"),
+                appointment_count: Number((ds.data || [])[idx] || 0),
+                color_code: ds.colorCode,
+              })),
+            )
+          : []);
+  // Chart rows come from DB unless user explicitly enables sample mode.
+  const chartRows = rows;
+  useEffect(() => {
+    if (!useSampleData) {
+      // Suppress "empty" warning while queries are still loading/fetching
+      const chartLoading =
+        (treatmentsReportQuery as any)?.isLoading === true ||
+        (treatmentsReportQuery as any)?.isFetching === true;
+      const rangeLoading =
+        (rangeAppointmentsQuery as any)?.isLoading === true ||
+        (rangeAppointmentsQuery as any)?.isFetching === true;
+      if (chartLoading || rangeLoading) {
+        return;
+      }
+      if ((liveLabels.length === 0 || liveDatasets.length === 0)) {
+        console.warn("[CustomTreatmentAnalytics] Live chart rows empty due to empty labels/datasets", {
+          liveLabelsCount: liveLabels.length,
+          liveDatasetsCount: liveDatasets.length,
+        });
+      } else if (Array.isArray(chartRows) && chartRows.length === 0) {
+        console.warn("[CustomTreatmentAnalytics] Live chart rows computed empty despite labels/datasets present", {
+          liveLabelsCount: liveLabels.length,
+          liveDatasetsCount: liveDatasets.length,
+        });
+      } else {
+        // Debug logging removed
+      }
+    } else {
+      // Debug logging removed
+    }
+  }, [useSampleData, liveLabels, liveDatasets, chartRows]);
+
+  const appointmentsQuery = useQuery({
+    queryKey: [
+      "/api/analytics/appointments-custom-list",
+      { startDate, endDate, showAppointments, appointmentType },
+    ],
+    enabled: !!user && showAppointments && !useSampleData && createRunId > 0,
+    retry: false,
+    queryFn: async () => {
+      const startDayOnly = String(startDate).slice(0, 10);
+      const endDayOnly = String(endDate).slice(0, 10);
+      const qs = new URLSearchParams({
+        startDate: startDayOnly,
+        endDate: endDayOnly,
+        appointmentType,
+      });
+      const url = `/api/analytics/appointments-custom-list?${qs.toString()}`;
+      const response = await apiRequest("GET", url);
+      const json = await response.json();
+      console.log("[CustomTreatmentAnalytics] Appointments list received:", {
+        rows: Array.isArray(json) ? json.length : "not-array",
+        sample: Array.isArray(json) ? json.slice(0, 5) : json,
+      });
+      return json;
+    },
+  });
+
+  useEffect(() => {
+    console.log("[CustomTreatmentAnalytics] List query state:", {
+      enabled: !!user && showAppointments,
+      isLoading: appointmentsQuery.isLoading,
+      isFetching: appointmentsQuery.isFetching,
+      hasError: !!appointmentsQuery.error,
+      startDate,
+      endDate,
+      appointmentType,
+    });
+  }, [
+    user,
+    showAppointments,
+    appointmentsQuery.isLoading,
+    appointmentsQuery.isFetching,
+    appointmentsQuery.error,
+    startDate,
+    endDate,
+    appointmentType,
+  ]);
+
+  const appointmentRows: Array<{
+    id: number;
+    appointment_id: string;
+    patient_id: number;
+    provider_id: number;
+    status: string;
+    duration: number;
+    appointment_type: string;
+    scheduled_at: string;
+    service_name: string;
+  }> = Array.isArray(appointmentsQuery.data) ? appointmentsQuery.data : [];
+  const activeGraphType = useSampleData ? graphType : appliedGraphType;
+
+  const services = Array.from(new Set(chartRows.map((r) => r.service_name))).sort();
+  const timeLabels = Array.from(new Set(chartRows.map((r) => r.scheduled_at))).sort();
+
+  const byDate = useMemo(() => {
+    const map = new Map<string, Record<string, any>>();
+    timeLabels.forEach((t) => map.set(t, { scheduled_at: t }));
+    chartRows.forEach((r) => {
+      const entry = map.get(r.scheduled_at) || { scheduled_at: r.scheduled_at };
+      entry[r.service_name] = (entry[r.service_name] || 0) + (r.appointment_count || 0);
+      map.set(r.scheduled_at, entry);
+    });
+    return Array.from(map.values()).sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
+  }, [chartRows, timeLabels]);
+
+  const pieData = useMemo(() => {
+    const totals = new Map<string, number>();
+    chartRows.forEach((r) => {
+      totals.set(r.service_name, (totals.get(r.service_name) || 0) + (r.appointment_count || 0));
+    });
+    return Array.from(totals.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [chartRows]);
+
+  const topServices = useMemo(() => {
+    const totals = new Map<string, number>();
+    chartRows.forEach((r) =>
+      totals.set(r.service_name, (totals.get(r.service_name) || 0) + (r.appointment_count || 0)),
+    );
+    return Array.from(totals.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [chartRows]);
+
+  const totalBookings = useSampleData
+    ? chartRows.reduce((acc, r) => acc + (r.appointment_count || 0), 0)
+    : Number(data?.totalBookings || 0);
+  const topTreatmentInsight = useSampleData
+    ? (topServices[0]
+        ? `Top treatment is ${topServices[0].name} with ${totalBookings > 0 ? ((topServices[0].count / totalBookings) * 100).toFixed(2) : "0"}% of total bookings`
+        : "No treatment bookings found in selected date range")
+    : (data?.insightText || "No treatment bookings found in selected date range");
+  const treatmentResultBadges = useMemo(
+    () =>
+      topServices.slice(0, 12).map((s) => {
+        const pct = totalBookings > 0 ? ((s.count / totalBookings) * 100).toFixed(2) : "0.00";
+        return `${s.name}: ${s.count} (${pct}%)`;
+      }),
+    [topServices, totalBookings],
+  );
+
+  const analyticsDebug = useMemo(() => {
+    const reason =
+      useSampleData
+        ? "Sample data is enabled, live DB queries are skipped."
+        : createRunId <= 0
+          ? "Live query has not started. Click Generate Analytics."
+          : error
+            ? `Chart query failed: ${String((error as any)?.message || error)}`
+            : rows.length === 0
+              ? "Query succeeded but returned 0 treatment rows for this date range/type."
+              : null;
+    return {
+      dateRange: `${startDate} -> ${endDate}`,
+      tenantSubdomain: String((tenantInfoQuery.data as any)?.subdomain || getTenantSubdomain() || "unknown"),
+      organizationId: (tenantInfoQuery.data as any)?.id ?? (user as any)?.organizationId ?? null,
+      tenantInfoError: tenantInfoQuery.error ? String((tenantInfoQuery.error as any)?.message || tenantInfoQuery.error) : null,
+      createRunId,
+      useSampleData,
+      rowsCount: rows.length,
+      appointmentRowsCount: appointmentRows.length,
+      totalBookings,
+      topTreatmentNames: topServices.map((s) => `${s.name} (${s.count})`).slice(0, 8),
+      latestAppointmentsCount: Array.isArray(latestAppointmentsQuery.data) ? latestAppointmentsQuery.data.length : 0,
+      latestAppointmentsSample: Array.isArray(latestAppointmentsQuery.data)
+        ? latestAppointmentsQuery.data.slice(0, 10).map((a: any) => ({
+            id: a.id,
+            appointment_id: a.appointment_id ?? a.appointmentId,
+            scheduled_at: a.scheduled_at ?? a.scheduledAt,
+            appointment_type: a.appointment_type ?? a.appointmentType,
+            treatment_id: a.treatment_id ?? a.treatmentId,
+            status: a.status,
+          }))
+        : [],
+      latestAppointmentsIsLoading: latestAppointmentsQuery.isLoading,
+      latestAppointmentsIsFetching: latestAppointmentsQuery.isFetching,
+      latestAppointmentsError: latestAppointmentsQuery.error ? String((latestAppointmentsQuery.error as any)?.message || latestAppointmentsQuery.error) : null,
+      reason,
+    };
+  }, [
+    useSampleData,
+    createRunId,
+    error,
+    rows.length,
+    appointmentRows.length,
+    totalBookings,
+    topServices,
+    startDate,
+    endDate,
+    tenantInfoQuery.data,
+    tenantInfoQuery.error,
+    latestAppointmentsQuery.data,
+    latestAppointmentsQuery.isLoading,
+    latestAppointmentsQuery.isFetching,
+    latestAppointmentsQuery.error,
+  ]);
+
+  return (
+    <>
+      {/* Quick date filter card (mirrors appointments page date picker behavior) */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between gap-3">
+            <span>Calendar & Scheduling</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label>Date</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-start">
+                    <Calendar className="h-4 w-4 mr-2" />
+                    {startDate && endDate && String(startDate).slice(0, 10) === String(endDate).slice(0, 10)
+                      ? String(startDate).slice(0, 10)
+                      : "Select date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={startDate ? new Date(startDate) : undefined}
+                    onSelect={(d) => {
+                      if (!d) return;
+                      const yyyy = d.getFullYear();
+                      const mm = String(d.getMonth() + 1).padStart(2, "0");
+                      const dd = String(d.getDate()).padStart(2, "0");
+                      // Match appointments page: date-only with no timezone conversion (full-day bounds)
+                      setStartDate(`${yyyy}-${mm}-${dd}T00:00`);
+                      setEndDate(`${yyyy}-${mm}-${dd}T23:59`);
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-3">
+          <span>Custom treatment analytics</span>
+          <Badge variant="secondary" className="text-xs">
+            {appointmentType.toUpperCase()}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <Label>Subject / Title</Label>
+            <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </div>
+          <div>
+            <Label>Start Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start">
+                  <Calendar className="h-4 w-4 mr-2" />
+                  {String(startDate || "").slice(0, 10) || "Select date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="p-0" align="start">
+                <CalendarComponent
+                  mode="single"
+                  selected={startDate ? new Date(startDate) : undefined}
+                  onSelect={(d) => {
+                    if (!d) return;
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, "0");
+                    const dd = String(d.getDate()).padStart(2, "0");
+                    setStartDate(`${yyyy}-${mm}-${dd}T00:00`);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div>
+            <Label>End Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start">
+                  <Calendar className="h-4 w-4 mr-2" />
+                  {String(endDate || "").slice(0, 10) || "Select date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="p-0" align="start">
+                <CalendarComponent
+                  mode="single"
+                  selected={endDate ? new Date(endDate) : undefined}
+                  onSelect={(d) => {
+                    if (!d) return;
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, "0");
+                    const dd = String(d.getDate()).padStart(2, "0");
+                    setEndDate(`${yyyy}-${mm}-${dd}T23:59`);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div>
+            <Label>Appointment Type</Label>
+            <Select value={appointmentType} onValueChange={(v) => setAppointmentType(v as any)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="consultation">Consultation</SelectItem>
+                <SelectItem value="treatment">Treatment</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="lg:col-span-2">
+            <Label>Graph Type</Label>
+            <Select value={graphType} onValueChange={(v) => setGraphType(v as any)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select graph type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="line">Line (Trends)</SelectItem>
+                <SelectItem value="bar">Bar (Comparisons)</SelectItem>
+                <SelectItem value="pie">Pie (Proportions)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="lg:col-span-2">
+            <Label>Report</Label>
+            <div className="text-sm text-gray-600 dark:text-gray-300 mt-2">
+              <div className="font-semibold text-gray-900 dark:text-gray-100">{subject || "Untitled"}</div>
+              <div>
+                {startDate} → {endDate} • {rows.length} rows • {services.length} services
+              </div>
+              <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                Total bookings: {totalBookings}
+              </div>
+              <div className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                {topTreatmentInsight}
+              </div>
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const orgId =
+                      (tenantInfoQuery.data as any)?.id ??
+                      (user as any)?.organizationId ??
+                      null;
+                    console.log("[CustomTreatmentAnalytics] Create clicked", {
+                      startDate,
+                      endDate,
+                      appointmentType,
+                      startDateSql: formatSqlDate(startDate),
+                      endDateSql: formatSqlDate(endDate),
+                      organizationId: orgId,
+                    });
+                    setAppliedGraphType(graphType);
+                    setUseSampleData(false);
+                    setShowAppointments(true);
+                    setCreateRunId((v) => v + 1);
+                  }}
+                  disabled={isLoading || isFetching}
+                >
+                  {isLoading || isFetching ? "Creating..." : "Create Treatments Analytics"}
+                </Button>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Checkbox
+                  checked={useSampleData}
+                  onCheckedChange={(v) => setUseSampleData(Boolean(v))}
+                  id="use-sample-data"
+                />
+                <Label htmlFor="use-sample-data" className="text-sm font-normal">
+                  Use sample data (show graph instantly)
+                </Label>
+              </div>
+              <button
+                type="button"
+                className="mt-2 text-blue-600 hover:text-blue-800 underline text-sm"
+                onClick={() => setShowAppointments((v) => !v)}
+              >
+                {showAppointments ? "Hide appointments" : "See appointments"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="border rounded-lg p-4 bg-white dark:bg-slate-900">
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="font-semibold">Analytics Debug</div>
+            <div>Date range: {analyticsDebug.dateRange}</div>
+            <div>Tenant: {analyticsDebug.tenantSubdomain}</div>
+            <div>Organization ID: {analyticsDebug.organizationId ?? "unknown"}</div>
+            {analyticsDebug.tenantInfoError && (
+              <div>Tenant info error: {analyticsDebug.tenantInfoError}</div>
+            )}
+            <div>Appointments in response: {analyticsDebug.appointmentRowsCount}</div>
+            <div>Treatments in chart: {analyticsDebug.rowsCount}</div>
+            <div>Total bookings: {analyticsDebug.totalBookings}</div>
+            <div>Latest appointments (top 10): {analyticsDebug.latestAppointmentsCount}</div>
+            <div className="text-[11px]">
+              Latest query:{" "}
+              {analyticsDebug.latestAppointmentsIsLoading || analyticsDebug.latestAppointmentsIsFetching ? "loading..." : "idle"}
+              {analyticsDebug.latestAppointmentsError ? ` • error: ${analyticsDebug.latestAppointmentsError}` : ""}
+            </div>
+            {analyticsDebug.latestAppointmentsSample.length > 0 && (
+              <div className="mt-1">
+                <div className="font-semibold">Latest 10 sample:</div>
+                <div className="text-[11px] leading-4">
+                  {analyticsDebug.latestAppointmentsSample.map((a: any) => (
+                    <div key={a.id}>
+                      {String(a.scheduled_at).replace("T", " ").slice(0, 16)} • {a.appointment_type || "unknown"} • treatment_id: {a.treatment_id ?? "null"} • {a.status || "unknown"}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {analyticsDebug.latestAppointmentsSample.length === 0 && !analyticsDebug.latestAppointmentsIsLoading && !analyticsDebug.latestAppointmentsIsFetching && !analyticsDebug.latestAppointmentsError && (
+              <div className="text-[11px] mt-1">
+                No latest appointments to display. Make sure you clicked <b>Create Treatments Analytics</b> and <b>Use sample data</b> is unchecked.
+              </div>
+            )}
+            <div>
+              Treatment names: {analyticsDebug.topTreatmentNames.length > 0 ? analyticsDebug.topTreatmentNames.join(", ") : "none"}
+            </div>
+            {analyticsDebug.reason && (
+              <div className="mt-1 font-medium">
+                Why "No data available right now": {analyticsDebug.reason}
+              </div>
+            )}
+          </div>
+          <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">
+              Query Result Badges (before graph)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary" className="text-xs">
+                Range: {startDate} to {endDate}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Type: {appointmentType}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Org: {analyticsDebug.organizationId ?? "unknown"}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Appointments: {appointmentRows.length}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Treatments: {rows.length}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                DB preview: {Array.isArray((rebuilt as any)?.rows) ? (rebuilt as any).rows.length : 0}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Total bookings: {totalBookings}
+              </Badge>
+              {(isLoading || isFetching) && (
+                <Badge variant="outline" className="text-xs">
+                  Loading query...
+                </Badge>
+              )}
+              {error && (
+                <Badge variant="destructive" className="text-xs">
+                  Query failed
+                </Badge>
+              )}
+            </div>
+            {treatmentResultBadges.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {treatmentResultBadges.map((label, idx) => (
+                  <Badge key={`${label}-${idx}`} variant="outline" className="text-xs">
+                    {label}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
+            <div className="text-xs font-semibold mb-1">DB Preview (from /api/appointments, client-filtered by range & type)</div>
+            {Array.isArray((rebuilt as any)?.rows) && (rebuilt as any).rows.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+                {(rebuilt as any).rows.slice(0, 8).map((a: any, i: number) => (
+                  <div key={`${a.id || i}`} className="truncate">
+                    {String(a?.scheduled_at ?? a?.scheduledAt ?? "").replace("T", " ").slice(0, 16)} • {String(a?.appointment_type ?? a?.appointmentType ?? "unknown")}
+                    {" "}| treatment_id: {a?.treatment_id ?? a?.treatmentId ?? "null"}
+                    {" "}| consultation_id: {a?.consultation_id ?? a?.consultationId ?? "null"}
+                    {" "}| status: {a?.status ?? "unknown"}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>No rows found for the selected date range and type.</div>
+            )}
+          </div>
+          {Array.isArray((rebuilt as any)?.rows) && (rebuilt as any).rows.length > 0 && (
+            <div className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="text-sm font-semibold mb-2">Raw rows fetched (first 20)</div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-300 mb-2">
+                Columns shown: id, organization_id, appointment_id, appointment_type, scheduled_at, title, treatment_id, consultation_id, status, provider_id, patient_id
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left border-b dark:border-slate-700">
+                      <th className="p-2">id</th>
+                      <th className="p-2">organization_id</th>
+                      <th className="p-2">appointment_id</th>
+                      <th className="p-2">appointment_type</th>
+                      <th className="p-2">scheduled_at</th>
+                      <th className="p-2">treatment_id</th>
+                      <th className="p-2">consultation_id</th>
+                      <th className="p-2">status</th>
+                      <th className="p-2">provider_id</th>
+                      <th className="p-2">patient_id</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(rebuilt as any).rows.slice(0, 20).map((a: any, i: number) => (
+                      <tr key={`${a.id || i}`} className="border-b last:border-b-0 dark:border-slate-800">
+                        <td className="p-2">{a?.id ?? ""}</td>
+                        <td className="p-2">{a?.organization_id ?? a?.organizationId ?? ""}</td>
+                        <td className="p-2">{a?.appointment_id ?? a?.appointmentId ?? ""}</td>
+                        <td className="p-2">{a?.appointment_type ?? a?.appointmentType ?? ""}</td>
+                        <td className="p-2">{String(a?.scheduled_at ?? a?.scheduledAt ?? "").replace("T", " ").slice(0, 19)}</td>
+                        <td className="p-2">{a?.treatment_id ?? a?.treatmentId ?? ""}</td>
+                        <td className="p-2">{a?.consultation_id ?? a?.consultationId ?? ""}</td>
+                        <td className="p-2">{a?.status ?? ""}</td>
+                        <td className="p-2">{a?.provider_id ?? a?.providerId ?? ""}</td>
+                        <td className="p-2">{a?.patient_id ?? a?.patientId ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <div className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-1">Appointment Volume</div>
+          <div className="text-sm text-gray-500 mb-4">
+            View appointment trends from the appointments table
+          </div>
+          <div className="h-[380px] w-full">
+          {useSampleData ? (
+            activeGraphType === "pie" ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={280}>
+                <PieChart>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend />
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    outerRadius={140}
+                    label={({ name, percent }) => `${name} (${Math.round(percent * 100)}%)`}
+                  >
+                    {pieData.map((_, idx) => (
+                      <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            ) : activeGraphType === "bar" ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={280}>
+                <BarChart data={byDate}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="scheduled_at" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend />
+                  {services.map((s, idx) => (
+                    <Bar key={s} dataKey={s} stackId="a" fill={COLORS[idx % COLORS.length]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={280}>
+                <LineChart data={byDate}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="scheduled_at" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend />
+                  {services.map((s, idx) => (
+                    <Line key={s} type="monotone" dataKey={s} stroke={COLORS[idx % COLORS.length]} dot={false} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            )
+          ) : (isLoading || isFetching) && rows.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Loading chart…
+            </div>
+          ) : (!useSampleData && Array.isArray((rebuilt as any)?.rows) && (rebuilt as any).rows.length === 0) ? (
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">
+              No appointments found in selected date range.
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">
+              {error ? "No data available right now." : "No data in appointments."}
+            </div>
+          ) : activeGraphType === "pie" ? (
+            <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={280}>
+              <PieChart>
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+                <Pie
+                  data={pieData}
+                  dataKey="value"
+                  nameKey="name"
+                  outerRadius={140}
+                  label={({ name, percent }) => `${name} (${Math.round(percent * 100)}%)`}
+                >
+                  {pieData.map((_, idx) => (
+                    <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          ) : activeGraphType === "bar" ? (
+            <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={280}>
+              <BarChart data={byDate}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="scheduled_at" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                <YAxis allowDecimals={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+                {services.map((s, idx) => (
+                  <Bar key={s} dataKey={s} stackId="a" fill={rows.find((r: any) => r.service_name === s)?.color_code || COLORS[idx % COLORS.length]} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={280}>
+              <LineChart data={byDate}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="scheduled_at" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                <YAxis allowDecimals={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+                {services.map((s, idx) => (
+                  <Line key={s} type="monotone" dataKey={s} stroke={COLORS[idx % COLORS.length]} dot={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+          </div>
+        </div>
+
+        {rows.length > 0 && (
+          <div className="border rounded-lg p-4 bg-white dark:bg-slate-900">
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              Top {appointmentType === "treatment" ? "treatments" : "consultations"} (last 30 days)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {topServices.map((s, idx) => (
+                <Badge key={`${s.name}-${idx}`} variant="secondary" className="text-xs">
+                  {s.name} ({s.count})
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showAppointments && (
+          <Card className="border border-gray-200 dark:border-gray-700">
+            <CardHeader className="py-3">
+              <CardTitle className="text-base">
+                Appointments in range ({appointmentRows.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {appointmentsQuery.error ? (
+                <div className="text-sm text-gray-500">
+                  No data available right now.
+                </div>
+              ) : appointmentsQuery.isLoading || appointmentsQuery.isFetching ? (
+                <div className="flex items-center text-sm text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Loading appointments…
+                </div>
+              ) : appointmentRows.length === 0 ? (
+                <div className="text-sm text-gray-500">No appointments in selected date range.</div>
+              ) : (
+                <div className="max-h-[320px] overflow-y-auto border rounded-md">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-white dark:bg-slate-900 border-b">
+                      <tr className="text-left">
+                        <th className="p-2">Scheduled</th>
+                        <th className="p-2">Appointment ID</th>
+                        <th className="p-2">Type</th>
+                        <th className="p-2">Service</th>
+                        <th className="p-2">Duration</th>
+                        <th className="p-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {appointmentRows.map((a) => (
+                        <tr key={a.id} className="border-b last:border-b-0">
+                          <td className="p-2 whitespace-nowrap">
+                            {String(a.scheduled_at).replace("T", " ").slice(0, 16)}
+                          </td>
+                          <td className="p-2 whitespace-nowrap">{a.appointment_id}</td>
+                          <td className="p-2">{a.appointment_type}</td>
+                          <td className="p-2">{a.service_name}</td>
+                          <td className="p-2 whitespace-nowrap">{a.duration} min</td>
+                          <td className="p-2">{a.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </CardContent>
+    </Card>
+    </>
+  );
+}
+const CustomAnalyticsDashboard: React.FC<{ currencySymbol: string; user: any }> = ({ currencySymbol, user }) => {
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all'); // Default to 'all' to show all appointments
   const [showManageDialog, setShowManageDialog] = useState(false);
@@ -470,7 +1837,7 @@ function CustomAnalyticsDashboard({ currencySymbol, user }: { currencySymbol: st
       />
     </div>
   );
-}
+};
 
 // Manage Analytics Subjects Dialog Component
 function ManageAnalyticsSubjectsDialog({ 
@@ -2717,12 +4084,169 @@ export default function AnalyticsPage() {
   const { canView } = useRolePermissions();
   const [showAppointmentsDialog, setShowAppointmentsDialog] = useState(false);
   const [completedAppointments, setCompletedAppointments] = useState<any[]>([]);
+  // Admin-style Filters (ported from appointments page)
+  const [filterRole, setFilterRole] = useState<string>("");
+  const [filterProvider, setFilterProvider] = useState<string>("");
+  const [filterStartDate, setFilterStartDate] = useState<Date | undefined>(undefined);
+  const [filterEndDate, setFilterEndDate] = useState<Date | undefined>(undefined);
+  const [filterAppointmentId, setFilterAppointmentId] = useState<string>("");
+  // Manual search trigger (appointments filters) - only fetch when user clicks "Search"
+  const [searchRunId, setSearchRunId] = useState(0);
+  const [appointmentIdPopoverOpen, setAppointmentIdPopoverOpen] = useState(false);
   const [filters, setFilters] = useState({
     dateRange: '30',
     department: 'all',
     provider: 'all',
     patientType: 'all'
   });
+  const [filteredAppointments, setFilteredAppointments] = useState<any[]>([]);
+
+  // Shallow array equality helper to avoid infinite re-render loops on identical data
+  const areAppointmentsShallowEqual = (a: any[] | undefined, b: any[] | undefined): boolean => {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      const ai = a[i];
+      const bi = b[i];
+      // Compare by stable identifiers and a couple of frequently changing fields
+      const aid = ai?.id ?? ai?.appointmentId ?? ai?.appointment_id;
+      const bid = bi?.id ?? bi?.appointmentId ?? bi?.appointment_id;
+      if (aid !== bid) return false;
+      const at = ai?.scheduledAt ?? ai?.scheduled_at;
+      const bt = bi?.scheduledAt ?? bi?.scheduled_at;
+      if (at !== bt) return false;
+      const ap = ai?.providerId ?? ai?.provider_id;
+      const bp = bi?.providerId ?? bi?.provider_id;
+      if (ap !== bp) return false;
+    }
+    return true;
+  };
+
+  // Date normalization helpers to defensively handle unexpected formats
+  const normalizeToDate = (value: any): Date | undefined => {
+    if (!value) return undefined;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    const parsed = new Date(String(value));
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  };
+  const ensureStartEndOrder = (start?: Date, end?: Date): { start?: Date; end?: Date } => {
+    if (start && end && end < start) {
+      return { start: end, end: start }; // swap if reversed
+    }
+    return { start, end };
+  };
+  // New: Simple date-range-only appointments fetch (defaults to today)
+  const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+  const [rangeStart, setRangeStart] = useState<string>(todayStr);
+  const [rangeEnd, setRangeEnd] = useState<string>(todayStr);
+  // Applied range is only updated when user clicks "Search" (prevents auto-refetch on date picker changes)
+  const [appliedRangeStart, setAppliedRangeStart] = useState<string>(todayStr);
+  const [appliedRangeEnd, setAppliedRangeEnd] = useState<string>(todayStr);
+  // On initial load, reflect today's range into the visible date pickers
+  useEffect(() => {
+    if (!filterStartDate && !filterEndDate) {
+      const today = new Date();
+      setFilterStartDate(today);
+      setFilterEndDate(today);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Sync with existing date pickers: if either changes, refetch using updated range
+  useEffect(() => {
+    const rawStart = normalizeToDate(filterStartDate);
+    const rawEnd = normalizeToDate(filterEndDate);
+    const { start, end } = ensureStartEndOrder(rawStart, rawEnd);
+    const s = start ? format(start, 'yyyy-MM-dd') : null;
+    const e = end ? format(end, 'yyyy-MM-dd') : null;
+    if (s && e) {
+      setRangeStart(s);
+      setRangeEnd(e);
+    } else if (s && !e) {
+      setRangeStart(s);
+      setRangeEnd(s);
+    } else if (!s && e) {
+      setRangeStart(e);
+      setRangeEnd(e);
+    } else {
+      // default to today on initial load or when cleared
+      setRangeStart(todayStr);
+      setRangeEnd(todayStr);
+    }
+  }, [filterStartDate, filterEndDate, todayStr]);
+  // Removed legacy single-call by-date-range query; Search now uses per-day chunked requests only.
+
+  // Support data for filters
+  const { data: rolesData = [] } = useQuery({
+    queryKey: ["/api/roles"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/roles");
+      const json = await res.json();
+      return Array.isArray(json) ? json : [];
+    },
+    enabled: !!user,
+    staleTime: 60000,
+  });
+  const { data: usersData = [] } = useQuery({
+    queryKey: ["/api/users", "all"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/users");
+      const json = await res.json();
+      return Array.isArray(json) ? json : [];
+    },
+    enabled: !!user,
+    staleTime: 60000,
+  });
+  const { data: allAppointments = [] } = useQuery({
+    queryKey: ["/api/appointments", "all"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/appointments");
+      const json = await res.json();
+      return Array.isArray(json) ? json : [];
+    },
+    enabled: !!user,
+    staleTime: 60000,
+  });
+  const availableRoles: Array<{ name: string; displayName: string }> = useMemo(() => {
+    if (!rolesData || !Array.isArray(rolesData)) return [];
+    const filtered = rolesData
+      .filter((role: any) => {
+        const roleName = String(role.name || "").toLowerCase();
+        if (user?.role === "patient") {
+          return roleName !== "patient" && roleName !== "admin" && roleName !== "administrator";
+        }
+        return roleName !== "patient";
+      })
+      .map((role: any) => ({ name: role.name, displayName: role.displayName || role.name }));
+    if (user?.role === "patient") {
+      return filtered.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" }));
+    }
+    return filtered;
+  }, [rolesData, user?.role]);
+  const filteredUsersByFilterRole = useMemo(() => {
+    if (!filterRole || !usersData || !Array.isArray(usersData)) return [];
+    const roleLc = String(filterRole).toLowerCase();
+    // Doctor-like roles can be stored with variations; include all doctor-like when role is 'doctor'
+    if (roleLc === "doctor") {
+      return usersData.filter((u: any) => isDoctorLike(String(u.role || "").toLowerCase()));
+    }
+    return usersData.filter((u: any) => String(u.role || "").toLowerCase() === roleLc);
+  }, [filterRole, usersData]);
+  // If no role is selected, fall back to all providers; if a role yields 0, gracefully fall back to all as well
+  const providersForDropdown = useMemo(() => {
+    if (!usersData || !Array.isArray(usersData)) return [];
+    if (!filterRole) return usersData;
+    const list = filteredUsersByFilterRole;
+    return Array.isArray(list) && list.length > 0 ? list : usersData;
+  }, [usersData, filterRole, filteredUsersByFilterRole]);
+  const handleRefreshFilters = () => {
+    setFilterRole("");
+    setFilterProvider("");
+    setFilterStartDate(undefined);
+    setFilterEndDate(undefined);
+    setFilterAppointmentId("");
+    setFilteredAppointments([]);
+  };
 
   const { data: analyticsData, isLoading } = useQuery({
     queryKey: ['/api/analytics', user?.id, isDoctorLike(user?.role)],
@@ -2745,76 +4269,131 @@ export default function AnalyticsPage() {
     enabled: !!user
   });
 
-  // Fetch all appointments to filter for future and current ones
-  const fetchAllAppointments = async () => {
-    try {
-      const now = new Date(); // Current date and time
-      
-      const response = await apiRequest("GET", "/api/appointments");
-      if (response.ok) {
-        const allAppointments = await response.json();
-        
-        // Filter for appointments that are today or future (not past)
-        // Include appointments that are scheduled for today or later
-        const futureAndCurrent = allAppointments.filter((apt: any) => {
-          const appointmentDateTime = new Date(apt.scheduledAt || apt.scheduled_at || apt.date);
-          
-          // Include if appointment is today or in the future
-          return appointmentDateTime >= now;
-        });
-        
-        return futureAndCurrent;
+  // Server-side filtered appointments (NEW window endpoint) - runs on Search click
+  const { data: serverFilteredAppointments = [], isFetching: isFetchingServerFiltered, error: windowError } = useQuery({
+    queryKey: ["/api/appointments", "analytics-filtered", "range-fast-chunked", {
+      providerId: filterProvider || null,
+      startDate: appliedRangeStart || null,
+      endDate: appliedRangeEnd || null,
+      role: filterRole || null,
+      searchRunId,
+    }],
+    enabled: !!user && searchRunId > 0 && (!!appliedRangeStart && !!appliedRangeEnd),
+    queryFn: async () => {
+      // Instant-feel: fetch each day in the range in parallel using the fast by-date-range endpoint
+      const start = new Date(`${appliedRangeStart}T00:00:00`);
+      const end = new Date(`${appliedRangeEnd}T00:00:00`);
+      const days: string[] = [];
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const da = String(d.getDate()).padStart(2, "0");
+        days.push(`${y}-${m}-${da}`);
       }
-      return [];
-    } catch (error) {
-      console.error("Failed to fetch appointments:", error);
-      return [];
-    }
-  };
-
-  // Fetch completed appointments (not past today)
-  const fetchCompletedAppointments = async () => {
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // Start of today
-      
-      const response = await apiRequest("GET", "/api/appointments");
-      if (response.ok) {
-        const allAppointments = await response.json();
-        
-        // Filter for completed appointments that are today or future (not past)
-        const completed = allAppointments.filter((apt: any) => {
-          const appointmentDate = new Date(apt.scheduledAt || apt.scheduled_at || apt.date);
-          appointmentDate.setHours(0, 0, 0, 0);
-          
-          return apt.status === 'completed' && appointmentDate >= today;
-        });
-        
-        return completed;
+      // Limit concurrency to avoid overloading server; slightly longer timeout per request
+      const fetchDay = async (day: string) => {
+        const qs = new URLSearchParams({ startDate: day, endDate: day, limit: "1000", offset: "0" });
+        // Provide explicit organizationId to avoid tenant resolution edge cases
+        const orgId = (user as any)?.organizationId;
+        if (orgId != null) qs.set("organizationId", String(orgId));
+        const url = `/api/appointments/by-date-range?${qs.toString()}`;
+        try {
+          const r = await apiRequest("GET", url, undefined, { timeoutMs: 15000 });
+          return await r.json();
+        } catch {
+          return [];
+        }
+      };
+      const concurrency = 2;
+      const perDay: any[][] = [];
+      for (let i = 0; i < days.length; i += concurrency) {
+        const slice = days.slice(i, i + concurrency);
+        const chunk = await Promise.all(slice.map(fetchDay));
+        perDay.push(...chunk);
       }
-      return [];
-    } catch (error) {
-      console.error("Failed to fetch completed appointments:", error);
-      return [];
-    }
-  };
-
-  // Fetch all appointments to get future and current count
-  const { data: futureAndCurrentAppointments } = useQuery({
-    queryKey: ['future-appointments', user?.id],
-    queryFn: fetchAllAppointments,
-    enabled: !!user
+      const merged = perDay.flat().filter(Boolean);
+      console.log("[ANALYTICS FILTER] Chunked per-day results:", merged.length, "days:", days.length);
+      return merged;
+    },
+    staleTime: 30000,
+    retry: 0,
   });
 
-  // Fetch completed appointments data
-  const { data: completedAppointmentsData } = useQuery({
-    queryKey: ['completed-appointments', user?.id],
-    queryFn: fetchCompletedAppointments,
-    enabled: !!user
-  });
+  // Compute counts from the already-fetched Search dataset.
+  const appointmentsForCounts: any[] = useMemo(() => {
+    return Array.isArray(serverFilteredAppointments) ? serverFilteredAppointments : [];
+  }, [serverFilteredAppointments]);
 
-  const completedCount = completedAppointmentsData?.length || 0;
-  const futureAndCurrentCount = futureAndCurrentAppointments?.length || 0;
+  const { futureAndCurrentList, completedCount, futureAndCurrentCount } = useMemo(() => {
+    const now = new Date();
+
+    const futureAndCurrent = appointmentsForCounts.filter((apt: any) => {
+      const dt = new Date(apt.scheduledAt || apt.scheduled_at || apt.date);
+      return !Number.isNaN(dt.getTime()) && dt >= now;
+    });
+
+    const completed = futureAndCurrent.filter(
+      (apt: any) => String(apt.status || "").toLowerCase() === "completed",
+    );
+
+    return {
+      futureAndCurrentList: futureAndCurrent,
+      completedCount: completed.length,
+      futureAndCurrentCount: futureAndCurrent.length,
+    };
+  }, [appointmentsForCounts]);
+
+  // Appointment IDs contextual to current filters (like appointments page)
+  const uniqueAppointmentIds = useMemo(() => {
+    const source = Array.isArray(serverFilteredAppointments) ? serverFilteredAppointments : [];
+    const ids = source
+      .map((apt: any) => apt.appointmentId || apt.appointment_id)
+      .filter((id: string | undefined) => id != null && String(id).trim() !== "");
+    return Array.from(new Set(ids.map((s: any) => String(s)))).sort();
+  }, [serverFilteredAppointments]);
+
+  // Apply filters to appointments (all roles)
+  useEffect(() => {
+    const hasSearchDates = searchRunId > 0 && !!appliedRangeStart && !!appliedRangeEnd;
+    let base: any[] = [];
+    if (hasSearchDates || !!filterProvider) {
+      base = Array.isArray(serverFilteredAppointments) ? serverFilteredAppointments : [];
+    } else {
+      base = [];
+    }
+    if (!Array.isArray(base)) {
+      setFilteredAppointments([]);
+      return;
+    }
+    let filtered = [...base];
+    if (filterProvider) {
+      const providerIdNum = parseInt(filterProvider);
+      filtered = filtered.filter((a: any) => {
+        const id = a.providerId ?? a.provider_id ?? a.doctorId ?? a.doctor_id;
+        return Number(id) === providerIdNum;
+      });
+    }
+    // Date filtering should reflect the applied (Search-time) date range, not live date picker values.
+    if (hasSearchDates) {
+      const startDay = appliedRangeStart || null;
+      const endDay = appliedRangeEnd || null;
+      filtered = filtered.filter((a: any) => {
+        const raw = a.scheduledAt || a.scheduled_at || a.date;
+        if (!raw) return false;
+        const d = String(raw).slice(0, 10);
+        if (startDay && d < startDay) return false;
+        if (endDay && d > endDay) return false;
+        return true;
+      });
+    }
+    if (filterAppointmentId) {
+      filtered = filtered.filter((a: any) => {
+        const id = a.appointmentId ?? a.appointment_id;
+        return String(id || '').trim() === String(filterAppointmentId).trim();
+      });
+    }
+    setFilteredAppointments((prev) => (areAppointmentsShallowEqual(prev, filtered) ? prev : filtered));
+  }, [user?.role, serverFilteredAppointments, filterProvider, filterAppointmentId, searchRunId, appliedRangeStart, appliedRangeEnd]);
 
   // Fetch daily, monthly, yearly analytics
   const [timeframe, setTimeframe] = useState<'daily' | 'monthly' | 'yearly'>('monthly');
@@ -3211,132 +4790,8 @@ export default function AnalyticsPage() {
     staleTime: 60000
   });
 
-  // Comprehensive summary of all query results with detailed values
-  useEffect(() => {
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('[QUERY SUMMARY] All Treatment Analytics Query Results:');
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('FILTERS:');
-    console.log('  Status Filter:', statusFilter);
-    console.log('  Timeframe:', timeframe);
-    console.log('  Days Filter:', daysFilter);
-    console.log('  Months Filter:', monthsFilter);
-    console.log('  Years Filter:', yearsFilter);
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('1. TREATMENT SESSIONS:');
-    console.log('  Count:', treatmentSessions.length);
-    console.log('  Loading:', sessionsLoading);
-    console.log('  Error:', sessionsError);
-    console.log('  Full Data Array:', treatmentSessions);
-    if (treatmentSessions.length > 0) {
-      console.log('  First Item:', treatmentSessions[0]);
-      console.log('  Last Item:', treatmentSessions[treatmentSessions.length - 1]);
-      console.log('  All Items:', treatmentSessions.map((item: any, index: number) => `[${index}]: ${JSON.stringify(item)}`));
-    } else {
-      console.log('  ⚠️ No treatment sessions found');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('2. TREATMENT POPULARITY:');
-    console.log('  Count:', treatmentPopularity.length);
-    console.log('  Full Data Array:', treatmentPopularity);
-    if (treatmentPopularity.length > 0) {
-      treatmentPopularity.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Name: "${item.name}", Total Sessions: ${item.total_sessions}`);
-      });
-    } else {
-      console.log('  ⚠️ No treatment popularity data found');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('3. MONTHLY TRENDS:');
-    console.log('  Count:', monthlyTrends.length);
-    console.log('  Full Data Array:', monthlyTrends);
-    if (monthlyTrends.length > 0) {
-      monthlyTrends.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Month: "${item.month}", Total Sessions: ${item.total_sessions}`);
-      });
-    } else {
-      console.log('  ⚠️ No monthly trends data found');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('4. REVENUE PER TREATMENT:');
-    console.log('  Count:', revenuePerTreatment.length);
-    console.log('  Full Data Array:', revenuePerTreatment);
-    if (revenuePerTreatment.length > 0) {
-      revenuePerTreatment.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Name: "${item.name}", Revenue: ${item.revenue}`);
-      });
-    } else {
-      console.log('  ⚠️ No revenue data found');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('5. CATEGORY DISTRIBUTION:');
-    console.log('  Count:', categoryDistribution.length);
-    console.log('  Full Data Array:', categoryDistribution);
-    if (categoryDistribution.length > 0) {
-      categoryDistribution.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Category: "${item.category_name || 'Uncategorized'}", Total: ${item.total}`);
-      });
-    } else {
-      console.log('  ⚠️ No category distribution data found');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('6. TREATMENT SUMMARY:');
-    console.log('  Full Summary Object:', treatmentSummary);
-    if (treatmentSummary && Object.keys(treatmentSummary).length > 0) {
-      console.log('  Total Patients:', treatmentSummary.total_patients);
-      console.log('  Total Treatments:', treatmentSummary.total_treatments);
-      console.log('  Revenue This Month:', treatmentSummary.revenue_this_month);
-      console.log('  Most Popular Treatment:', treatmentSummary.most_popular_treatment);
-    } else {
-      console.log('  ⚠️ No treatment summary data found');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('7. DAILY DATA:');
-    console.log('  Enabled:', timeframe === 'daily');
-    console.log('  Count:', dailyData.length);
-    console.log('  Full Data Array:', dailyData);
-    if (dailyData.length > 0) {
-      dailyData.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Date: ${item.date}, Treatments: ${item.total_treatments}, Patients: ${item.total_patients}, Revenue: ${item.revenue}`);
-      });
-    } else {
-      console.log('  ⚠️ No daily data found (or query not enabled)');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('8. MONTHLY DATA:');
-    console.log('  Enabled:', timeframe === 'monthly');
-    console.log('  Count:', monthlyData.length);
-    console.log('  Full Data Array:', monthlyData);
-    if (monthlyData.length > 0) {
-      monthlyData.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Month: ${item.month} (${item.month_label}), Treatments: ${item.total_treatments}, Patients: ${item.total_patients}, Revenue: ${item.revenue}`);
-      });
-    } else {
-      console.log('  ⚠️ No monthly data found (or query not enabled)');
-    }
-    console.log('───────────────────────────────────────────────────────────');
-    
-    console.log('9. YEARLY DATA:');
-    console.log('  Enabled:', timeframe === 'yearly');
-    console.log('  Count:', yearlyData.length);
-    console.log('  Full Data Array:', yearlyData);
-    if (yearlyData.length > 0) {
-      yearlyData.forEach((item: any, index: number) => {
-        console.log(`  [${index}] Year: ${item.year}, Treatments: ${item.total_treatments}, Patients: ${item.total_patients}, Revenue: ${item.revenue}`);
-      });
-    } else {
-      console.log('  ⚠️ No yearly data found (or query not enabled)');
-    }
-    console.log('═══════════════════════════════════════════════════════════');
-  }, [
+  // Removed verbose console summary logs used during debugging
+  useEffect(() => {}, [
     statusFilter,
     timeframe,
     daysFilter,
@@ -3356,8 +4811,8 @@ export default function AnalyticsPage() {
   ]);
 
   const handleAppointmentsClick = () => {
-    if (futureAndCurrentAppointments) {
-      setCompletedAppointments(futureAndCurrentAppointments);
+    if (futureAndCurrentList) {
+      setCompletedAppointments(futureAndCurrentList);
       setShowAppointmentsDialog(true);
     }
   };
@@ -3513,8 +4968,6 @@ export default function AnalyticsPage() {
           <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
             {isDoctorLike(user?.role) ? (
               <>
-                {/* <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger> */}
-                {/* <TabsTrigger value="custom-analytics">Custom Analytics</TabsTrigger> */}
                 <TabsTrigger value="overview">Overview ({user?.firstName} {user?.lastName})</TabsTrigger>
                 <TabsTrigger value="patients">Patients ({user?.firstName} {user?.lastName})</TabsTrigger>
                 <TabsTrigger value="appointments">My Appointments ({user?.firstName} {user?.lastName})</TabsTrigger>
@@ -3523,8 +4976,6 @@ export default function AnalyticsPage() {
               </>
             ) : (
               <>
-                {/* <TabsTrigger value="treatment-analytics">Treatment Analytics</TabsTrigger> */}
-                {/* <TabsTrigger value="custom-analytics">Custom Analytics</TabsTrigger> */}
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="patients">Patients</TabsTrigger>
                 <TabsTrigger value="clinical">Clinical</TabsTrigger>
@@ -3532,6 +4983,8 @@ export default function AnalyticsPage() {
               </>
             )}
           </TabsList>
+
+          {/* Custom treatment analytics tab removed per requirement */}
 
           {/* Custom Analytics Tab */}
           <TabsContent value="custom-analytics" className="space-y-4 lg:space-y-6">
@@ -3587,6 +5040,123 @@ export default function AnalyticsPage() {
           */}
 
           <TabsContent value="overview" className="space-y-4">
+            {/* Date Range Filter (Overview) */}
+            <Card className="border-gray-200 dark:border-slate-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Filter Appointments by Date</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap items-end gap-3">
+                  {/* Start Date */}
+                  <div className="min-w-[200px]">
+                    <Label>Start date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left font-normal mt-1"
+                        >
+                          <Calendar className="mr-2 h-4 w-4" />
+                          {filterStartDate ? format(filterStartDate, "PPP") : "Pick a date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          selected={filterStartDate}
+                          onSelect={setFilterStartDate}
+                          disabled={() => false}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* End Date */}
+                  <div className="min-w-[200px]">
+                    <Label>End date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left font-normal mt-1"
+                        >
+                          <Calendar className="mr-2 h-4 w-4" />
+                          {filterEndDate ? format(filterEndDate, "PPP") : "Pick a date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          selected={filterEndDate}
+                          onSelect={setFilterEndDate}
+                          disabled={() => false}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div className="flex items-end gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        // Apply the currently selected dates and trigger a single server fetch.
+                        const rawStart = normalizeToDate(filterStartDate || filterEndDate);
+                        const rawEnd = normalizeToDate(filterEndDate || filterStartDate);
+                        const { start, end } = ensureStartEndOrder(rawStart, rawEnd);
+                        const s = start ? format(start, "yyyy-MM-dd") : "";
+                        const e = end ? format(end, "yyyy-MM-dd") : "";
+                        setAppliedRangeStart(s);
+                        setAppliedRangeEnd(e);
+                        setSearchRunId((v) => v + 1);
+                      }}
+                      disabled={!filterStartDate || !filterEndDate}
+                      title="Search"
+                    >
+                      Search
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setFilterStartDate(undefined); setFilterEndDate(undefined); }}
+                      title="Clear"
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+                {/* Result count (shows how many rows were fetched from appointments for the applied start/end) */}
+                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                  {searchRunId > 0 && appliedRangeStart && appliedRangeEnd ? (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">
+                        Appointments fetched:
+                      </span>
+                      <span>
+                        {Array.isArray(serverFilteredAppointments) ? serverFilteredAppointments.length : 0}
+                      </span>
+                      <span className="text-gray-500 dark:text-gray-500">
+                        (from {appliedRangeStart} to {appliedRangeEnd})
+                      </span>
+                      {isFetchingServerFiltered ? (
+                        <span className="text-gray-500 dark:text-gray-500">Loading…</span>
+                      ) : null}
+                      {/* Suppress verbose fetch error display per requirement */}
+                    </div>
+                  ) : (
+                    <span className="text-gray-500 dark:text-gray-500">
+                      Click Search to fetch appointments and show row count.
+                    </span>
+                  )}
+                </div>
+                {/* Debug trace for user to verify steps */}
+                <div className="sr-only" aria-hidden="true">
+                  {/* a11y-hidden container; we rely on console traces instead of UI text */}
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Compact Analytics Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 auto-rows-fr mt-[70px]">
               {/* Patients This Month */}
@@ -3784,6 +5354,80 @@ export default function AnalyticsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Filtered Appointments (Overview) */}
+          {(searchRunId > 0 && appliedRangeStart && appliedRangeEnd) && (
+            <Card className="mb-4">
+              <CardHeader className="py-3">
+                <CardTitle className="text-base">
+                  Filtered Appointments ({filteredAppointments.length} found)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {filteredAppointments.length === 0 ? (
+                  <div className="text-sm text-gray-500">
+                    No appointments match the selected dates ({appliedRangeStart} to {appliedRangeEnd}).
+                  </div>
+                ) : (
+                  <div className="border rounded-md bg-white dark:bg-slate-900 overflow-hidden">
+                    <div className="max-h-[420px] overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-gray-50 dark:bg-slate-800 border-b">
+                          <tr className="text-left">
+                            <th className="px-3 py-2 font-medium text-gray-700 dark:text-gray-200">Date</th>
+                            <th className="px-3 py-2 font-medium text-gray-700 dark:text-gray-200">Time</th>
+                            <th className="px-3 py-2 font-medium text-gray-700 dark:text-gray-200">Title</th>
+                            <th className="px-3 py-2 font-medium text-gray-700 dark:text-gray-200">Provider</th>
+                            <th className="px-3 py-2 font-medium text-gray-700 dark:text-gray-200">Status</th>
+                            <th className="px-3 py-2 font-medium text-gray-700 dark:text-gray-200">Appointment ID</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredAppointments.slice(0, 50).map((a: any) => {
+                            const scheduled = String(a.scheduledAt || a.scheduled_at || "").replace("T", " ");
+                            const dateOnly = scheduled.slice(0, 10) || "-";
+                            const timeOnly = scheduled.slice(11, 16) || "-";
+                            const provider = usersData?.find?.(
+                              (u: any) => u.id?.toString() === (a.providerId ?? a.provider_id)?.toString(),
+                            );
+                            const providerName = provider ? `${provider.firstName || ""} ${provider.lastName || ""}`.trim() : "Unknown";
+                            const title = a.title || a.service_name || `Appointment with ${providerName}`;
+                            const status = String(a.status || "scheduled");
+                            const statusLc = status.toLowerCase();
+                            const badge =
+                              statusLc === "scheduled"
+                                ? "bg-blue-100 text-blue-700"
+                                : statusLc === "completed"
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-gray-100 text-gray-700";
+                            return (
+                              <tr key={a.id ?? a.appointmentId ?? a.appointment_id} className="border-b last:border-b-0">
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200 whitespace-nowrap">{dateOnly}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200 whitespace-nowrap">{timeOnly}</td>
+                                <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{title}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200 whitespace-nowrap">{providerName}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`text-xs px-2 py-1 rounded ${badge}`}>{status}</span>
+                                </td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                                  {a.appointmentId || a.appointment_id || "-"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {filteredAppointments.length > 50 ? (
+                      <div className="px-3 py-2 text-xs text-gray-500 border-t bg-gray-50 dark:bg-slate-800">
+                        Showing first 50 of {filteredAppointments.length} appointments.
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
           </TabsContent>
 
           <TabsContent value="patients" className="space-y-4 lg:space-y-6">

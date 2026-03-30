@@ -254,6 +254,7 @@ export const users = pgTable("users", {
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   role: varchar("role", { length: 20 }).notNull().default("doctor"), // admin, doctor, nurse, receptionist, patient, sample_taker
+  professionalRegistrationId: text("Professional_RegistrationID"),
   department: text("department"),
   medicalSpecialtyCategory: text("medical_specialty_category"),
   subSpecialty: text("sub_specialty"),

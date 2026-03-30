@@ -65,9 +65,11 @@ import {
   ArrowLeft,
   Trash,
   Volume2,
+  LogOut,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 interface VoiceNote {
   id: string;
@@ -148,6 +150,7 @@ interface ClinicalPhoto {
 }
 
 export default function VoiceDocumentation() {
+  const { logout } = useAuth();
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("voice");
   const [isRecording, setIsRecording] = useState(false);
@@ -2199,6 +2202,18 @@ export default function VoiceDocumentation() {
             >
               <Settings className="w-4 h-4 mr-2" />
               Voice Settings
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                try { logout(); } catch {}
+                window.location.href = "/auth/login";
+              }}
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign out
             </Button>
           </div>
         </div>

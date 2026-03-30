@@ -123,6 +123,9 @@ export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
+  options?: {
+    timeoutMs?: number;
+  },
 ): Promise<Response> {
   // Check session timeout before making request
   checkSessionTimeout();
@@ -158,12 +161,34 @@ export async function apiRequest(
     });
   }
 
-  const res = await fetch(buildUrl(url), {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
+  // Fail-fast timeout (prevents requests sitting "pending" forever if the server/DB hangs)
+  const controller = new AbortController();
+  const timeoutMs =
+    typeof options?.timeoutMs === "number"
+      ? options.timeoutMs
+      : url.includes("/api/appointments")
+        ? 30000
+        : 45000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(url), {
+      method,
+      headers,
+      body: data ? JSON.stringify(data) : undefined,
+      credentials: "include",
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    // Convert AbortError into a clearer timeout error for easier debugging.
+    if (e?.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${method} ${url}`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Update last activity on successful request
   if (res.ok) {

@@ -44,6 +44,7 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [detailsAppointment, setDetailsAppointment] = useState<any>(null);
   
   // Edit appointment state
   const [editingAppointment, setEditingAppointment] = useState<any>(null);
@@ -649,6 +650,79 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
     return name ? `${name} (${formattedRole})` : `User ${createdById}`;
   };
 
+  const getPatientSpecialRequirements = (patient: any): string[] => {
+    if (!patient) return [];
+    const raw = (patient.medicalHistory as any)?.specialRequirements;
+    if (!raw || typeof raw !== "object" || raw.hasSpecialRequirements !== "yes") {
+      return [];
+    }
+
+    const selected = raw.selected && typeof raw.selected === "object" ? raw.selected : {};
+    const details = raw.details && typeof raw.details === "object" ? raw.details : {};
+    const labels: Record<string, string> = {
+      mobility_wheelchair: "Wheelchair user",
+      mobility_walking_assistance: "Walking assistance",
+      mobility_bed_bound: "Bed-bound",
+      mobility_exam_table_help: "Help onto exam table",
+      mobility_other: "Mobility other",
+      sensory_hearing_impairment: "Hearing impairment",
+      sensory_sign_language: "Sign language interpreter",
+      sensory_visual_impairment: "Visual impairment",
+      sensory_large_print: "Large-print materials",
+      sensory_other: "Sensory other",
+      communication_language_barrier: "Language barrier",
+      communication_interpreter: "Translator/interpreter",
+      communication_difficulty_instructions: "Difficulty with instructions",
+      communication_other: "Communication other",
+      cognitive_dementia: "Dementia/memory issues",
+      cognitive_autism: "Autism spectrum",
+      cognitive_anxiety: "Anxiety/panic disorder",
+      cognitive_quiet_environment: "Needs quiet environment",
+      cognitive_other: "Cognitive other",
+      medical_diabetes: "Diabetes",
+      medical_heart_condition: "Heart condition",
+      medical_epilepsy: "Epilepsy/seizures",
+      medical_oxygen: "Requires oxygen",
+      medical_other: "Medical other",
+      alerts_drug_allergy: "Drug allergy",
+      alerts_latex_allergy: "Latex allergy",
+      alerts_skin_sensitivity: "Skin sensitivity",
+      alerts_cosmetic_allergy: "Cosmetic allergy",
+      alerts_other: "Medical alert other",
+      infection_condition: "Infectious condition",
+      infection_isolation: "Isolation precautions",
+      infection_other: "Infection control other",
+      aesthetic_sensitive_skin: "Sensitive skin",
+      aesthetic_reactions_history: "History of cosmetic reactions",
+      aesthetic_undergoing_treatments: "Undergoing cosmetic treatments",
+      aesthetic_scarring_concern: "Scarring/pigmentation concern",
+      aesthetic_keloid_tendency: "Keloid tendency",
+      aesthetic_acne_prone: "Acne-prone skin",
+      aesthetic_hyperpigmentation: "Hyperpigmentation/melasma",
+      aesthetic_minimal_marks: "Preference for minimal marks",
+      aesthetic_skincare_medications: "Using skincare meds",
+      aesthetic_recent_treatment: "Recent facial/body treatment",
+      aesthetic_other: "Aesthetic other",
+      personal_prefers_male_doctor: "Prefers male doctor",
+      personal_prefers_female_doctor: "Prefers female doctor",
+      personal_modesty_privacy: "Modesty/privacy concerns",
+      personal_religious_cultural: "Religious/cultural considerations",
+      personal_other: "Personal/cultural other",
+      assistance_caregiver: "Caregiver assistance",
+      assistance_priority: "Priority/urgent care",
+      assistance_other_special: "Other special assistance",
+      assistance_other: "Special assistance other",
+    };
+
+    return Object.entries(selected)
+      .filter(([, checked]) => !!checked)
+      .map(([key]) => {
+        const label = labels[key] || key;
+        const detail = details[key];
+        return detail ? `${label}: ${detail}` : label;
+      });
+  };
+
   const formatTime = (timeValue: string | Date) => {
     try {
       let hours: number, minutes: number;
@@ -997,6 +1071,22 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
     if (!nextAppointment) return null;
     return getAppointmentServiceInfo(nextAppointment);
   }, [nextAppointment, treatmentsList, consultationServices]);
+
+  const nextAppointmentAllergies = React.useMemo(() => {
+    if (!nextAppointmentPatient) return [];
+    return Array.from(
+      new Set(
+        [
+          ...(Array.isArray(nextAppointmentPatient.medicalHistory?.allergies)
+            ? nextAppointmentPatient.medicalHistory.allergies
+            : []),
+          ...(Array.isArray(nextAppointmentPatient.allergies) ? nextAppointmentPatient.allergies : []),
+        ]
+          .map((item: any) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+  }, [nextAppointmentPatient]);
 
   const weekStart = startOfWeek(selectedDate);
   const weekEnd = endOfWeek(selectedDate);
@@ -1366,13 +1456,29 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                 const createdBy = usersData?.find((u: any) => u.id === appointment.createdBy);
                 const appointmentServiceInfo = getAppointmentServiceInfo(appointment);
                 const appointmentTypeBadge = getAppointmentTypeBadgeInfo(appointment);
+                const patientAllergies = patient
+                  ? Array.from(
+                      new Set(
+                        [
+                          ...(Array.isArray(patient.medicalHistory?.allergies)
+                            ? patient.medicalHistory.allergies
+                            : []),
+                          ...(Array.isArray(patient.allergies) ? patient.allergies : []),
+                        ]
+                          .map((item: any) => (typeof item === "string" ? item.trim() : ""))
+                          .filter(Boolean),
+                      ),
+                    )
+                  : [];
+                const patientSpecialRequirements = getPatientSpecialRequirements(patient);
                 
                 return (
                   <Card 
                     key={appointment.id} 
-                    className="border-l-4 bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700" 
+                    className="border-l-4 bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 cursor-pointer" 
                     style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}
                     data-testid={`selected-date-appointment-${appointment.id}`}
+                    onClick={() => setDetailsAppointment(appointment)}
                   >
                     <CardContent className="p-4">
                       {/* Header with Title and Actions */}
@@ -1403,7 +1509,10 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleEditAppointment(appointment)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditAppointment(appointment);
+                            }}
                               className="h-8 w-8 p-0"
                               data-testid={`button-edit-selected-appointment-${appointment.id}`}
                             >
@@ -1415,7 +1524,10 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                               variant="outline"
                               size="sm"
                               className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => setAppointmentToCancel(appointment.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAppointmentToCancel(appointment.id);
+                            }}
                               data-testid={`button-cancel-selected-${appointment.id}`}
                             >
                               Cancel Appointment
@@ -1542,6 +1654,21 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                         </div>
                       </div>
 
+                      {isDoctorLike(user?.role || "") && (patientAllergies.length > 0 || patientSpecialRequirements.length > 0) && (
+                        <div className="mt-3 flex w-full flex-wrap gap-2">
+                          {patientAllergies.length > 0 && (
+                            <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200 whitespace-normal">
+                              Allergies: {patientAllergies.join(", ")}
+                            </Badge>
+                          )}
+                          {patientSpecialRequirements.length > 0 && (
+                            <Badge className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200 whitespace-normal">
+                              Special Requirements: {patientSpecialRequirements.join(", ")}
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+
                       {/* Booked By Info */}
                       {createdBy && (
                         <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
@@ -1616,7 +1743,10 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
 
       {/* Next Upcoming Appointment */}
       {nextAppointment && (
-        <Card className="border-l-4 border-l-blue-500 bg-blue-50 dark:bg-blue-900/20">
+        <Card
+          className="border-l-4 border-l-blue-500 bg-blue-50 dark:bg-blue-900/20 cursor-pointer"
+          onClick={() => setDetailsAppointment(nextAppointment)}
+        >
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <ArrowRight className="h-5 w-5 text-blue-600" />
@@ -1680,6 +1810,13 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                           style={{ backgroundColor: nextAppointmentServiceInfo.color }}
                         />
                         <span>Service: {nextAppointmentServiceInfo.name}</span>
+                      </div>
+                    )}
+                    {isDoctorLike(user?.role || "") && nextAppointmentAllergies.length > 0 && (
+                      <div className="w-full mt-2">
+                        <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200 whitespace-normal">
+                          Allergies: {nextAppointmentAllergies.join(", ")}
+                        </Badge>
                       </div>
                     )}
                   </div>
@@ -1760,14 +1897,30 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                 p.id.toString() === appointment.patientId.toString()
               );
               const createdBy = usersData?.find((u: any) => u.id === appointment.createdBy);
+              const patientAllergies = patient
+                ? Array.from(
+                    new Set(
+                      [
+                        ...(Array.isArray(patient.medicalHistory?.allergies)
+                          ? patient.medicalHistory.allergies
+                          : []),
+                        ...(Array.isArray(patient.allergies) ? patient.allergies : []),
+                      ]
+                        .map((item: any) => (typeof item === "string" ? item.trim() : ""))
+                        .filter(Boolean),
+                    ),
+                  )
+                : [];
+              const patientSpecialRequirements = getPatientSpecialRequirements(patient);
               
             const appointmentServiceInfo = getAppointmentServiceInfo(appointment);
             return (
                 <Card 
                   key={appointment.id} 
-                  className="border-l-4" 
+                  className="border-l-4 cursor-pointer" 
                   style={{ borderLeftColor: statusColors[appointment.status as keyof typeof statusColors] }}
                   data-testid={`filtered-appointment-${appointment.id}`}
+                  onClick={() => setDetailsAppointment(appointment)}
                 >
                   <CardContent className="p-4">
                     {/* Header with Title and Actions */}
@@ -1797,7 +1950,10 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleEditAppointment(appointment)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditAppointment(appointment);
+                            }}
                             className="h-8 w-8 p-0"
                             data-testid={`button-edit-appointment-${appointment.id}`}
                           >
@@ -1809,7 +1965,10 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                             variant="outline"
                             size="sm"
                             className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => setAppointmentToCancel(appointment.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAppointmentToCancel(appointment.id);
+                            }}
                             data-testid={`button-cancel-${appointment.id}`}
                           >
                             Cancel Appointment
@@ -1898,6 +2057,21 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
                         )}
                       </div>
                     </div>
+
+                    {isDoctorLike(user?.role || "") && (patientAllergies.length > 0 || patientSpecialRequirements.length > 0) && (
+                      <div className="mt-3 flex w-full flex-wrap gap-2">
+                        {patientAllergies.length > 0 && (
+                          <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200 whitespace-normal">
+                            Allergies: {patientAllergies.join(", ")}
+                          </Badge>
+                        )}
+                        {patientSpecialRequirements.length > 0 && (
+                          <Badge className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200 whitespace-normal">
+                            Special Requirements: {patientSpecialRequirements.join(", ")}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
 
                     {/* Booked By Info */}
                     {createdBy && (
@@ -2631,6 +2805,100 @@ export default function DoctorAppointments({ onNewAppointment }: { onNewAppointm
           </div>
         </div>
       )}
+
+      {/* Appointment Details Modal (doctor/nurse/admin view parity) */}
+      <Dialog
+        open={detailsAppointment !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailsAppointment(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          {detailsAppointment && (() => {
+            const patient = patientsData?.find((p: any) =>
+              p.userId === detailsAppointment.patientId ||
+              p.id === detailsAppointment.patientId ||
+              (p.patientId && p.patientId === detailsAppointment.patientId?.toString()) ||
+              p.id?.toString() === detailsAppointment.patientId?.toString(),
+            );
+            const provider = usersData?.find((u: any) => u.id === detailsAppointment.providerId);
+            const createdByUser = usersData?.find((u: any) => u.id === detailsAppointment.createdBy);
+            const serviceInfo = getAppointmentServiceInfo(detailsAppointment);
+            const patientName = patient
+              ? `${patient.firstName || ""} ${patient.lastName || ""}`.trim()
+              : getPatientName(detailsAppointment.patientId);
+            const patientEmail = patient?.email || "";
+            const providerName = provider
+              ? `${provider.firstName || ""} ${provider.lastName || ""}`.trim()
+              : getDoctorNameWithSpecialization(detailsAppointment.providerId);
+            const providerEmail = provider?.email || "";
+            const createdByLabel = createdByUser
+              ? `${createdByUser.firstName || ""} ${createdByUser.lastName || ""}`.trim()
+              : detailsAppointment.createdBy
+                ? getCreatedByName(detailsAppointment.createdBy)
+                : "N/A";
+            const createdByRole = createdByUser?.role ? ` (${createdByUser.role})` : "";
+            const createdByEmail = createdByUser?.email ? ` (${createdByUser.email})` : "";
+
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-2xl font-bold text-blue-800 dark:text-blue-200">
+                    Appointment Details
+                  </DialogTitle>
+                  <DialogDescription className="space-y-1">
+                    <div className="text-gray-500 dark:text-gray-400">
+                      {formatAppointmentDate(detailsAppointment.scheduledAt)}
+                    </div>
+                    {detailsAppointment.appointmentId && (
+                      <div className="font-semibold text-gray-700 dark:text-gray-300">
+                        ID: {detailsAppointment.appointmentId}
+                      </div>
+                    )}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="border rounded-xl p-4 space-y-2 bg-white dark:bg-slate-800">
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    <span>{(detailsAppointment.status || "scheduled").toUpperCase()}</span>
+                    <span>{formatTime(detailsAppointment.scheduledAt)}</span>
+                  </div>
+                  <p className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                    {patientEmail ? `${patientName} (${patientEmail})` : patientName}
+                  </p>
+                  {serviceInfo && (
+                    <p className="text-sm text-gray-600 dark:text-gray-300">Service: {serviceInfo.name}</p>
+                  )}
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {detailsAppointment.duration || 30} minutes
+                  </p>
+
+                  <div className="pt-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Provider</p>
+                    <p className="text-base text-gray-900 dark:text-gray-100">
+                      {providerEmail ? `${providerName} (${providerEmail})` : providerName}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {provider?.medicalSpecialtyCategory || provider?.subSpecialty || provider?.department || "General"}
+                    </p>
+                  </div>
+
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Created By: {createdByLabel}{createdByRole}{createdByEmail}
+                  </p>
+                </div>
+
+                <div className="border rounded-xl p-4 bg-gray-50 dark:bg-slate-800/50">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Invoice</p>
+                  <AppointmentInvoiceInfo
+                    appointmentId={detailsAppointment.appointmentId ?? (detailsAppointment as any).appointment_id}
+                  />
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* Cancel Appointment Confirmation Modal */}
       <Dialog open={appointmentToCancel !== null} onOpenChange={(open) => !open && setAppointmentToCancel(null)}>

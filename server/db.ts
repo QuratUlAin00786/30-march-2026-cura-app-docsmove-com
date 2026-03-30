@@ -17,7 +17,9 @@ if (!process.env.DATABASE_URL) {
 export const pool = new Pool({ 
   connectionString: 'postgresql://curauser24nov25:cura_123@185.185.126.58:5432/cura24nov2025',
   max: 10, // Maximum number of connections in pool
+  connectionTimeoutMillis: 5000, // Fail fast if DB/network is down instead of hanging requests
   idleTimeoutMillis: 10000, // 10 seconds idle timeout
+  query_timeout: 7000, // Client-side query timeout as an additional safety net
   maxUses: 7500, // Maximum uses per connection before renewal
   allowExitOnIdle: false
 });
@@ -25,6 +27,9 @@ export const pool = new Pool({
 // Set search_path to user schema only (no public - avoid "permission denied for schema public")
 pool.on('connect', (client: any) => {
   client.query('SET search_path TO curauser24nov25');
+  // Keep a conservative default statement timeout so accidental full table scans don't hang the API.
+  // Individual endpoints can still override via SET LOCAL statement_timeout inside a transaction.
+  client.query('SET statement_timeout TO 8000');
 });
 
 // One-time migration: Add recipients column to message_campaigns if missing
@@ -126,6 +131,21 @@ export const db = drizzle({ client: pool, schema });
       ADD COLUMN IF NOT EXISTS consultation_id INTEGER
     `);
     console.log('✅ Ensured appointments columns appointment_type, treatment_id, consultation_id exist');
+
+    // Performance indexes for analytics/date-range queries
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_appointments_org_scheduled_at
+      ON appointments (organization_id, scheduled_at)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_appointments_org_appointment_type
+      ON appointments (organization_id, appointment_type)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_appointments_org_type_sched_treatment
+      ON appointments (organization_id, appointment_type, scheduled_at, treatment_id)
+    `);
+    console.log('✅ Ensured appointments analytics indexes exist');
   } catch (error: any) {
     console.warn('⚠️ Unable to ensure appointments columns:', error?.message || error);
   }

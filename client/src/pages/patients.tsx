@@ -403,6 +403,112 @@ export default function Patients() {
                     </div>
                   );
                 })()}
+
+                {/* Special Requirements */}
+                {(() => {
+                  const rawSpecialReq = (patient.medicalHistory as any)?.specialRequirements;
+                  const hasStructuredData = rawSpecialReq && typeof rawSpecialReq === "object";
+                  const hasSpecialRequirements =
+                    hasStructuredData && rawSpecialReq.hasSpecialRequirements === "yes";
+
+                  if (!hasSpecialRequirements) return null;
+
+                  const selected = rawSpecialReq.selected && typeof rawSpecialReq.selected === "object"
+                    ? rawSpecialReq.selected
+                    : {};
+                  const details = rawSpecialReq.details && typeof rawSpecialReq.details === "object"
+                    ? rawSpecialReq.details
+                    : {};
+
+                  const specialRequirementLabelMap: Record<string, string> = {
+                    mobility_wheelchair: "Wheelchair user",
+                    mobility_walking_assistance: "Needs walking assistance",
+                    mobility_bed_bound: "Bed-bound",
+                    mobility_exam_table_help: "Requires help getting onto exam table",
+                    mobility_other: "Mobility other",
+                    sensory_hearing_impairment: "Hearing impairment",
+                    sensory_sign_language: "Requires sign language interpreter",
+                    sensory_visual_impairment: "Visual impairment",
+                    sensory_large_print: "Needs large-print materials",
+                    sensory_other: "Sensory other",
+                    communication_language_barrier: "Language barrier",
+                    communication_interpreter: "Needs translator/interpreter",
+                    communication_difficulty_instructions: "Difficulty understanding instructions",
+                    communication_other: "Communication other",
+                    cognitive_dementia: "Dementia / memory issues",
+                    cognitive_autism: "Autism spectrum",
+                    cognitive_anxiety: "Anxiety / panic disorder",
+                    cognitive_quiet_environment: "Needs calm or quiet environment",
+                    cognitive_other: "Cognitive/behavioral other",
+                    medical_diabetes: "Diabetes",
+                    medical_heart_condition: "Heart condition",
+                    medical_epilepsy: "Epilepsy / seizures",
+                    medical_oxygen: "Requires oxygen",
+                    medical_other: "Medical other",
+                    alerts_drug_allergy: "Drug allergy",
+                    alerts_latex_allergy: "Latex allergy",
+                    alerts_skin_sensitivity: "Skin sensitivity",
+                    alerts_cosmetic_allergy: "Cosmetic product allergy",
+                    alerts_other: "Medical alert other",
+                    infection_condition: "Infectious condition",
+                    infection_isolation: "Requires isolation precautions",
+                    infection_other: "Infection control other",
+                    aesthetic_sensitive_skin: "Sensitive skin",
+                    aesthetic_reactions_history: "History of cosmetic reactions",
+                    aesthetic_undergoing_treatments: "Undergoing cosmetic treatments",
+                    aesthetic_scarring_concern: "Concern about scarring/pigmentation",
+                    aesthetic_keloid_tendency: "Keloid tendency",
+                    aesthetic_acne_prone: "Acne-prone skin",
+                    aesthetic_hyperpigmentation: "Hyperpigmentation / melasma",
+                    aesthetic_minimal_marks: "Preference for minimal marks",
+                    aesthetic_skincare_medications: "Using skincare medications",
+                    aesthetic_recent_treatment: "Recent facial/body treatment",
+                    aesthetic_other: "Aesthetic other",
+                    personal_prefers_male_doctor: "Prefers male doctor",
+                    personal_prefers_female_doctor: "Prefers female doctor",
+                    personal_modesty_privacy: "Modesty/privacy concerns",
+                    personal_religious_cultural: "Religious/cultural considerations",
+                    personal_other: "Personal/cultural other",
+                    assistance_caregiver: "Requires caregiver assistance",
+                    assistance_priority: "Needs priority/urgent care",
+                    assistance_other_special: "Other special assistance",
+                    assistance_other: "Special assistance other",
+                  };
+
+                  const selectedItems = Object.entries(selected)
+                    .filter(([, checked]) => !!checked)
+                    .map(([key]) => {
+                      const base = specialRequirementLabelMap[key] || key;
+                      const extra = details[key];
+                      return extra ? `${base}: ${extra}` : base;
+                    });
+
+                  const additionalNotes = typeof rawSpecialReq.additionalNotes === "string"
+                    ? rawSpecialReq.additionalNotes.trim()
+                    : "";
+
+                  if (selectedItems.length === 0 && !additionalNotes) return null;
+
+                  return (
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-white">Special Requirements</p>
+                      {selectedItems.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {selectedItems.map((item, index) => (
+                            <Badge key={index} variant="secondary" className="text-xs">
+                              {item}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {additionalNotes && (
+                        <p className="text-xs text-gray-600 dark:text-neutral-300 mt-2 whitespace-pre-wrap">
+                          {additionalNotes}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 
                 {/* Display patient flags */}
                 {patient.flags && patient.flags.length > 0 && (

@@ -1874,6 +1874,20 @@ Medical License: [License Number]
   };
 
   // Helper functions
+  const getPatientRecord = (patientId: number | string) => {
+    if (!patientsData || !Array.isArray(patientsData)) return null;
+    return (
+      patientsData.find((p: any) =>
+        p.id === patientId ||
+        p.id === Number(patientId) ||
+        String(p.id) === String(patientId) ||
+        p.userId === patientId ||
+        p.userId === Number(patientId) ||
+        String(p.userId) === String(patientId)
+      ) || null
+    );
+  };
+
   const getPatientName = (patientId: number | string) => {
     if (!patientsData || !Array.isArray(patientsData)) {
       console.warn(`[Calendar] patientsData not available, returning fallback for patientId: ${patientId}`);
@@ -1900,6 +1914,106 @@ Medical License: [License Number]
     console.warn(`[Calendar] Patient not found for patientId: ${patientId}, patientsData length: ${patientsData.length}`);
     // Return "Patient not found" when patient record is not available or deleted
     return "Patient not found";
+  };
+
+  const getPatientAllergiesLabel = (patientId: number | string): string | null => {
+    const patient = getPatientRecord(patientId);
+    if (!patient) return null;
+
+    const medicalHistoryAllergies = Array.isArray(patient.medicalHistory?.allergies)
+      ? patient.medicalHistory.allergies
+      : [];
+    const directAllergies = Array.isArray(patient.allergies) ? patient.allergies : [];
+
+    const normalized = [...medicalHistoryAllergies, ...directAllergies]
+      .map((item: any) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+
+    const uniqueAllergies = Array.from(new Set(normalized));
+    if (uniqueAllergies.length === 0) return null;
+    return uniqueAllergies.join(", ");
+  };
+
+  const getPatientSpecialRequirementsLabel = (patientId: number | string): string | null => {
+    const patient = getPatientRecord(patientId);
+    const specialRequirements = (patient?.medicalHistory as any)?.specialRequirements;
+    if (!specialRequirements || typeof specialRequirements !== "object") return null;
+    if (specialRequirements.hasSpecialRequirements !== "yes") return null;
+
+    const selected =
+      specialRequirements.selected && typeof specialRequirements.selected === "object"
+        ? specialRequirements.selected
+        : {};
+    const details =
+      specialRequirements.details && typeof specialRequirements.details === "object"
+        ? specialRequirements.details
+        : {};
+
+    const labels: Record<string, string> = {
+      mobility_wheelchair: "Wheelchair user",
+      mobility_walking_assistance: "Walking assistance",
+      mobility_bed_bound: "Bed-bound",
+      mobility_exam_table_help: "Help onto exam table",
+      mobility_other: "Mobility other",
+      sensory_hearing_impairment: "Hearing impairment",
+      sensory_sign_language: "Sign language interpreter",
+      sensory_visual_impairment: "Visual impairment",
+      sensory_large_print: "Large-print materials",
+      sensory_other: "Sensory other",
+      communication_language_barrier: "Language barrier",
+      communication_interpreter: "Translator/interpreter",
+      communication_difficulty_instructions: "Difficulty with instructions",
+      communication_other: "Communication other",
+      cognitive_dementia: "Dementia/memory issues",
+      cognitive_autism: "Autism spectrum",
+      cognitive_anxiety: "Anxiety/panic disorder",
+      cognitive_quiet_environment: "Needs quiet environment",
+      cognitive_other: "Cognitive other",
+      medical_diabetes: "Diabetes",
+      medical_heart_condition: "Heart condition",
+      medical_epilepsy: "Epilepsy/seizures",
+      medical_oxygen: "Requires oxygen",
+      medical_other: "Medical other",
+      alerts_drug_allergy: "Drug allergy",
+      alerts_latex_allergy: "Latex allergy",
+      alerts_skin_sensitivity: "Skin sensitivity",
+      alerts_cosmetic_allergy: "Cosmetic allergy",
+      alerts_other: "Medical alert other",
+      infection_condition: "Infectious condition",
+      infection_isolation: "Isolation precautions",
+      infection_other: "Infection control other",
+      aesthetic_sensitive_skin: "Sensitive skin",
+      aesthetic_reactions_history: "History of cosmetic reactions",
+      aesthetic_undergoing_treatments: "Undergoing cosmetic treatments",
+      aesthetic_scarring_concern: "Scarring/pigmentation concern",
+      aesthetic_keloid_tendency: "Keloid tendency",
+      aesthetic_acne_prone: "Acne-prone skin",
+      aesthetic_hyperpigmentation: "Hyperpigmentation/melasma",
+      aesthetic_minimal_marks: "Preference for minimal marks",
+      aesthetic_skincare_medications: "Using skincare meds",
+      aesthetic_recent_treatment: "Recent facial/body treatment",
+      aesthetic_other: "Aesthetic other",
+      personal_prefers_male_doctor: "Prefers male doctor",
+      personal_prefers_female_doctor: "Prefers female doctor",
+      personal_modesty_privacy: "Modesty/privacy concerns",
+      personal_religious_cultural: "Religious/cultural considerations",
+      personal_other: "Personal/cultural other",
+      assistance_caregiver: "Caregiver assistance",
+      assistance_priority: "Priority/urgent care",
+      assistance_other_special: "Other special assistance",
+      assistance_other: "Special assistance other",
+    };
+
+    const selectedItems = Object.entries(selected)
+      .filter(([, checked]) => !!checked)
+      .map(([key]) => {
+        const label = labels[key] || key;
+        const detail = details[key];
+        return detail ? `${label}: ${detail}` : label;
+      });
+
+    if (selectedItems.length === 0) return null;
+    return selectedItems.join(", ");
   };
 
   const selectedProvider = useMemo(() => {
@@ -2339,6 +2453,26 @@ Medical License: [License Number]
                             {appointment.duration || 30} minutes
                           </span>
                         </div>
+                        {user?.role === "admin" && (
+                          <div className="w-full mt-2 flex flex-wrap gap-2">
+                            {(() => {
+                              const allergies = getPatientAllergiesLabel(appointment.patientId);
+                              return allergies ? (
+                                <Badge className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200 whitespace-normal">
+                                  Allergies: {allergies}
+                                </Badge>
+                              ) : null;
+                            })()}
+                            {(() => {
+                              const specialRequirements = getPatientSpecialRequirementsLabel(appointment.patientId);
+                              return specialRequirements ? (
+                                <Badge className="text-[10px] px-2 py-0.5 bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200 whitespace-normal">
+                                  Special Requirements: {specialRequirements}
+                                </Badge>
+                              ) : null;
+                            })()}
+                          </div>
+                        )}
                         {user?.role === "admin" && (
                           <AppointmentCardInvoice
                             appointmentId={appointment.appointmentId ?? (appointment as any).appointment_id ?? null}

@@ -9,8 +9,7 @@ import { TenantContext } from "./use-tenant";
  * @returns Currency symbol, code, country name, and refresh function
  */
 export function useCurrency() {
-  // Log hook execution (this will fire on every render, but that's OK for debugging)
-  console.log('🎯 useCurrency: Hook function executing');
+  // Debug logging removed
   
   // Safely access tenant context - it may be undefined in SaaS portal
   const tenantContext = useContext(TenantContext);
@@ -642,21 +641,7 @@ export function useCurrency() {
   const countryName = eventCountryName || countryData?.country_name || "United Kingdom";
   
   // Debug logging to track currency source
-  if (refreshTrigger > 0 || currencyVersion > 0) {
-    console.log('💱 useCurrency calculated values:', {
-      currencySymbol,
-      currencyCode,
-      countryCode,
-      countryName,
-      source: {
-        currencyFromEvent: !!eventCurrency?.currencySymbol,
-        currencyFromTenant: !!tenant?.currency_symbol,
-        countryNameFromEvent: !!eventCountryName,
-        countryNameFromData: !!countryData?.country_name,
-        tenantContextAvailable: !!tenantContext
-      }
-    });
-  }
+  // Debug summary logging removed
 
   // Return currency values - use useMemo to ensure object reference changes when currency updates
   // This forces React to re-render components using this hook when currency updates

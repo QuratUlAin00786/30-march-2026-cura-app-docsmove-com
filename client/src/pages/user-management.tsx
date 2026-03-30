@@ -498,6 +498,7 @@ const userSchema = z.object({
     }
   ),
   role: z.string().min(1, "Role is required"),
+  professionalRegistrationId: z.string().optional(),
   department: z.string().optional(),
   medicalSpecialtyCategory: z.string().optional(),
   subSpecialty: z.string().optional(),
@@ -545,6 +546,14 @@ const userSchema = z.object({
     effectiveDate: z.string().optional(),
   }).optional(),
 }).superRefine((data, ctx) => {
+  if (data.role !== 'patient' && (!data.professionalRegistrationId || data.professionalRegistrationId.trim() === '')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Please enter Professional Registration ID",
+      path: ["professionalRegistrationId"],
+    });
+  }
+
   // Validate Patient-specific required fields
   if (data.role === 'patient') {
     // Phone Number validation - must be exactly 10 digits excluding country code
@@ -796,6 +805,7 @@ interface User {
   firstName: string;
   lastName: string;
   role: string;
+  professionalRegistrationId?: string;
   department?: string;
   medicalSpecialtyCategory?: string;
   subSpecialty?: string;
@@ -1245,7 +1255,7 @@ function SearchableSelect({
 
 export default function UserManagement() {
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const canManageRoles = user?.role === "admin";
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -1389,7 +1399,7 @@ export default function UserManagement() {
   const [roleDisplayNameError, setRoleDisplayNameError] = useState<string>("");
   
   // View type states
-  const [userViewType, setUserViewType] = useState<"list" | "grid">("list");
+  const [userViewType, setUserViewType] = useState<"list" | "table" | "grid">("list");
   const [roleViewType, setRoleViewType] = useState<"list" | "grid">("list");
   
   // Role filter state
@@ -1785,10 +1795,12 @@ export default function UserManagement() {
   console.log("Users query - loading:", isLoading, "error:", error, "users count:", users?.length);
   console.log("Auth token exists:", !!localStorage.getItem('auth_token'));
 
-  // Fetch users on mount
+  // Fetch users when auth context is ready (prevents empty initial load with unresolved tenant/user state).
   useEffect(() => {
-    fetchUsers();
-  }, []);
+    if (!authLoading && user) {
+      fetchUsers();
+    }
+  }, [authLoading, user?.id, user?.role]);
 
   // Explicit defaults for "Add New User" – used so form.reset(values) always clears to empty after Edit User
   const addNewUserDefaultValues: UserFormData = {
@@ -1796,6 +1808,7 @@ export default function UserManagement() {
     firstName: "",
     lastName: "",
     role: "doctor",
+    professionalRegistrationId: "",
     department: "",
     workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     workingHours: { start: "09:00", end: "17:00" },
@@ -2466,6 +2479,7 @@ export default function UserManagement() {
           firstName: updatedUserData.firstName,
           lastName: updatedUserData.lastName,
           role: updatedUserData.role as any,
+          professionalRegistrationId: updatedUserData.professionalRegistrationId || "",
           department: updatedUserData.department || "",
           workingDays: updatedUserData.workingDays || [],
           workingHours: updatedUserData.workingHours || { start: "09:00", end: "17:00" },
@@ -2948,6 +2962,7 @@ export default function UserManagement() {
     }
     
     userData.genderAtBirth = user.genderAtBirth || "";
+    userData.professionalRegistrationId = user.professionalRegistrationId || "";
 
     // SECTION 2B: Patient table data (if role === 'patient')
     if (user.role === 'patient') {
@@ -3277,6 +3292,15 @@ export default function UserManagement() {
                 data-testid="button-user-grid-view"
               >
                 <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={userViewType === "table" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setUserViewType("table")}
+                className="rounded-none"
+                data-testid="button-user-table-view"
+              >
+                <Users className="h-4 w-4" />
               </Button>
             </div>
             
@@ -4820,6 +4844,24 @@ export default function UserManagement() {
                   </>
                 )}
 
+                {selectedRole !== "patient" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="professionalRegistrationId">Professional Registration #</Label>
+                    <Input
+                      id="professionalRegistrationId"
+                      {...form.register("professionalRegistrationId")}
+                      placeholder="Enter Professional Registration ID"
+                      className={form.formState.errors.professionalRegistrationId ? "border-red-500" : ""}
+                      data-testid="input-professional-registration-id"
+                    />
+                    {form.formState.errors.professionalRegistrationId && (
+                      <p className="text-sm text-red-500">
+                        {form.formState.errors.professionalRegistrationId.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Department (Optional), Password in one row */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -5058,6 +5100,11 @@ export default function UserManagement() {
                                   return fullName.length > 20 ? fullName.slice(0, 20) + '...' : fullName;
                                 })()}
                               </h3>
+                              {user.professionalRegistrationId?.trim() && (
+                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  Professional_RegistrationID: {user.professionalRegistrationId}
+                                </p>
+                              )}
                               <p
                                 className="text-sm text-gray-500 dark:text-gray-400 truncate"
                                 title={user.email}
@@ -5194,6 +5241,96 @@ export default function UserManagement() {
                   </div>
                 ))}
               </div>
+            ) : userViewType === "table" ? (
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr className="text-left text-gray-600 dark:text-gray-300">
+                      <th className="px-4 py-3 font-medium">Full Name</th>
+                      <th className="px-4 py-3 font-medium">Role</th>
+                      <th className="px-4 py-3 font-medium">Professional_RegistrationID</th>
+                      <th className="px-4 py-3 font-medium">Email</th>
+                      <th className="px-4 py-3 font-medium">Department</th>
+                      <th className="px-4 py-3 font-medium">Status</th>
+                      <th className="px-4 py-3 font-medium text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedFilteredUsers.map((user) => (
+                      <tr
+                        key={`user-table-${user.id}-${user.email}`}
+                        className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900"
+                        data-testid={`user-table-row-${user.id}`}
+                      >
+                        <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+                          {user.firstName || "N/A"} {user.lastName || "N/A"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className={getRoleColor(user.role)}>
+                            {getRoleDisplayName(user.role)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                          {user.professionalRegistrationId?.trim() || "-"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{user.email}</td>
+                        <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                          {user.department?.trim() || "-"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={user.isActive ? "default" : "secondary"}>
+                            {user.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEdit(user)}
+                              title="Edit User"
+                              data-testid={`button-edit-user-table-${user.id}`}
+                              className="flex items-center gap-1"
+                            >
+                              <Edit className="h-4 w-4" />
+                              <span>Edit User</span>
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-600 hover:text-red-700"
+                                  data-testid={`button-delete-user-table-${user.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete User</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Do you want to delete {user.firstName} {user.lastName} ({getRoleDisplayName(user.role)})?
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>No, Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => handleDelete(user.id)}
+                                    className="bg-red-600 hover:bg-red-700"
+                                  >
+                                    Yes, Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sortedFilteredUsers.map((user) => (
@@ -5208,6 +5345,11 @@ export default function UserManagement() {
                             <h3 className="font-medium text-gray-900 dark:text-gray-100">
                               {user.firstName || 'N/A'} {user.lastName || 'N/A'}
                             </h3>
+                            {user.professionalRegistrationId?.trim() && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Professional_RegistrationID: {user.professionalRegistrationId}
+                              </p>
+                            )}
                             <Badge className={getRoleColor(user.role)}>
                               {getRoleDisplayName(user.role)}
                             </Badge>

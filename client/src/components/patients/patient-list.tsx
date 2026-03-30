@@ -2270,7 +2270,7 @@ function PatientDetailsModal({
 export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "grid", canEditPatient = true, canDeletePatient = true }: PatientListProps = {}) {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { tenant } = useTenant();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
@@ -2545,11 +2545,12 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
   };
 
   const {
-    data: patients,
+    data: patients = [],
     isLoading,
     error,
   } = useQuery({
     queryKey: ["/api/patients", user?.id, user?.role],
+    enabled: !authLoading,
     staleTime: 0,
     gcTime: 0,
     queryFn: async () => {
@@ -2600,7 +2601,7 @@ export function PatientList({ onSelectPatient, genderFilter = null, viewMode = "
         }
         
         console.log("NOT filtering - returning all patients");
-        return data;
+        return Array.isArray(data) ? data : [];
       } catch (err) {
         console.error("Error in patients queryFn:", err);
         throw err;

@@ -108,6 +108,7 @@ import {
   ChevronsUpDown,
   Trash2,
   Share2,
+  LogOut,
 } from "lucide-react";
 
 interface FormFieldSummary {
@@ -868,7 +869,7 @@ function ViewClinicInfo({ user, onLoadHeader, onLoadFooter }: { user: any; onLoa
 
 export default function Forms() {
   const { currencySymbol } = useCurrency();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [documentContent, setDocumentContent] = useState("");
@@ -6366,6 +6367,19 @@ Coverage Details: [Insurance Coverage]`;
           <div className="flex items-center">
             <NotificationBell />
           </div>
+          {/* Sign out placed immediately after Notification button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              try { logout(); } catch {}
+              window.location.href = "/auth/login";
+            }}
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Sign out</span>
+          </Button>
         </div>
       </div>
 

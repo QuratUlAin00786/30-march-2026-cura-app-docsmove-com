@@ -652,11 +652,166 @@ export default function PatientFamilyHistory({
   const [showAllergyDeleteSuccessModal, setShowAllergyDeleteSuccessModal] = useState(false);
   const [showMedicalHistoryUpdateSuccessModal, setShowMedicalHistoryUpdateSuccessModal] = useState(false);
   const [showChronicConditionDeleteSuccessModal, setShowChronicConditionDeleteSuccessModal] = useState(false);
+  const specialRequirementGroups = [
+    {
+      title: "Mobility & Physical Assistance",
+      options: [
+        { key: "mobility_wheelchair", label: "Wheelchair user" },
+        { key: "mobility_walking_assistance", label: "Needs walking assistance" },
+        { key: "mobility_bed_bound", label: "Bed-bound" },
+        { key: "mobility_exam_table_help", label: "Requires help getting onto exam table" },
+        { key: "mobility_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Sensory Support",
+      options: [
+        { key: "sensory_hearing_impairment", label: "Hearing impairment" },
+        { key: "sensory_sign_language", label: "Requires sign language interpreter" },
+        { key: "sensory_visual_impairment", label: "Visual impairment" },
+        { key: "sensory_large_print", label: "Needs large-print materials" },
+        { key: "sensory_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Communication Needs",
+      options: [
+        { key: "communication_language_barrier", label: "Language barrier (Specify)", hasInput: true },
+        { key: "communication_interpreter", label: "Needs translator/interpreter" },
+        { key: "communication_difficulty_instructions", label: "Difficulty understanding instructions" },
+        { key: "communication_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Cognitive / Behavioral",
+      options: [
+        { key: "cognitive_dementia", label: "Dementia / memory issues" },
+        { key: "cognitive_autism", label: "Autism spectrum" },
+        { key: "cognitive_anxiety", label: "Anxiety / panic disorder" },
+        { key: "cognitive_quiet_environment", label: "Needs calm or quiet environment" },
+        { key: "cognitive_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Medical Conditions Requiring Attention",
+      options: [
+        { key: "medical_diabetes", label: "Diabetes" },
+        { key: "medical_heart_condition", label: "Heart condition" },
+        { key: "medical_epilepsy", label: "Epilepsy / seizures" },
+        { key: "medical_oxygen", label: "Requires oxygen" },
+        { key: "medical_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Allergies / Medical Alerts",
+      options: [
+        { key: "alerts_drug_allergy", label: "Drug allergy (Specify)", hasInput: true },
+        { key: "alerts_latex_allergy", label: "Latex allergy" },
+        { key: "alerts_skin_sensitivity", label: "Skin sensitivity" },
+        { key: "alerts_cosmetic_allergy", label: "Cosmetic product allergy" },
+        { key: "alerts_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Infection Control",
+      options: [
+        { key: "infection_condition", label: "Infectious condition (Specify)", hasInput: true },
+        { key: "infection_isolation", label: "Requires isolation precautions" },
+        { key: "infection_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Aesthetic / Cosmetic Considerations",
+      options: [
+        { key: "aesthetic_sensitive_skin", label: "Sensitive skin" },
+        { key: "aesthetic_reactions_history", label: "History of cosmetic reactions (peels, lasers, etc.)" },
+        { key: "aesthetic_undergoing_treatments", label: "Undergoing cosmetic treatments (e.g., Botox, fillers)" },
+        { key: "aesthetic_scarring_concern", label: "Concern about scarring or pigmentation" },
+        { key: "aesthetic_keloid_tendency", label: "Keloid tendency (raised scars)" },
+        { key: "aesthetic_acne_prone", label: "Acne-prone skin" },
+        { key: "aesthetic_hyperpigmentation", label: "Hyperpigmentation / melasma" },
+        { key: "aesthetic_minimal_marks", label: "Preference for minimal marks or no visible scars" },
+        { key: "aesthetic_skincare_medications", label: "Using skincare medications (retinoids, steroids, etc.)" },
+        { key: "aesthetic_recent_treatment", label: "Recent facial/body treatment (peel, laser, waxing, etc.)" },
+        { key: "aesthetic_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Personal / Cultural Preferences",
+      options: [
+        { key: "personal_prefers_male_doctor", label: "Prefers male doctor" },
+        { key: "personal_prefers_female_doctor", label: "Prefers female doctor" },
+        { key: "personal_modesty_privacy", label: "Modesty/privacy concerns" },
+        { key: "personal_religious_cultural", label: "Religious/cultural considerations", hasInput: true },
+        { key: "personal_other", label: "Other", hasInput: true },
+      ],
+    },
+    {
+      title: "Special Assistance",
+      options: [
+        { key: "assistance_caregiver", label: "Requires caregiver assistance" },
+        { key: "assistance_priority", label: "Needs priority/urgent care" },
+        { key: "assistance_other_special", label: "Other special assistance", hasInput: true },
+        { key: "assistance_other", label: "Other", hasInput: true },
+      ],
+    },
+  ] as const;
+
+  const createDefaultSpecialRequirements = () => ({
+    hasSpecialRequirements: "" as "" | "yes" | "no",
+    selected: {} as Record<string, boolean>,
+    details: {} as Record<string, string>,
+    additionalNotes: "",
+    aestheticNotes: {
+      skinType: "",
+      allergyTestDone: "" as "" | "yes" | "no",
+      specialPrecautions: "",
+    },
+  });
+
+  const parseSpecialRequirements = (raw: any) => {
+    const defaults = createDefaultSpecialRequirements();
+    if (!raw || typeof raw !== "object") return defaults;
+    return {
+      hasSpecialRequirements:
+        raw.hasSpecialRequirements === "yes" || raw.hasSpecialRequirements === "no"
+          ? raw.hasSpecialRequirements
+          : defaults.hasSpecialRequirements,
+      selected:
+        raw.selected && typeof raw.selected === "object" ? raw.selected : defaults.selected,
+      details:
+        raw.details && typeof raw.details === "object" ? raw.details : defaults.details,
+      additionalNotes:
+        typeof raw.additionalNotes === "string" ? raw.additionalNotes : defaults.additionalNotes,
+      aestheticNotes: {
+        skinType:
+          typeof raw.aestheticNotes?.skinType === "string"
+            ? raw.aestheticNotes.skinType
+            : "",
+        allergyTestDone:
+          raw.aestheticNotes?.allergyTestDone === "yes" ||
+          raw.aestheticNotes?.allergyTestDone === "no"
+            ? raw.aestheticNotes.allergyTestDone
+            : "",
+        specialPrecautions:
+          typeof raw.aestheticNotes?.specialPrecautions === "string"
+            ? raw.aestheticNotes.specialPrecautions
+            : "",
+      },
+    };
+  };
+
+  const [specialRequirementsForm, setSpecialRequirementsForm] = useState(() =>
+    parseSpecialRequirements((patient.medicalHistory as any)?.specialRequirements),
+  );
 
   // Ensure Family History tab is selected when dialog opens
   useEffect(() => {
     if (isEditing) {
       setActiveTab("family");
+      setSpecialRequirementsForm(
+        parseSpecialRequirements((patient.medicalHistory as any)?.specialRequirements),
+      );
     }
   }, [isEditing]);
 
@@ -1007,6 +1162,8 @@ export default function PatientFamilyHistory({
       familyHistory: normalizeFamilyHistory(patient.medicalHistory?.familyHistory),
       socialHistory: patient.medicalHistory?.socialHistory || {},
       immunizations: patient.medicalHistory?.immunizations || [],
+      specialRequirements: specialRequirementsForm,
+      specialRequirementsNotes: specialRequirementsForm.additionalNotes || "",
     });
     setIsEditing(false);
   };
@@ -1309,12 +1466,15 @@ export default function PatientFamilyHistory({
                 onValueChange={setActiveTab}
                 className="w-full flex-1 flex flex-col overflow-hidden"
               >
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-5">
                   <TabsTrigger value="family">Family History</TabsTrigger>
                   <TabsTrigger value="social">Social History</TabsTrigger>
                   <TabsTrigger value="immunizations">Immunizations</TabsTrigger>
                   <TabsTrigger value="allergies">
                     Allergies & Conditions
+                  </TabsTrigger>
+                  <TabsTrigger value="special-requirements">
+                    Special Requirements
                   </TabsTrigger>
                 </TabsList>
 
@@ -2150,53 +2310,6 @@ export default function PatientFamilyHistory({
                         <AlertTriangle className="h-4 w-4 text-red-500" />
                         Known Allergies
                       </h4>
-                      <div className="space-y-2 mb-4">
-                        {(() => {
-                          // Combine allergies from medicalHistory and extract from flags
-                          const medicalAllergies =
-                            patient.medicalHistory?.allergies || [];
-                          const flagAllergies = patient.flags
-                            ? patient.flags
-                                .filter(
-                                  (flag) =>
-                                    typeof flag === "string" &&
-                                    flag.includes(":"),
-                                )
-                                .map((flag) => flag.split(":")[2]) // Extract the allergy text after "general:medium:"
-                                .filter(
-                                  (allergy) =>
-                                    allergy && allergy.trim().length > 0,
-                                )
-                            : [];
-
-                          const allAllergies = [
-                            ...medicalAllergies,
-                            ...flagAllergies,
-                          ];
-
-                          return allAllergies.length > 0 ? (
-                            allAllergies.map((allergy, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between p-2 bg-red-50 rounded"
-                              >
-                                <span className="text-red-800">{allergy}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => removeAllergy(index)}
-                                >
-                                  <Trash2 className="h-4 w-4 text-red-600" />
-                                </Button>
-                              </div>
-                            ))
-                          ) : (
-                            <p className="text-sm text-gray-500">
-                              No known allergies
-                            </p>
-                          );
-                        })()}
-                      </div>
                       <div>
                         <div className="space-y-2">
                           <div className="flex gap-2">
@@ -2288,40 +2401,59 @@ export default function PatientFamilyHistory({
                           </p>
                         )}
                       </div>
+                      <div className="space-y-2 mt-4 h-[250px] overflow-y-auto pr-1">
+                        {(() => {
+                          // Combine allergies from medicalHistory and extract from flags
+                          const medicalAllergies =
+                            patient.medicalHistory?.allergies || [];
+                          const flagAllergies = patient.flags
+                            ? patient.flags
+                                .filter(
+                                  (flag) =>
+                                    typeof flag === "string" &&
+                                    flag.includes(":"),
+                                )
+                                .map((flag) => flag.split(":")[2]) // Extract the allergy text after "general:medium:"
+                                .filter(
+                                  (allergy) =>
+                                    allergy && allergy.trim().length > 0,
+                                )
+                            : [];
+
+                          const allAllergies = [
+                            ...medicalAllergies,
+                            ...flagAllergies,
+                          ];
+
+                          return allAllergies.length > 0 ? (
+                            allAllergies.map((allergy, index) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between p-2 bg-red-50 rounded"
+                              >
+                                <span className="text-red-800">{allergy}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeAllergy(index)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                </Button>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-gray-500">
+                              No known allergies
+                            </p>
+                          );
+                        })()}
+                      </div>
                     </div>
                     <div>
                       <h4 className="font-medium mb-3 flex items-center gap-2">
                         <Activity className="h-4 w-4 text-blue-500" />
                         Chronic Conditions
                       </h4>
-                      <div className="space-y-2 mb-4">
-                        {patient.medicalHistory?.chronicConditions &&
-                        patient.medicalHistory.chronicConditions.length > 0 ? (
-                          patient.medicalHistory.chronicConditions.map(
-                            (condition, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between p-2 bg-blue-50 rounded"
-                              >
-                                <span className="text-blue-800">
-                                  {condition}
-                                </span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => removeChronicCondition(index)}
-                                >
-                                  <Trash2 className="h-4 w-4 text-blue-600" />
-                                </Button>
-                              </div>
-                            ),
-                          )
-                        ) : (
-                          <p className="text-sm text-gray-500">
-                            No chronic conditions
-                          </p>
-                        )}
-                      </div>
                       <div>
                         <div className="space-y-2">
                           <div className="flex gap-2">
@@ -2413,7 +2545,220 @@ export default function PatientFamilyHistory({
                           </p>
                         )}
                       </div>
+                      <div className="space-y-2 mt-4 h-[250px] overflow-y-auto pr-1">
+                        {patient.medicalHistory?.chronicConditions &&
+                        patient.medicalHistory.chronicConditions.length > 0 ? (
+                          patient.medicalHistory.chronicConditions.map(
+                            (condition, index) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between p-2 bg-blue-50 rounded"
+                              >
+                                <span className="text-blue-800">
+                                  {condition}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeChronicCondition(index)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-blue-600" />
+                                </Button>
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <p className="text-sm text-gray-500">
+                            No chronic conditions
+                          </p>
+                        )}
+                      </div>
                     </div>
+                  </div>
+                </TabsContent>
+                <TabsContent
+                  value="special-requirements"
+                  className="space-y-4 overflow-y-auto flex-1"
+                >
+                  <div className="border rounded-lg p-4 space-y-5">
+                    <h4 className="font-medium">Special Requirements</h4>
+
+                    <div className="space-y-2">
+                      <Label>1. Does the patient have any special requirements?</Label>
+                      <div className="flex items-center gap-6">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name="hasSpecialRequirements"
+                            checked={specialRequirementsForm.hasSpecialRequirements === "no"}
+                            onChange={() =>
+                              setSpecialRequirementsForm((prev: any) => ({
+                                ...prev,
+                                hasSpecialRequirements: "no",
+                              }))
+                            }
+                          />
+                          No
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name="hasSpecialRequirements"
+                            checked={specialRequirementsForm.hasSpecialRequirements === "yes"}
+                            onChange={() =>
+                              setSpecialRequirementsForm((prev: any) => ({
+                                ...prev,
+                                hasSpecialRequirements: "yes",
+                              }))
+                            }
+                          />
+                          Yes
+                        </label>
+                      </div>
+                    </div>
+
+                    {specialRequirementsForm.hasSpecialRequirements === "yes" && (
+                      <>
+                        <div className="space-y-4">
+                          <Label>2. Type of Special Requirement (Check all that apply)</Label>
+                          {specialRequirementGroups.map((group) => (
+                            <div key={group.title} className="border rounded-md p-3 space-y-2">
+                              <p className="text-sm font-semibold">{group.title}</p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {group.options.map((opt) => (
+                                  <div key={opt.key} className="space-y-1">
+                                    <label className="flex items-center gap-2 text-sm">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!specialRequirementsForm.selected?.[opt.key]}
+                                        onChange={(e) =>
+                                          setSpecialRequirementsForm((prev: any) => ({
+                                            ...prev,
+                                            selected: {
+                                              ...(prev.selected || {}),
+                                              [opt.key]: e.target.checked,
+                                            },
+                                          }))
+                                        }
+                                      />
+                                      {opt.label}
+                                    </label>
+                                    {opt.hasInput && (
+                                      <Input
+                                        value={specialRequirementsForm.details?.[opt.key] || ""}
+                                        onChange={(e) =>
+                                          setSpecialRequirementsForm((prev: any) => ({
+                                            ...prev,
+                                            details: {
+                                              ...(prev.details || {}),
+                                              [opt.key]: e.target.value,
+                                            },
+                                          }))
+                                        }
+                                        placeholder="Specify..."
+                                        className="h-8"
+                                      />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>3. Additional Notes</Label>
+                          <Textarea
+                            value={specialRequirementsForm.additionalNotes || ""}
+                            onChange={(e) =>
+                              setSpecialRequirementsForm((prev: any) => ({
+                                ...prev,
+                                additionalNotes: e.target.value,
+                              }))
+                            }
+                            rows={3}
+                            placeholder="Add additional notes..."
+                          />
+                        </div>
+
+                        <div className="space-y-3 border rounded-md p-3">
+                          <Label>4. Aesthetic Treatment Notes (For Staff)</Label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <Label>Skin type</Label>
+                              <Input
+                                value={specialRequirementsForm.aestheticNotes?.skinType || ""}
+                                onChange={(e) =>
+                                  setSpecialRequirementsForm((prev: any) => ({
+                                    ...prev,
+                                    aestheticNotes: {
+                                      ...(prev.aestheticNotes || {}),
+                                      skinType: e.target.value,
+                                    },
+                                  }))
+                                }
+                                placeholder="Skin type"
+                              />
+                            </div>
+                            <div>
+                              <Label>Allergy test done</Label>
+                              <div className="flex items-center gap-6 mt-2">
+                                <label className="flex items-center gap-2 text-sm">
+                                  <input
+                                    type="radio"
+                                    name="allergyTestDone"
+                                    checked={specialRequirementsForm.aestheticNotes?.allergyTestDone === "yes"}
+                                    onChange={() =>
+                                      setSpecialRequirementsForm((prev: any) => ({
+                                        ...prev,
+                                        aestheticNotes: {
+                                          ...(prev.aestheticNotes || {}),
+                                          allergyTestDone: "yes",
+                                        },
+                                      }))
+                                    }
+                                  />
+                                  Yes
+                                </label>
+                                <label className="flex items-center gap-2 text-sm">
+                                  <input
+                                    type="radio"
+                                    name="allergyTestDone"
+                                    checked={specialRequirementsForm.aestheticNotes?.allergyTestDone === "no"}
+                                    onChange={() =>
+                                      setSpecialRequirementsForm((prev: any) => ({
+                                        ...prev,
+                                        aestheticNotes: {
+                                          ...(prev.aestheticNotes || {}),
+                                          allergyTestDone: "no",
+                                        },
+                                      }))
+                                    }
+                                  />
+                                  No
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <Label>Special precautions</Label>
+                            <Input
+                              value={specialRequirementsForm.aestheticNotes?.specialPrecautions || ""}
+                              onChange={(e) =>
+                                setSpecialRequirementsForm((prev: any) => ({
+                                  ...prev,
+                                  aestheticNotes: {
+                                    ...(prev.aestheticNotes || {}),
+                                    specialPrecautions: e.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Special precautions"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </TabsContent>
           </Tabs>

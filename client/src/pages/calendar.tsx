@@ -669,6 +669,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
   // Confirmation modal states for patient users
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   const [pendingAppointmentData, setPendingAppointmentData] = useState<any>(null);
+  const [isConfirmingAppointment, setIsConfirmingAppointment] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showInsufficientTimeModal, setShowInsufficientTimeModal] = useState(false);
   const [insufficientTimeMessage, setInsufficientTimeMessage] = useState("");
@@ -2286,9 +2287,11 @@ const getAppointmentTypeLabel = (appointment: any): string => {
       setSelectedMedicalSpecialty("");
       setPendingAppointmentData(null);
       setShowConfirmationModal(false);
+      setIsConfirmingAppointment(false);
     },
     onError: (error: any) => {
       console.error("Doctor appointment error:", error);
+      setIsConfirmingAppointment(false);
       toast({
         title: "Booking Failed",
         description: "Failed to create appointment. Please try again.",
@@ -2711,13 +2714,16 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     <div className="flex-1 min-w-[150px]">
                       <Label>Select Role</Label>
                       <Select value={filterRole} onValueChange={(value) => {
-                        setFilterRole(value);
+                        setFilterRole(value === 'all' ? '' : value);
                         setFilterProvider(""); // Reset provider when role changes
                       }}>
                         <SelectTrigger data-testid="select-filter-role">
                           <SelectValue placeholder="Select role..." />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem key="all-roles" value="all">
+                            All
+                          </SelectItem>
                           {availableRoles.map((role) => (
                             <SelectItem key={role.name} value={role.name}>
                               {role.displayName}
@@ -2728,14 +2734,17 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     </div>
 
                     {/* Provider (Admin Only) - Only show when a role is selected */}
-                    {filterRole && (
+                    {filterRole !== undefined && (
                       <div className="flex-1 min-w-[150px]">
                         <Label>Provider</Label>
-                        <Select value={filterProvider} onValueChange={setFilterProvider}>
+                        <Select value={filterProvider} onValueChange={(value) => setFilterProvider(value === 'all' ? '' : value)}>
                           <SelectTrigger data-testid="select-filter-provider">
                             <SelectValue placeholder="Select provider..." />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem key="all-providers" value="all">
+                              All
+                            </SelectItem>
                             {filteredUsersByFilterRole.map((user: any) => (
                               <SelectItem key={user.id} value={user.id.toString()}>
                                 {user.firstName} {user.lastName}
@@ -2749,33 +2758,43 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     {/* Date */}
                     <div className="flex-1 min-w-[150px]">
                       <Label>Date</Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className="w-full justify-start text-left font-normal"
-                            data-testid="button-filter-date"
-                          >
-                            <Calendar className="mr-2 h-4 w-4" />
-                            {filterDate ? format(filterDate, "PPP") : "Select date"}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <CalendarComponent
-                            mode="single"
-                            selected={filterDate}
-                            onSelect={setFilterDate}
-                            disabled={(date) => {
-                              // Disable past dates
-                              if (isBefore(date, startOfDay(new Date()))) return true;
-                              // Disable dates beyond 3 months
-                              if (isAfter(date, addMonths(new Date(), 3))) return true;
-                              return false;
-                            }}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
+                      <div className="flex items-center gap-2">
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className="w-full justify-start text-left font-normal"
+                              data-testid="button-filter-date"
+                            >
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {filterDate ? format(filterDate, "PPP") : "All dates"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <CalendarComponent
+                              mode="single"
+                              selected={filterDate}
+                              onSelect={setFilterDate}
+                              disabled={(date) => {
+                                // Disable past dates
+                                if (isBefore(date, startOfDay(new Date()))) return true;
+                                // Disable dates beyond 3 months
+                                if (isAfter(date, addMonths(new Date(), 3))) return true;
+                                return false;
+                              }}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setFilterDate(undefined)}
+                          title="Clear date"
+                        >
+                          Clear
+                        </Button>
+                      </div>
                     </div>
 
                     {/* Appointment ID (Admin Only) */}
@@ -2848,14 +2867,17 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     <div className="pt-4">
                       <Label>Medical Specialty Category</Label>
                       <Select value={filterSpecialty} onValueChange={(value) => {
-                        setFilterSpecialty(value);
+                        setFilterSpecialty(value === 'all' ? '' : value);
                         setFilterSubSpecialty(""); // Reset sub-specialty when specialty changes
                         setFilterDoctor(""); // Reset doctor when specialty changes
                       }}>
                         <SelectTrigger data-testid="select-filter-specialty">
-                          <SelectValue placeholder="Select category..." />
+                          <SelectValue placeholder="All" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem key="all-specialties" value="all">
+                            All
+                          </SelectItem>
                           {getUniqueSpecialties().map((specialty) => (
                             <SelectItem key={specialty} value={specialty}>
                               {specialty}
@@ -2869,13 +2891,16 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     <div>
                       <Label>Sub-Specialty</Label>
                       <Select value={filterSubSpecialty} onValueChange={(value) => {
-                        setFilterSubSpecialty(value);
+                        setFilterSubSpecialty(value === 'all' ? '' : value);
                         setFilterDoctor(""); // Reset doctor when sub-specialty changes
                       }}>
                         <SelectTrigger data-testid="select-filter-subspecialty">
-                          <SelectValue placeholder="Select sub-specialty..." />
+                          <SelectValue placeholder="All" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem key="all-subspecialties" value="all">
+                            All
+                          </SelectItem>
                           {getSubSpecialties(filterSpecialty).map((subSpecialty) => (
                             <SelectItem key={subSpecialty} value={subSpecialty}>
                               {subSpecialty}
@@ -2888,11 +2913,14 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     {/* Doctor (Non-Admin) */}
                     <div>
                       <Label>Doctor</Label>
-                      <Select value={filterDoctor} onValueChange={setFilterDoctor}>
+                      <Select value={filterDoctor} onValueChange={(value) => setFilterDoctor(value === 'all' ? '' : value)}>
                         <SelectTrigger data-testid="select-filter-doctor">
-                          <SelectValue placeholder="Select doctor..." />
+                          <SelectValue placeholder="All" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem key="all-doctors" value="all">
+                            All
+                          </SelectItem>
                           {filteredDoctorsBySpecialty.map((doctor: any) => (
                             <SelectItem key={doctor.id} value={doctor.id.toString()}>
                               Dr. {doctor.firstName} {doctor.lastName} - {doctor.specialization}
@@ -2905,33 +2933,43 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     {/* Date (Non-Admin) */}
                     <div>
                       <Label>Date</Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className="w-full justify-start text-left font-normal"
-                            data-testid="button-filter-date"
-                          >
-                            <Calendar className="mr-2 h-4 w-4" />
-                            {filterDate ? format(filterDate, "PPP") : "Select date"}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <CalendarComponent
-                            mode="single"
-                            selected={filterDate}
-                            onSelect={setFilterDate}
-                            disabled={(date) => {
-                              // Disable past dates
-                              if (isBefore(date, startOfDay(new Date()))) return true;
-                              // Disable dates beyond 3 months
-                              if (isAfter(date, addMonths(new Date(), 3))) return true;
-                              return false;
-                            }}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
+                      <div className="flex items-center gap-2">
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className="w-full justify-start text-left font-normal"
+                              data-testid="button-filter-date"
+                            >
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {filterDate ? format(filterDate, "PPP") : "All dates"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <CalendarComponent
+                              mode="single"
+                              selected={filterDate}
+                              onSelect={setFilterDate}
+                              disabled={(date) => {
+                                // Disable past dates
+                                if (isBefore(date, startOfDay(new Date()))) return true;
+                                // Disable dates beyond 3 months
+                                if (isAfter(date, addMonths(new Date(), 3))) return true;
+                                return false;
+                              }}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setFilterDate(undefined)}
+                          title="Clear date"
+                        >
+                          Clear
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -5666,8 +5704,11 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                 <div className="flex justify-end gap-3">
                   <Button
                     variant="outline"
+                    disabled={isConfirmingAppointment || createDoctorAppointmentMutation.isPending}
                     onClick={() => {
+                      if (isConfirmingAppointment || createDoctorAppointmentMutation.isPending) return;
                       setShowConfirmationModal(false);
+                      setIsConfirmingAppointment(false);
                       setPendingAppointmentData(null);
                       setSelectedDoctor(null); // Clear selected doctor
                       setDoctorAppointmentType("");
@@ -5683,11 +5724,16 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     Go Back
                   </Button>
                   <Button
+                    disabled={isConfirmingAppointment || createDoctorAppointmentMutation.isPending}
                     onClick={() => {
+                      if (isConfirmingAppointment || createDoctorAppointmentMutation.isPending) return;
+                      setIsConfirmingAppointment(true);
                       if (isDoctorLike(user?.role)) {
                         if (pendingAppointmentData) {
                           setShowConfirmationModal(false);
                           createDoctorAppointmentMutation.mutate(pendingAppointmentData);
+                        } else {
+                          setIsConfirmingAppointment(false);
                         }
                         return;
                       }
@@ -5700,11 +5746,14 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                       setShowConfirmationModal(false);
                       setShowInvoiceModal(true);
                       setShowInvoiceSummary(false);
+                      setIsConfirmingAppointment(false);
                     }}
                     data-testid="button-confirm-appointment"
                   >
                     <Check className="h-4 w-4 mr-2" />
-                    {isDoctorLike(user?.role) ? "Confirm Booking" : "Confirm Appointment"}
+                    {isConfirmingAppointment || createDoctorAppointmentMutation.isPending
+                      ? "Confirming..."
+                      : (isDoctorLike(user?.role) ? "Confirm Booking" : "Confirm Appointment")}
                   </Button>
                 </div>
               </div>

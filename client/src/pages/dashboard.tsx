@@ -7,12 +7,13 @@ import { NotificationBell } from "@/components/layout/notification-bell";
 import { useTenant } from "@/hooks/use-tenant";
 import { useCurrency } from "@/hooks/use-currency";
 import { useQuery } from "@tanstack/react-query";
-import { Globe } from "lucide-react";
+import { Globe, LogOut } from "lucide-react";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { AccessRestricted } from "@/components/access-restricted";
 import { getFirstAccessiblePage } from "@/lib/get-first-accessible-page";
+import { Button } from "@/components/ui/button";
 
 // Currency and Country Display Component
 // Automatically updates when currency changes in organizations table
@@ -43,7 +44,7 @@ function CurrencyCountryDisplay() {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { canView, isLoading: permissionsLoading } = useRolePermissions();
   const { tenant } = useTenant();
   const [, setLocation] = useLocation();
@@ -228,6 +229,7 @@ export default function Dashboard() {
           hideNotificationBell={true}
           hideAiStatus={true}
           hideRegionalSettings={true}
+          hideSignOut={true}
         />
 
         <div className="flex items-center gap-2">
@@ -253,6 +255,20 @@ export default function Dashboard() {
           <NotificationBell />
           <span className="text-sm text-neutral-600 dark:text-neutral-400">Theme:</span>
           <ThemeToggle />
+
+          {/* Sign out button (replacement) */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              try { logout(); } catch {}
+              window.location.href = "/auth/login";
+            }}
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Sign out</span>
+          </Button>
         </div>
       </div>
 
