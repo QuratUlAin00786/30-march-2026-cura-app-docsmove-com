@@ -249,6 +249,7 @@ import {
   Save,
   Loader2,
   MoreVertical,
+  Share2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -831,11 +832,12 @@ export default function LabResultsPage() {
   const [selectedSubSpecialty, setSelectedSubSpecialty] = useState<string>("");
   const [selectedSpecificArea, setSelectedSpecificArea] = useState<string>("");
   const [shareFormData, setShareFormData] = useState({
-    method: "",
+    method: "email",
     email: "",
     whatsapp: "",
     message: "",
   });
+  const [isSendingShare, setIsSendingShare] = useState(false);
   const [orderFormData, setOrderFormData] = useState({
     patientId: "",
     patientName: "",
@@ -1688,7 +1690,15 @@ Report generated from Cura EMR System`;
 
   const handleShareResult = (result: DatabaseLabResult) => {
     setSelectedResult(result);
-    setShowReviewDialog(true);
+    const patient = Array.isArray(patients) ? patients.find((p: any) => p?.id === result.patientId) : null;
+    const patientEmail = (patient as any)?.email || "";
+    setShareFormData({
+      method: "email",
+      email: patientEmail,
+      whatsapp: "",
+      message: `Lab test result for ${result.testType} is now available for review.`,
+    });
+    setShowShareDialog(true);
   };
 
   const handleGeneratePrescription = (result: DatabaseLabResult) => {
@@ -4139,6 +4149,15 @@ Report generated from Cura EMR System`;
                                             <Download className="w-3.5 h-3.5 mr-2 shrink-0" />
                                             Download
                                           </DropdownMenuItem>
+                                          {user?.role !== 'patient' && (
+                                            <DropdownMenuItem
+                                              onClick={() => handleShareResult(result)}
+                                              data-testid={`button-share-${result.id}`}
+                                            >
+                                              <Share2 className="w-3.5 h-3.5 mr-2 shrink-0" />
+                                              Share
+                                            </DropdownMenuItem>
+                                          )}
                                           {user?.role !== 'patient' && canDelete('lab_results') && (
                                             <DropdownMenuItem
                                               onClick={() => handleDeleteResult(result.id)}
@@ -6220,11 +6239,12 @@ Report generated from Cura EMR System`;
                 <div className="flex gap-2">
                   <Button
                     onClick={() => {
+                      const pt = Array.isArray(patients) ? patients.find((p: any) => p?.id === selectedResult.patientId) : null;
                       setShowReviewDialog(false);
                       setShowShareDialog(true);
                       setShareFormData({
-                        method: "",
-                        email: "",
+                        method: "email",
+                        email: (pt as any)?.email || "",
                         whatsapp: "",
                         message: `Lab results for ${selectedResult.testType} are now available for review.`,
                       });
@@ -6362,40 +6382,58 @@ Report generated from Cura EMR System`;
                 <Button
                   variant="outline"
                   onClick={() => setShowShareDialog(false)}
+                  disabled={isSendingShare}
+                  size="sm"
+                  className="text-xs"
                 >
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => {
-                    const method =
-                      shareFormData.method === "email" ? "email" : "WhatsApp";
-                    const contact =
-                      shareFormData.method === "email"
-                        ? shareFormData.email
-                        : shareFormData.whatsapp;
-
-                    toast({
-                      title: "Results Shared",
-                      description: `Lab results sent to ${getPatientName(selectedResult.patientId)} via ${method} (${contact})`,
-                    });
-                    setShowShareDialog(false);
-                    setShareFormData({
-                      method: "",
-                      email: "",
-                      whatsapp: "",
-                      message: "",
-                    });
-                  }}
+                  size="sm"
+                  className="text-xs bg-medical-blue hover:bg-blue-700"
                   disabled={
-                    !shareFormData.method ||
-                    (shareFormData.method === "email" &&
-                      !shareFormData.email) ||
-                    (shareFormData.method === "whatsapp" &&
-                      !shareFormData.whatsapp)
+                    isSendingShare ||
+                    (shareFormData.method === "email" && !shareFormData.email) ||
+                    (shareFormData.method === "whatsapp" && !shareFormData.whatsapp)
                   }
-                  className="bg-medical-blue hover:bg-blue-700"
+                  onClick={async () => {
+                    if (!selectedResult) return;
+                    setIsSendingShare(true);
+                    try {
+                      if (shareFormData.method === "email") {
+                        const response = await apiRequest("POST", `/api/lab-results/${selectedResult.id}/share-email`, {
+                          recipientEmail: shareFormData.email,
+                          message: shareFormData.message,
+                        });
+                        const data = await response.json();
+                        if (response.ok) {
+                          toast({ title: "Shared", description: `Lab result PDF sent to ${data.email} (${data.patientName})` });
+                          setShowShareDialog(false);
+                          setShareFormData({ method: "email", email: "", whatsapp: "", message: "" });
+                        } else {
+                          toast({
+                            title: "Share Failed",
+                            description: data.error || data.details || "Failed to send email.",
+                            variant: "destructive",
+                          });
+                        }
+                      } else {
+                        toast({ title: "WhatsApp Sharing", description: "WhatsApp sharing is not yet implemented. Please use email sharing.", variant: "destructive" });
+                      }
+                    } catch (error: any) {
+                      const msg = error.message || "Network error.";
+                      const match = msg.match(/^\d+: (.+)$/);
+                      let description = msg;
+                      if (match) {
+                        try { const p = JSON.parse(match[1]); if (p.error) description = p.error; } catch {}
+                      }
+                      toast({ title: "Share Failed", description, variant: "destructive" });
+                    } finally {
+                      setIsSendingShare(false);
+                    }
+                  }}
                 >
-                  Send Results
+                  {isSendingShare ? "Sending…" : "Send Results"}
                 </Button>
               </div>
             </div>

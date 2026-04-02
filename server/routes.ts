@@ -15651,7 +15651,7 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const clinicFooter = await storage.getActiveClinicFooter(organizationId);
 
       // Check if this is a prescription PDF request (from Request Report tab)
-      const isPrescription = req.query.type === 'prescription' || req.body.type === 'prescription';
+      const isPrescription = req.query.type === 'prescription' || req.body?.type === 'prescription';
 
       // Construct directory path based on type
       const pdfDirectoryName = isPrescription ? 'Lab_Prescription' : 'Lab_TestResults';
@@ -16473,6 +16473,92 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     } catch (error) {
       console.error("Error downloading lab result PDF:", error);
       res.status(500).json({ error: "Failed to download PDF" });
+    }
+  });
+
+  // Share lab result PDF via email to patient
+  app.post("/api/lab-results/:id/share-email", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const labResultId = parseInt(req.params.id);
+      if (isNaN(labResultId)) {
+        return res.status(400).json({ error: "Invalid lab result ID" });
+      }
+
+      const organizationId = req.tenant!.id;
+
+      const labResults = await storage.getLabResults(organizationId);
+      const labResult = labResults.find(r => r.id === labResultId);
+      if (!labResult) {
+        return res.status(404).json({ error: "Lab result not found" });
+      }
+
+      const patientRow = await pool.query(
+        `SELECT first_name, last_name, email FROM patients WHERE id = $1 AND organization_id = $2 LIMIT 1`,
+        [labResult.patientId, organizationId]
+      );
+      if (patientRow.rows.length === 0) {
+        return res.status(404).json({ error: "Patient not found" });
+      }
+      const patient = patientRow.rows[0];
+
+      // Allow caller to override the recipient email (e.g. from the share dialog)
+      const recipientEmail: string = (req.body?.recipientEmail || patient.email || "").trim();
+      if (!recipientEmail) {
+        return res.status(422).json({ error: "No recipient email address available. Please enter an email in the share dialog or add one to the patient record." });
+      }
+
+      const customMessage: string = (req.body?.message || "").trim();
+
+      const pdfDirectoryName = 'Lab_TestResults';
+      const fileName = `${labResult.testId}.pdf`;
+      const filePath = path.join(process.cwd(), 'uploads', pdfDirectoryName, organizationId.toString(), labResult.patientId.toString(), fileName);
+
+      const fileExists = await fse.pathExists(filePath);
+      if (!fileExists) {
+        return res.status(404).json({ error: "PDF not found. Please generate the report first." });
+      }
+
+      const fsModule = await import('fs');
+      const fileBuffer = fsModule.readFileSync(filePath);
+
+      const patientName = `${patient.first_name} ${patient.last_name}`.trim();
+      const sharedBy = `${req.user.firstName ?? ""} ${req.user.lastName ?? ""}`.trim() || req.user.email || "Cura EMR";
+      const customPart = customMessage ? `<p>${customMessage}</p>` : "";
+      const customTextPart = customMessage ? `${customMessage}\n\n` : "";
+
+      const result = await emailService.sendEmailWithReport({
+        to: recipientEmail,
+        subject: `Your Lab Test Result — ${labResult.testId}`,
+        html: `<p>Dear ${patientName},</p>${customPart}<p>Please find your lab test result attached (Test ID: <strong>${labResult.testId}</strong>).</p><p>Shared by: ${sharedBy}</p><p>If you have any questions, please contact your healthcare provider.</p><p>Regards,<br/>Cura EMR Team</p>`,
+        text: `Dear ${patientName},\n\n${customTextPart}Please find your lab test result attached (Test ID: ${labResult.testId}).\n\nShared by: ${sharedBy}\n\nIf you have any questions, please contact your healthcare provider.\n\nRegards,\nCura EMR Team`,
+        attachments: [{
+          filename: fileName,
+          content: fileBuffer,
+          contentType: 'application/pdf',
+        }],
+      });
+
+      if (!result.success) {
+        const errMsg = result.error || "Failed to send email";
+        const isConfigError = errMsg.includes("credentials") || errMsg.includes("SENDGRID_API_KEY") || errMsg.includes("not set") || errMsg.includes("not configured") || errMsg.includes("ENOTFOUND") || errMsg.includes("ECONNREFUSED");
+        if (isConfigError) {
+          return res.status(503).json({ error: "Email delivery is not configured for this system. Please contact your administrator." });
+        }
+        return res.status(500).json({ error: "Failed to send email.", details: errMsg });
+      }
+
+      console.log(`[LAB-SHARE] Emailed ${fileName} to ${recipientEmail} for lab result ${labResultId}`);
+      return res.json({ success: true, email: recipientEmail, patientName });
+    } catch (error) {
+      console.error("Error sharing lab result via email:", error);
+      res.status(500).json({
+        error: "Failed to share lab result",
+        details: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 
