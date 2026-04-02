@@ -1,4 +1,3 @@
-// @ts-nocheck
 import express, { type Express, type Request, type Response } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
@@ -38855,15 +38854,15 @@ Cura EMR Team
       } else {
         const tf2 = typeFilter.toLowerCase();
         if (tf2 === 'treatment') {
-          // Treatment: group by treatments_info.name via treatment_id → shows "Botox (Wrinkle Relaxers)", "IV Drip Therapy", etc.
+          // Treatment: only appointments where treatment_id resolves to a real name in treatments_info or treatments
           byTreatmentSql =
-            'SELECT COALESCE(ti.name, \'Unknown\') AS treatment_name, ti.color_code, COUNT(*)::int AS count' +
+            'SELECT COALESCE(ti.name, t.name) AS treatment_name, COALESCE(ti.color_code, t.color_code) AS color_code, COUNT(*)::int AS count' +
             baseJoins +
-            " WHERE " + where + " AND a.appointment_type = 'treatment' AND a.treatment_id IS NOT NULL" +
-            ' GROUP BY COALESCE(ti.name, \'Unknown\'), ti.color_code' +
+            " WHERE " + where + " AND a.appointment_type = 'treatment' AND a.treatment_id IS NOT NULL AND COALESCE(ti.name, t.name) IS NOT NULL" +
+            ' GROUP BY COALESCE(ti.name, t.name), COALESCE(ti.color_code, t.color_code)' +
             ' ORDER BY count DESC';
         } else if (tf2 === 'consultation') {
-          // Consultation: group by doctors_fee.service_name via consultation_id
+          // Consultation: only appointments with a consultation_id assigned; resolve name via doctors_fee.service_name
           byTreatmentSql =
             'SELECT COALESCE(df.service_name, \'Unknown\') AS treatment_name, NULL::text AS color_code, COUNT(*)::int AS count' +
             baseJoins +
