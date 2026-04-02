@@ -151,26 +151,28 @@ function AppointmentCardInvoice({ appointmentId }: { appointmentId: string | nul
     },
   });
 
-  // Per requirement: do not show any badge if invoice doesn't exist (or is still loading).
   if (!appointmentId || isLoading || !invoice) return null;
 
   const statusLabel = String(invoice.status ?? "—").toLowerCase();
   const statusBadgeClass =
-    statusLabel === "overdue"
-      ? "absolute top-1.5 right-2 bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-0 text-xs font-medium"
-      : statusLabel === "unpaid"
-        ? "absolute top-1.5 right-2 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-0 text-xs font-medium"
-        : "absolute top-1.5 right-2 bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-0 text-xs font-medium";
+    statusLabel === "paid"
+      ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-0 text-[10px] font-semibold px-2 py-0.5"
+      : statusLabel === "overdue"
+        ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-0 text-[10px] font-semibold px-2 py-0.5"
+        : statusLabel === "unpaid"
+          ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-0 text-[10px] font-semibold px-2 py-0.5"
+          : statusLabel === "sent"
+            ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-0 text-[10px] font-semibold px-2 py-0.5"
+            : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 border-0 text-[10px] font-semibold px-2 py-0.5";
+
   return (
-    <>
-      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 flex items-center gap-1">
-        <PoundSterling className="h-3 w-3 text-green-600" />
-        Invoice No.: {invoice.invoiceNumber ?? `#${invoice.id}`}
-      </p>
-      <Badge className={statusBadgeClass}>
-        {statusLabel}
-      </Badge>
-    </>
+    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+      <span className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400">
+        <PoundSterling className="h-3 w-3 text-green-600 shrink-0" />
+        {invoice.invoiceNumber ?? `#${invoice.id}`}
+      </span>
+      <Badge className={statusBadgeClass}>{statusLabel}</Badge>
+    </div>
   );
 }
 
@@ -2675,99 +2677,156 @@ Medical License: [License Number]
                 </div>
 
               {user?.role === "admin" && (
-                <div className="mt-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-slate-800/50">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                    <Receipt className="h-4 w-4" />
-                    Invoice
-                  </p>
-                  {appointmentInvoiceLoading ? (
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading invoice…
-                    </div>
-                  ) : appointmentInvoice ? (
-                    <div className="space-y-2 text-sm">
-                      <p className="text-gray-700 dark:text-gray-300">
-                        <span className="text-gray-500 dark:text-gray-400">Invoice No.:</span>{" "}
-                        {appointmentInvoice.invoiceNumber ?? `#${appointmentInvoice.id}`}
-                      </p>
-                      <p className="text-gray-700 dark:text-gray-300">
-                        <span className="text-gray-500 dark:text-gray-400">Status:</span>{" "}
-                        <Badge variant="secondary" className="capitalize">
-                          {String(appointmentInvoice.status ?? "—").toLowerCase()}
-                        </Badge>
-                      </p>
-                      {(appointmentInvoice.dueDate != null || (appointmentInvoice as any).due_date != null) && (
-                        <p className="text-gray-700 dark:text-gray-300">
-                          <span className="text-gray-500 dark:text-gray-400">Due date:</span>{" "}
-                          {format(new Date((appointmentInvoice.dueDate ?? (appointmentInvoice as any).due_date) as string | Date), "dd MMM yyyy")}
-                        </p>
-                      )}
-                      {(appointmentInvoice.createdBy != null || (appointmentInvoice as any).created_by != null) && (
-                        <p className="text-gray-700 dark:text-gray-300">
-                          <span className="text-gray-500 dark:text-gray-400">Created by:</span>{" "}
-                          {(() => {
-                            const createdById = appointmentInvoice.createdBy ?? (appointmentInvoice as any).created_by;
-                            const creator = getCreatedByUser(createdById);
-                            return creator ? `${creator.name} (${creator.role})` : `User #${createdById}`;
-                          })()}
-                        </p>
-                      )}
-                      {appointmentInvoice.totalAmount != null && (
-                        <p className="text-gray-700 dark:text-gray-300">
-                          <span className="text-gray-500 dark:text-gray-400">Total:</span>{" "}
-                          £{Number(appointmentInvoice.totalAmount).toFixed(2)}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm text-gray-600 dark:text-gray-400">No invoice created.</p>
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-                        onClick={() => {
-                          const sub = getActiveSubdomain() || getTenantSubdomain() || "demo";
-                          // Get patient ID - try multiple sources
-                          const patientId = (() => {
-                            // Try to find patient in patientsData
-                            const patient = patientsData?.find((p: any) => 
-                              p.id === selectedAppointment.patientId || 
-                              p.id === Number(selectedAppointment.patientId) || 
+                <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-slate-800/60 border-b border-gray-200 dark:border-gray-700">
+                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                      <Receipt className="h-4 w-4 text-indigo-500" />
+                      Invoice
+                    </span>
+                    {appointmentInvoice && (() => {
+                      const st = String(appointmentInvoice.status ?? "").toLowerCase();
+                      const cls =
+                        st === "paid"
+                          ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-0 text-xs font-semibold"
+                          : st === "overdue"
+                            ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-0 text-xs font-semibold"
+                            : st === "unpaid"
+                              ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-0 text-xs font-semibold"
+                              : st === "sent"
+                                ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-0 text-xs font-semibold"
+                                : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 border-0 text-xs font-semibold";
+                      return <Badge className={cls}>{st || "—"}</Badge>;
+                    })()}
+                  </div>
+
+                  {/* Body */}
+                  <div className="px-4 py-3 bg-white dark:bg-slate-900/30">
+                    {appointmentInvoiceLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading invoice…
+                      </div>
+                    ) : appointmentInvoice ? (
+                      <table className="w-full text-sm">
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                          <tr>
+                            <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400 w-1/2">Invoice No.</td>
+                            <td className="py-1.5 font-medium text-gray-900 dark:text-white text-right">
+                              {appointmentInvoice.invoiceNumber ?? `#${appointmentInvoice.id}`}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Status</td>
+                            <td className="py-1.5 text-right">
+                              {(() => {
+                                const st = String(appointmentInvoice.status ?? "").toLowerCase();
+                                const cls =
+                                  st === "paid"
+                                    ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-0 text-xs font-semibold"
+                                    : st === "overdue"
+                                      ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-0 text-xs font-semibold"
+                                      : st === "unpaid"
+                                        ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-0 text-xs font-semibold"
+                                        : st === "sent"
+                                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-0 text-xs font-semibold"
+                                          : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 border-0 text-xs font-semibold";
+                                return <Badge className={cls}>{st || "—"}</Badge>;
+                              })()}
+                            </td>
+                          </tr>
+                          {appointmentInvoice.totalAmount != null && (
+                            <tr>
+                              <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Total Amount</td>
+                              <td className="py-1.5 font-semibold text-gray-900 dark:text-white text-right">
+                                £{Number(appointmentInvoice.totalAmount).toFixed(2)}
+                              </td>
+                            </tr>
+                          )}
+                          {appointmentInvoice.paidAmount != null && parseFloat(appointmentInvoice.paidAmount) > 0 && (
+                            <tr>
+                              <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Paid Amount</td>
+                              <td className="py-1.5 font-semibold text-green-700 dark:text-green-400 text-right">
+                                £{Number(appointmentInvoice.paidAmount).toFixed(2)}
+                              </td>
+                            </tr>
+                          )}
+                          {(appointmentInvoice.invoiceDate ?? (appointmentInvoice as any).invoice_date) != null && (
+                            <tr>
+                              <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Invoice Date</td>
+                              <td className="py-1.5 text-gray-700 dark:text-gray-300 text-right">
+                                {format(new Date((appointmentInvoice.invoiceDate ?? (appointmentInvoice as any).invoice_date) as string), "dd MMM yyyy")}
+                              </td>
+                            </tr>
+                          )}
+                          {(appointmentInvoice.dueDate ?? (appointmentInvoice as any).due_date) != null && (
+                            <tr>
+                              <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Due Date</td>
+                              <td className="py-1.5 text-gray-700 dark:text-gray-300 text-right">
+                                {format(new Date((appointmentInvoice.dueDate ?? (appointmentInvoice as any).due_date) as string), "dd MMM yyyy")}
+                              </td>
+                            </tr>
+                          )}
+                          {appointmentInvoice.paymentMethod && appointmentInvoice.paymentMethod !== "Not Selected" && (
+                            <tr>
+                              <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Payment Method</td>
+                              <td className="py-1.5 text-gray-700 dark:text-gray-300 text-right capitalize">
+                                {appointmentInvoice.paymentMethod}
+                              </td>
+                            </tr>
+                          )}
+                          {(appointmentInvoice.createdBy ?? (appointmentInvoice as any).created_by) != null && (
+                            <tr>
+                              <td className="py-1.5 pr-4 text-gray-500 dark:text-gray-400">Created By</td>
+                              <td className="py-1.5 text-gray-700 dark:text-gray-300 text-right">
+                                {(() => {
+                                  const createdById = appointmentInvoice.createdBy ?? (appointmentInvoice as any).created_by;
+                                  const creator = getCreatedByUser(createdById);
+                                  return creator ? `${creator.name} (${creator.role})` : `User #${createdById}`;
+                                })()}
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="space-y-2 py-1">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No invoice found for this appointment.</p>
+                        <button
+                          type="button"
+                          className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                          onClick={() => {
+                            const sub = getActiveSubdomain() || getTenantSubdomain() || "demo";
+                            const patient = patientsData?.find((p: any) =>
+                              p.id === selectedAppointment.patientId ||
+                              p.id === Number(selectedAppointment.patientId) ||
                               String(p.id) === String(selectedAppointment.patientId) ||
                               p.userId === selectedAppointment.patientId ||
                               p.userId === Number(selectedAppointment.patientId) ||
                               String(p.userId) === String(selectedAppointment.patientId)
                             );
-                            return patient?.patientId || selectedAppointment.patientId || "";
-                          })();
-                          
-                          // Get service date from scheduledAt
-                          const serviceDate = selectedAppointment.scheduledAt 
-                            ? new Date(selectedAppointment.scheduledAt).toISOString().split('T')[0]
-                            : new Date().toISOString().split('T')[0];
-                          
-                          // Get appointment ID - use internal id (not appointmentId) as that's what the Select uses
-                          const appointmentId = selectedAppointment.id || selectedAppointment.appointmentId || "";
-                          
-                          // Build URL with parameters
-                          const params = new URLSearchParams({
-                            tab: 'invoices',
-                            createInvoice: 'true',
-                            patientId: String(patientId),
-                            appointmentId: String(appointmentId),
-                            serviceDate: serviceDate
-                          });
-                          
-                          setLocation(`/${sub}/billing?${params.toString()}`);
-                          setShowAppointmentDetails(false);
-                        }}
-                      >
-                        Click here to add invoice
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )}
+                            const patientId = patient?.patientId || selectedAppointment.patientId || "";
+                            const serviceDate = selectedAppointment.scheduledAt
+                              ? new Date(selectedAppointment.scheduledAt).toISOString().split("T")[0]
+                              : new Date().toISOString().split("T")[0];
+                            const appointmentId = selectedAppointment.id || selectedAppointment.appointmentId || "";
+                            const params = new URLSearchParams({
+                              tab: "invoices",
+                              createInvoice: "true",
+                              patientId: String(patientId),
+                              appointmentId: String(appointmentId),
+                              serviceDate,
+                            });
+                            setLocation(`/${sub}/billing?${params.toString()}`);
+                            setShowAppointmentDetails(false);
+                          }}
+                        >
+                          Click here to add invoice
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

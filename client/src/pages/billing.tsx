@@ -53,7 +53,8 @@ import {
   Loader2,
   XCircle,
   CircleDollarSign,
-  RefreshCw
+  RefreshCw,
+  AlertCircle
 } from "lucide-react";
 import { SearchComboBox } from "@/components/SearchComboBox";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
@@ -370,6 +371,7 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
   const [bulkDefaultPrice, setBulkDefaultPrice] = useState("");
   const [showBulkTreatmentSuccessModal, setShowBulkTreatmentSuccessModal] = useState(false);
   const [bulkTreatmentSuccessMessage, setBulkTreatmentSuccessMessage] = useState("");
+  const [bulkTreatmentSuccessType, setBulkTreatmentSuccessType] = useState<"success" | "info">("success");
 
   const closeTreatmentsInfoModal = () => {
     setShowTreatmentsInfoModal(false);
@@ -1250,10 +1252,19 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
       await queryClient.refetchQueries({ queryKey: ["/api/pricing/treatments"] });
       setShowAddTreatmentDialog(false);
       setBulkTreatmentSelections({});
-      const msg =
-        skippedCount > 0
-          ? `Added ${addedCount} treatment(s). ${skippedCount} already existed and were skipped (no duplicates).`
-          : `Added ${addedCount} treatment(s).`;
+      let msg: string;
+      let resultType: "success" | "info";
+      if (addedCount === 0 && skippedCount > 0) {
+        msg = `${skippedCount === 1 ? "This treatment already exists" : "All selected treatments already exist"}. No new treatments were added.`;
+        resultType = "info";
+      } else if (addedCount > 0 && skippedCount > 0) {
+        msg = `${addedCount} treatment${addedCount > 1 ? "s" : ""} added successfully. ${skippedCount} treatment${skippedCount > 1 ? "s" : ""} already existed and ${skippedCount > 1 ? "were" : "was"} skipped.`;
+        resultType = "success";
+      } else {
+        msg = `${addedCount} treatment${addedCount > 1 ? "s" : ""} added successfully.`;
+        resultType = "success";
+      }
+      setBulkTreatmentSuccessType(resultType);
       setBulkTreatmentSuccessMessage(msg);
       setShowBulkTreatmentSuccessModal(true);
     } catch (error: any) {
@@ -3912,11 +3923,19 @@ function PricingManagementDashboard(props?: { scopeToCurrentUser?: { displayName
         <DialogContent className="max-w-md">
           <DialogHeader>
             <div className="flex items-center justify-center mb-4">
-              <div className="h-16 w-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
-                <CheckCircle className="h-10 w-10 text-green-600 dark:text-green-500" />
-              </div>
+              {bulkTreatmentSuccessType === "info" ? (
+                <div className="h-16 w-16 bg-yellow-100 dark:bg-yellow-900/20 rounded-full flex items-center justify-center">
+                  <AlertCircle className="h-10 w-10 text-yellow-600 dark:text-yellow-500" />
+                </div>
+              ) : (
+                <div className="h-16 w-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                  <CheckCircle className="h-10 w-10 text-green-600 dark:text-green-500" />
+                </div>
+              )}
             </div>
-            <DialogTitle className="text-center text-xl">Success</DialogTitle>
+            <DialogTitle className="text-center text-xl">
+              {bulkTreatmentSuccessType === "info" ? "Already Exists" : "Success"}
+            </DialogTitle>
             <DialogDescription className="text-center">
               {bulkTreatmentSuccessMessage}
             </DialogDescription>

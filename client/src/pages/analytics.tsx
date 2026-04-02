@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import dayjs from "dayjs";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +28,8 @@ import {
   Cell,
   AreaChart,
   Area,
-  Legend
+  Legend,
+  LabelList
 } from "recharts";
 import { 
   TrendingUp, 
@@ -49,7 +50,8 @@ import {
   Settings,
   ChevronsUpDown,
   Check,
-  Loader2
+  Loader2,
+  CalendarDays
 } from "lucide-react";
 import { format } from "date-fns";
 import { Header } from "@/components/layout/header";
@@ -354,6 +356,7 @@ function CustomTreatmentAnalyticsModule() {
   // Keep list collapsed by default; it can be a heavy query and slows "instant chart" perception.
   const [showAppointments, setShowAppointments] = useState(false);
   const [useSampleData, setUseSampleData] = useState(true);
+
   const [createRunId, setCreateRunId] = useState(0);
 
   const tenantInfoQuery = useQuery({
@@ -4101,6 +4104,81 @@ export default function AnalyticsPage() {
   });
   const [filteredAppointments, setFilteredAppointments] = useState<any[]>([]);
 
+  // ── All Appointments tab ──────────────────────────────────────────────────
+  const [apptPage, setApptPage] = useState(1);
+  const [apptStatus, setApptStatus] = useState("all");
+  const [apptSearchInput, setApptSearchInput] = useState("");
+  const [apptSearch, setApptSearch] = useState("");
+  const [apptStartDate, setApptStartDate] = useState("");
+  const [apptEndDate, setApptEndDate] = useState("");
+
+  const apptQuery = useQuery({
+    queryKey: ["/api/analytics/appointments-paginated", apptPage, apptStatus, apptSearch, apptStartDate, apptEndDate],
+    enabled: !!user,
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(apptPage), limit: "15" });
+      if (apptStatus && apptStatus !== "all") params.set("status", apptStatus);
+      if (apptSearch) params.set("search", apptSearch);
+      if (apptStartDate) params.set("startDate", apptStartDate);
+      if (apptEndDate) params.set("endDate", apptEndDate);
+      const r = await apiRequest("GET", `/api/analytics/appointments-paginated?${params.toString()}`);
+      return r.json() as Promise<{ appointments: any[]; total: number; page: number; totalPages: number; limit: number }>;
+    },
+  });
+
+  // ── Treatment Dashboard tab ───────────────────────────────────────────────
+  const todayIso = format(new Date(), 'yyyy-MM-dd');
+  const thirtyDaysAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
+  const ninetyDaysAgo = format(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
+  const [tdStartDate, setTdStartDate] = useState(ninetyDaysAgo);
+  const [tdEndDate, setTdEndDate] = useState(todayIso);
+  const [tdType, setTdType] = useState('all');
+  const [tdSearch, setTdSearch] = useState('');
+  const [tdSearchInput, setTdSearchInput] = useState('');
+  const [tdApplied, setTdApplied] = useState({ startDate: ninetyDaysAgo, endDate: todayIso, type: 'all', search: '' });
+  const [tdShowError, setTdShowError] = useState(false);
+  const [tdChartTitle, setTdChartTitle] = useState('');
+  const [tdChartType, setTdChartType] = useState<'bar' | 'pie' | 'line' | 'area'>('bar');
+  const [tdApptPage, setTdApptPage] = useState(1);
+  useEffect(() => { setTdApptPage(1); }, [tdApplied]);
+
+  const tdQuery = useQuery({
+    queryKey: ['/api/analytics/treatment-dashboard', tdApplied],
+    enabled: !!user,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const p = new URLSearchParams({ startDate: tdApplied.startDate, endDate: tdApplied.endDate });
+      if (tdApplied.type && tdApplied.type !== 'all') p.set('type', tdApplied.type);
+      if (tdApplied.search) p.set('search', tdApplied.search);
+      const r = await apiRequest('GET', `/api/analytics/treatment-dashboard?${p.toString()}`);
+      return r.json() as Promise<{
+        summary: { total: number; avgPerDay: number; activeDays: number; peakDay: string | null; peakDayCount: number; mostPopular: { name: string; count: number } | null; leastPopular: { name: string; count: number } | null; uniqueTypes: number; zeroBookings: string[] };
+        byTreatment: { name: string; count: number; percentage: number }[];
+        byDay: { date: string; count: number }[];
+        byStatus: { status: string; count: number }[];
+      }>;
+    },
+  });
+
+  const TD_COLORS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
+
+  const tdApptQuery = useQuery({
+    queryKey: ['/api/analytics/appointments-paginated', tdApplied, tdApptPage],
+    enabled: !!user,
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const p = new URLSearchParams({ page: String(tdApptPage), limit: '15', startDate: tdApplied.startDate, endDate: tdApplied.endDate });
+      if (tdApplied.type && tdApplied.type !== 'all') p.set('type', tdApplied.type);
+      const r = await apiRequest('GET', `/api/analytics/appointments-paginated?${p.toString()}`);
+      return r.json() as Promise<{ appointments: any[]; total: number; page: number; totalPages: number; limit: number }>;
+    },
+  });
+
+  useEffect(() => {
+    if (tdQuery.isError) setTdShowError(true);
+  }, [tdQuery.isError]);
+
   // Shallow array equality helper to avoid infinite re-render loops on identical data
   const areAppointmentsShallowEqual = (a: any[] | undefined, b: any[] | undefined): boolean => {
     if (a === b) return true;
@@ -4280,40 +4358,18 @@ export default function AnalyticsPage() {
     }],
     enabled: !!user && searchRunId > 0 && (!!appliedRangeStart && !!appliedRangeEnd),
     queryFn: async () => {
-      // Instant-feel: fetch each day in the range in parallel using the fast by-date-range endpoint
-      const start = new Date(`${appliedRangeStart}T00:00:00`);
-      const end = new Date(`${appliedRangeEnd}T00:00:00`);
-      const days: string[] = [];
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const da = String(d.getDate()).padStart(2, "0");
-        days.push(`${y}-${m}-${da}`);
+      // Single request to the dedicated analytics filter endpoint (queries scheduled_at column)
+      const qs = new URLSearchParams({ startDate: appliedRangeStart, endDate: appliedRangeEnd });
+      const url = `/api/analytics/appointments-filter?${qs.toString()}`;
+      try {
+        const r = await apiRequest("GET", url, undefined, { timeoutMs: 15000 });
+        const data = await r.json();
+        console.log("[ANALYTICS FILTER] Fetched:", Array.isArray(data) ? data.length : 0, "appointments for range:", appliedRangeStart, "→", appliedRangeEnd);
+        return Array.isArray(data) ? data : [];
+      } catch (e) {
+        console.error("[ANALYTICS FILTER] Error:", e);
+        return [];
       }
-      // Limit concurrency to avoid overloading server; slightly longer timeout per request
-      const fetchDay = async (day: string) => {
-        const qs = new URLSearchParams({ startDate: day, endDate: day, limit: "1000", offset: "0" });
-        // Provide explicit organizationId to avoid tenant resolution edge cases
-        const orgId = (user as any)?.organizationId;
-        if (orgId != null) qs.set("organizationId", String(orgId));
-        const url = `/api/appointments/by-date-range?${qs.toString()}`;
-        try {
-          const r = await apiRequest("GET", url, undefined, { timeoutMs: 15000 });
-          return await r.json();
-        } catch {
-          return [];
-        }
-      };
-      const concurrency = 2;
-      const perDay: any[][] = [];
-      for (let i = 0; i < days.length; i += concurrency) {
-        const slice = days.slice(i, i + concurrency);
-        const chunk = await Promise.all(slice.map(fetchDay));
-        perDay.push(...chunk);
-      }
-      const merged = perDay.flat().filter(Boolean);
-      console.log("[ANALYTICS FILTER] Chunked per-day results:", merged.length, "days:", days.length);
-      return merged;
     },
     staleTime: 30000,
     retry: 0,
@@ -4965,7 +5021,7 @@ export default function AnalyticsPage() {
 
         {/* Analytics Tabs */}
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
+          <TabsList className={`grid w-full ${isDoctorLike(user?.role) ? 'grid-cols-4 md:grid-cols-7' : 'grid-cols-3 md:grid-cols-6'}`}>
             {isDoctorLike(user?.role) ? (
               <>
                 <TabsTrigger value="overview">Overview ({user?.firstName} {user?.lastName})</TabsTrigger>
@@ -4973,6 +5029,8 @@ export default function AnalyticsPage() {
                 <TabsTrigger value="appointments">My Appointments ({user?.firstName} {user?.lastName})</TabsTrigger>
                 <TabsTrigger value="clinical">Clinic ({user?.firstName} {user?.lastName})</TabsTrigger>
                 <TabsTrigger value="financial">Financial ({user?.firstName} {user?.lastName})</TabsTrigger>
+                <TabsTrigger value="all-appointments">All Appointments</TabsTrigger>
+                <TabsTrigger value="treatments">Treatments</TabsTrigger>
               </>
             ) : (
               <>
@@ -4980,6 +5038,8 @@ export default function AnalyticsPage() {
                 <TabsTrigger value="patients">Patients</TabsTrigger>
                 <TabsTrigger value="clinical">Clinical</TabsTrigger>
                 <TabsTrigger value="financial">Financial</TabsTrigger>
+                <TabsTrigger value="all-appointments">All Appointments</TabsTrigger>
+                <TabsTrigger value="treatments">Treatments</TabsTrigger>
               </>
             )}
           </TabsList>
@@ -5976,6 +6036,529 @@ export default function AnalyticsPage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* ── All Appointments Tab ─────────────────────────────────────────── */}
+          <TabsContent value="all-appointments" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <CalendarDays className="h-5 w-5 text-blue-500" />
+                  All Appointments
+                  {apptQuery.data && (
+                    <span className="ml-auto text-sm font-normal text-gray-500">
+                      {apptQuery.data.total} total
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Filters */}
+                <div className="flex flex-wrap gap-3 mb-4">
+                  <Input
+                    placeholder="Search patient or title…"
+                    value={apptSearchInput}
+                    onChange={e => setApptSearchInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        setApptSearch(apptSearchInput);
+                        setApptPage(1);
+                      }
+                    }}
+                    className="w-48"
+                  />
+                  <Button size="sm" variant="outline" onClick={() => { setApptSearch(apptSearchInput); setApptPage(1); }}>
+                    Search
+                  </Button>
+                  <Select value={apptStatus} onValueChange={v => { setApptStatus(v); setApptPage(1); }}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="All Statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="no_show">No Show</SelectItem>
+                      <SelectItem value="rescheduled">Rescheduled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="date"
+                    value={apptStartDate}
+                    onChange={e => { setApptStartDate(e.target.value); setApptPage(1); }}
+                    className="w-40"
+                    title="Start date"
+                  />
+                  <Input
+                    type="date"
+                    value={apptEndDate}
+                    onChange={e => { setApptEndDate(e.target.value); setApptPage(1); }}
+                    className="w-40"
+                    title="End date"
+                  />
+                  {(apptSearch || apptStatus !== "all" || apptStartDate || apptEndDate) && (
+                    <Button size="sm" variant="ghost" onClick={() => {
+                      setApptSearchInput(""); setApptSearch(""); setApptStatus("all");
+                      setApptStartDate(""); setApptEndDate(""); setApptPage(1);
+                    }}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+
+                {/* Table */}
+                {apptQuery.isLoading ? (
+                  <div className="text-center py-12 text-gray-500">Loading appointments…</div>
+                ) : apptQuery.isError ? (
+                  <div className="text-center py-12 text-red-500">Failed to load appointments.</div>
+                ) : !apptQuery.data?.appointments?.length ? (
+                  <div className="text-center py-12 text-gray-400">No appointments found.</div>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 dark:bg-gray-800">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Date</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Time</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Patient</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Provider</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Treatment</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Title</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Type</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Duration</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Status</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Mode</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {apptQuery.data.appointments.map((apt: any, i: number) => {
+                          const dt = new Date(apt.scheduled_at);
+                          const dateStr = dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                          const timeStr = dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+                          const patientName = apt.patient_first_name
+                            ? `${apt.patient_first_name} ${apt.patient_last_name || ""}`.trim()
+                            : `Patient #${apt.patient_id}`;
+                          const providerName = apt.provider_first_name
+                            ? `${apt.provider_first_name} ${apt.provider_last_name || ""}`.trim()
+                            : apt.provider_id ? `Provider #${apt.provider_id}` : "—";
+                          const statusColors: Record<string, string> = {
+                            completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                            scheduled: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                            cancelled: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                            no_show: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+                            rescheduled: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+                          };
+                          const typeLabel = apt.type_label || apt.appointment_type || apt.type || "—";
+                          return (
+                            <tr key={apt.id ?? i} className={i % 2 === 0 ? "bg-white dark:bg-gray-900" : "bg-gray-50 dark:bg-gray-800/50"}>
+                              <td className="px-4 py-3 whitespace-nowrap font-medium">{dateStr}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-gray-500">{timeStr}</td>
+                              <td className="px-4 py-3 whitespace-nowrap">{patientName}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-gray-600 dark:text-gray-400">{providerName}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                {apt.treatment_name
+                                  ? <span className="inline-block px-2 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 text-xs font-medium">{apt.treatment_name}</span>
+                                  : <span className="text-gray-400">—</span>}
+                              </td>
+                              <td className="px-4 py-3 max-w-[180px] truncate" title={apt.title}>{apt.title || "—"}</td>
+                              <td className="px-4 py-3 whitespace-nowrap capitalize">{typeLabel}</td>
+                              <td className="px-4 py-3 whitespace-nowrap text-gray-500">{apt.duration ? `${apt.duration} min` : "—"}</td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[apt.status] ?? "bg-gray-100 text-gray-600"}`}>
+                                  {apt.status?.replace("_", " ") ?? "—"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-gray-500">
+                                {apt.is_virtual ? "Virtual" : "In-person"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {apptQuery.data && apptQuery.data.totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-4">
+                    <p className="text-sm text-gray-500">
+                      Page {apptQuery.data.page} of {apptQuery.data.totalPages}
+                      {" "}·{" "}
+                      {apptQuery.data.total} appointment{apptQuery.data.total !== 1 ? "s" : ""}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm" variant="outline"
+                        disabled={apptPage <= 1}
+                        onClick={() => setApptPage(1)}
+                      >«</Button>
+                      <Button
+                        size="sm" variant="outline"
+                        disabled={apptPage <= 1}
+                        onClick={() => setApptPage(p => Math.max(1, p - 1))}
+                      >‹ Prev</Button>
+                      {Array.from({ length: Math.min(5, apptQuery.data.totalPages) }, (_, i) => {
+                        const half = 2;
+                        const tp = apptQuery.data.totalPages;
+                        let start = Math.max(1, apptPage - half);
+                        if (start + 4 > tp) start = Math.max(1, tp - 4);
+                        const pageNum = start + i;
+                        if (pageNum > tp) return null;
+                        return (
+                          <Button
+                            key={pageNum}
+                            size="sm"
+                            variant={pageNum === apptPage ? "default" : "outline"}
+                            onClick={() => setApptPage(pageNum)}
+                            className="w-8 h-8 p-0"
+                          >{pageNum}</Button>
+                        );
+                      })}
+                      <Button
+                        size="sm" variant="outline"
+                        disabled={apptPage >= apptQuery.data.totalPages}
+                        onClick={() => setApptPage(p => Math.min(apptQuery.data!.totalPages, p + 1))}
+                      >Next ›</Button>
+                      <Button
+                        size="sm" variant="outline"
+                        disabled={apptPage >= apptQuery.data.totalPages}
+                        onClick={() => setApptPage(apptQuery.data!.totalPages)}
+                      >»</Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Treatment Analytics Dashboard Tab ─────────────────────────────── */}
+          <TabsContent value="treatments" className="space-y-4">
+            {/* Filters */}
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Start Date</label>
+                    <input type="date" value={tdStartDate} onChange={e => setTdStartDate(e.target.value)} className="h-9 px-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">End Date</label>
+                    <input type="date" value={tdEndDate} onChange={e => setTdEndDate(e.target.value)} className="h-9 px-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Treatment Type</label>
+                    <select value={tdType} onChange={e => setTdType(e.target.value)} className="h-9 px-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm">
+                      <option value="all">All Types</option>
+                      <option value="consultation">Consultation</option>
+                      <option value="checkup">Checkup</option>
+                      <option value="follow-up">Follow-Up</option>
+                      <option value="treatment">Treatment</option>
+                      <option value="procedure">Procedure</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Treatment Analytics Title</label>
+                    <input type="text" placeholder="e.g. Q1 Treatment Summary" value={tdChartTitle} onChange={e => setTdChartTitle(e.target.value)} className="h-9 px-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm w-52" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Chart Type</label>
+                    <select value={tdChartType} onChange={e => setTdChartType(e.target.value as any)} className="h-9 px-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm">
+                      <option value="bar">Bar Chart</option>
+                      <option value="pie">Pie Chart</option>
+                      <option value="line">Line Chart</option>
+                      <option value="area">Area Chart</option>
+                    </select>
+                  </div>
+                  <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white h-9 px-5 flex items-center gap-2" disabled={tdQuery.isFetching} onClick={() => setTdApplied({ startDate: tdStartDate, endDate: tdEndDate, type: tdType, search: tdSearchInput })}>
+                    {tdQuery.isFetching ? (
+                      <>
+                        <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Applying…
+                      </>
+                    ) : 'Apply Filters'}
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-9" onClick={() => { setTdStartDate(ninetyDaysAgo); setTdEndDate(todayIso); setTdType('all'); setTdSearchInput(''); setTdApplied({ startDate: ninetyDaysAgo, endDate: todayIso, type: 'all', search: '' }); }}>
+                    Reset
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* ── Loading overlay ── */}
+            {tdQuery.isFetching && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-4 min-w-[300px] max-w-sm mx-4">
+                  <span className="inline-block w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+                  <p className="text-base font-semibold text-gray-800 dark:text-gray-100 text-center">Fetching treatment analytics…</p>
+                  <p className="text-xs text-gray-400 text-center">Please wait while we process your filters</p>
+                </div>
+              </div>
+            )}
+
+            {/* ── Error popup ── */}
+            <Dialog open={tdShowError} onOpenChange={setTdShowError}>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle className="text-red-600 flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-red-100 text-red-600 text-sm font-bold">!</span>
+                    Something went wrong
+                  </DialogTitle>
+                  <DialogDescription>
+                    We couldn’t fetch the treatment analytics. Please check your filters and try again.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setTdShowError(false)}>Close</Button>
+                  <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => { setTdShowError(false); tdQuery.refetch(); }}>
+                    Try Again
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* ── Results ── */}
+            {tdQuery.data && !tdQuery.isError && !tdQuery.isFetching && (() => {
+              const summary = tdQuery.data.summary;
+              const byTreatment = (tdQuery.data.byTreatment ?? []).slice().sort((a: any, b: any) => b.count - a.count);
+              const chartTotal = byTreatment.reduce((s: number, t: any) => s + t.count, 0);
+              const mostPopular = summary.mostPopular?.name ?? byTreatment[0]?.name ?? '—';
+
+              if (byTreatment.length === 0) {
+                return (
+                  <Card>
+                    <CardContent className="py-16 text-center">
+                      <p className="text-gray-400 text-base">No treatments available for selected dates</p>
+                    </CardContent>
+                  </Card>
+                );
+              }
+
+              const typeNameLabels: Record<string, string> = { 'follow-up': 'Follow-Up', 'checkup': 'Checkup', 'consultation': 'Consultation', 'procedure': 'Procedure', 'treatment': 'Treatment' };
+              const selectedTypeLabel = tdApplied.type === 'all' || !tdApplied.type ? 'All Types' : (typeNameLabels[tdApplied.type] ?? tdApplied.type);
+
+              return (
+                <>
+                <Card>
+                  {/* Summary header */}
+                  <CardHeader className="pb-3">
+                    <div className="flex flex-wrap gap-6 items-center">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">Total Treatments</p>
+                        <p className="text-4xl font-bold text-indigo-600 tabular-nums">{chartTotal}</p>
+                      </div>
+                      <div className="h-10 w-px bg-gray-200 dark:bg-gray-700 hidden sm:block" />
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">Most Popular</p>
+                        <p className="text-base font-semibold text-gray-800 dark:text-gray-100 capitalize">{mostPopular}</p>
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  {/* Chart (type controlled by dropdown) */}
+                  <CardContent style={tdChartType === 'bar' ? { paddingBottom: '8px' } : {}}>
+                    <ResponsiveContainer width="100%" height={tdChartType === 'bar' ? 440 : 340}>
+                      {tdChartType === 'pie' ? (
+                        <PieChart>
+                          <Pie
+                            data={byTreatment}
+                            dataKey="count"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={120}
+                            label={({ name, percentage }: any) => `${name} ${percentage}%`}
+                            labelLine={true}
+                          >
+                            {byTreatment.map((t: any, i: number) => (
+                              <Cell key={i} fill={t.colorCode ?? TD_COLORS[i % TD_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(val: any, _: string, props: any) => [
+                              `${val} (${props.payload?.percentage}%)`,
+                              'Count'
+                            ]}
+                            contentStyle={{ borderRadius: 8, fontSize: 12, border: '1px solid #e5e7eb' }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
+                        </PieChart>
+                      ) : tdChartType === 'line' ? (
+                        <LineChart data={byTreatment} margin={{ top: 28, right: 24, left: 0, bottom: 72 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#6b7280' }} angle={-38} textAnchor="end" interval={0} height={80} />
+                          <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} allowDecimals={false} tickLine={false} axisLine={false} width={32} />
+                          <Tooltip
+                            formatter={(val: any, _: string, props: any) => [`${val} (${props.payload?.percentage}%)`, 'Count']}
+                            contentStyle={{ borderRadius: 8, fontSize: 12, border: '1px solid #e5e7eb' }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="count"
+                            strokeWidth={2.5}
+                            dot={(props: any) => {
+                              const { cx, cy, index } = props;
+                              return <circle key={index} cx={cx} cy={cy} r={5} fill={byTreatment[index]?.colorCode ?? TD_COLORS[index % TD_COLORS.length]} stroke="#fff" strokeWidth={2} />;
+                            }}
+                            stroke="#6366f1"
+                          >
+                            <LabelList dataKey="percentage" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: 700, fill: '#374151' }} />
+                          </Line>
+                        </LineChart>
+                      ) : tdChartType === 'area' ? (
+                        <AreaChart data={byTreatment} margin={{ top: 28, right: 24, left: 0, bottom: 72 }}>
+                          <defs>
+                            <linearGradient id="tdAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0.03} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#6b7280' }} angle={-38} textAnchor="end" interval={0} height={80} />
+                          <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} allowDecimals={false} tickLine={false} axisLine={false} width={32} />
+                          <Tooltip
+                            formatter={(val: any, _: string, props: any) => [`${val} (${props.payload?.percentage}%)`, 'Count']}
+                            contentStyle={{ borderRadius: 8, fontSize: 12, border: '1px solid #e5e7eb' }}
+                          />
+                          <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2.5} fill="url(#tdAreaGradient)">
+                            <LabelList dataKey="percentage" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: 700, fill: '#374151' }} />
+                          </Area>
+                        </AreaChart>
+                      ) : (
+                        <BarChart style={{ overflow: 'visible' }} data={byTreatment} margin={{ top: 28, right: 24, left: 0, bottom: 100 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} angle={-38} textAnchor="end" interval={0} height={100} />
+                          <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} allowDecimals={false} tickLine={false} axisLine={false} width={32} />
+                          <Tooltip
+                            cursor={{ fill: 'rgba(99,102,241,0.06)' }}
+                            formatter={(val: any, _: string, props: any) => [`${val} (${props.payload?.percentage}%)`, 'Count']}
+                            contentStyle={{ borderRadius: 8, fontSize: 12, border: '1px solid #e5e7eb' }}
+                          />
+                          <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={64}>
+                            {byTreatment.map((t: any, i: number) => (
+                              <Cell key={i} fill={t.colorCode ?? TD_COLORS[i % TD_COLORS.length]} />
+                            ))}
+                            <LabelList dataKey="percentage" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: 11, fontWeight: 700, fill: '#374151' }} />
+                          </Bar>
+                        </BarChart>
+                      )}
+                    </ResponsiveContainer>
+
+                    {/* Chart title displayed below the graph — auto-derived from filter, or custom user text */}
+                    {(() => {
+                      const typeNames: Record<string, string> = { 'follow-up': 'Follow-Up', 'checkup': 'Checkup', 'consultation': 'Consultation', 'procedure': 'Procedure', 'treatment': 'Treatment' };
+                      const autoTitle = (!tdApplied.type || tdApplied.type === 'all')
+                        ? 'Treatments and Consultations'
+                        : `${typeNames[tdApplied.type] ?? tdApplied.type} Appointments`;
+                      const displayTitle = tdChartTitle.trim() || autoTitle;
+                      return (
+                        <p className="mt-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-200 tracking-wide">
+                          {displayTitle}
+                        </p>
+                      );
+                    })()}
+                  </CardContent>
+                </Card>
+
+                {/* ── Filtered Appointments Table ────────────────────────────── */}
+                <Card className="mt-4">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <CardTitle className="text-base font-semibold">
+                        {selectedTypeLabel === 'All Types' ? 'All Appointments' : `${selectedTypeLabel} Appointments`}
+                      </CardTitle>
+                      {tdApptQuery.data && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{tdApptQuery.data.total} total</span>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {tdApptQuery.isLoading ? (
+                      <div className="py-10 text-center text-gray-400 text-sm">Loading appointments…</div>
+                    ) : !tdApptQuery.data?.appointments?.length ? (
+                      <div className="py-10 text-center text-gray-400 text-sm">No appointments found for this selection.</div>
+                    ) : (
+                      <>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 dark:bg-gray-800">
+                              <tr>
+                                <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Date</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Patient</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Provider</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Service / Treatment</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Treatment Type</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                              {tdApptQuery.data.appointments.map((apt: any, i: number) => {
+                                const dt = new Date(apt.scheduled_at);
+                                const dateStr = dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                                const patientName = apt.patient_first_name ? `${apt.patient_first_name} ${apt.patient_last_name || ''}`.trim() : `Patient #${apt.patient_id}`;
+                                const providerName = apt.provider_first_name ? `${apt.provider_first_name} ${apt.provider_last_name || ''}`.trim() : apt.provider_id ? `Provider #${apt.provider_id}` : '—';
+                                const typeLbl = apt.type_label || apt.appointment_type || apt.type || '—';
+                                const statusColors: Record<string, string> = {
+                                  completed: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+                                  scheduled: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                                  cancelled: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+                                  no_show: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+                                  rescheduled: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+                                };
+                                const typeTagColors: Record<string, string> = {
+                                  'Follow-Up': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+                                  'Checkup': 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300',
+                                  'Consultation': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+                                  'Procedure': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+                                  'Treatment': 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+                                  'Emergency': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+                                };
+                                return (
+                                  <tr key={apt.id ?? i} className={i % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-800/50'}>
+                                    <td className="px-4 py-3 whitespace-nowrap font-medium">{dateStr}</td>
+                                    <td className="px-4 py-3 whitespace-nowrap">{patientName}</td>
+                                    <td className="px-4 py-3 whitespace-nowrap text-gray-600 dark:text-gray-400">{providerName}</td>
+                                    <td className="px-4 py-3 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                      {apt.treatment_name
+                                        ? <span className="inline-block px-2 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 text-xs font-medium">{apt.treatment_name}</span>
+                                        : <span className="text-gray-400">—</span>}
+                                    </td>
+                                    <td className="px-4 py-3 whitespace-nowrap">
+                                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${typeTagColors[typeLbl] ?? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
+                                        {typeLbl}
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[apt.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                                        {apt.status?.replace('_', ' ') ?? '—'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        {tdApptQuery.data.totalPages > 1 && (
+                          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+                            <span className="text-xs text-gray-500">Page {tdApptQuery.data.page} of {tdApptQuery.data.totalPages} · {tdApptQuery.data.total} appointment{tdApptQuery.data.total !== 1 ? 's' : ''}</span>
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={tdApptPage <= 1} onClick={() => setTdApptPage(1)}>«</Button>
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={tdApptPage <= 1} onClick={() => setTdApptPage(p => Math.max(1, p - 1))}>‹</Button>
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={tdApptPage >= tdApptQuery.data.totalPages} onClick={() => setTdApptPage(p => Math.min(tdApptQuery.data!.totalPages, p + 1))}>›</Button>
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={tdApptPage >= tdApptQuery.data.totalPages} onClick={() => setTdApptPage(tdApptQuery.data!.totalPages)}>»</Button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+                </>
+              );
+            })()}
+          </TabsContent>
+
         </Tabs>
       </div>
 
