@@ -687,6 +687,9 @@ export default function LabResultsPage() {
   const [showViewDialog, setShowViewDialog] = useState(false);
   const [showReviewDialog, setShowReviewDialog] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
+  const [showShareResultDialog, setShowShareResultDialog] = useState(false);
+  const [shareResultDialogTitle, setShareResultDialogTitle] = useState<string>("");
+  const [shareResultDialogDescription, setShareResultDialogDescription] = useState<string>("");
   const [showPrescriptionDialog, setShowPrescriptionDialog] = useState(false);
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [showFillResultDialog, setShowFillResultDialog] = useState(false);
@@ -696,6 +699,46 @@ export default function LabResultsPage() {
   const [selectedLabOrder, setSelectedLabOrder] = useState<any>(null);
   const [selectedResult, setSelectedResult] =
     useState<DatabaseLabResult | null>(null);
+
+  // After generating a lab result PDF, show a preview + optional share action.
+  const [autoSharePreviewOpen, setAutoSharePreviewOpen] = useState(false);
+  const [autoSharePreviewResult, setAutoSharePreviewResult] = useState<any>(null);
+  const [autoShareSending, setAutoShareSending] = useState(false);
+  // Check whether the lab result PDF exists so we can disable "Send Results" if missing.
+  const {
+    data: sharePdfStatus,
+    isLoading: sharePdfStatusLoading,
+    isError: sharePdfStatusIsError,
+    error: sharePdfStatusError,
+    refetch: refetchSharePdfStatus,
+  } = useQuery({
+    queryKey: ["/api/lab-results", selectedResult?.id, "pdf-status"],
+    enabled: showShareDialog && !!selectedResult?.id,
+    retry: false,
+    queryFn: async () => {
+      if (!selectedResult?.id) return { exists: false, fileName: null as string | null };
+      try {
+        const response = await apiRequest("GET", `/api/lab-results/${selectedResult.id}/pdf-status`);
+        return await response.json();
+      } catch (e: any) {
+        // Treat 404 (lab result not found / pdf missing) as a valid "doesn't exist" state,
+        // not a hard error that blocks the UI.
+        const msg = String(e?.message || "");
+        if (msg.startsWith("404:")) {
+          return { exists: false, fileName: null as string | null };
+        }
+        throw e;
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (showShareDialog && selectedResult?.id) {
+      // Ensure we refresh status each time user opens the share dialog.
+      refetchSharePdfStatus();
+    }
+  }, [showShareDialog, selectedResult?.id, refetchSharePdfStatus]);
+
   const [isEditMode, setIsEditMode] = useState(false);
   const [editFormData, setEditFormData] = useState<any>({});
   const [selectedEditRole, setSelectedEditRole] = useState<string>("");
@@ -725,6 +768,54 @@ export default function LabResultsPage() {
   });
   const [paymentResult, setPaymentResult] = useState<any>(null);
   const [stripeClientSecret, setStripeClientSecret] = useState<string>("");
+
+  const shareGeneratedLabResult = async (labResult: any) => {
+    if (!labResult) return;
+    setAutoShareSending(true);
+    try {
+      // Resolve custom patient_id (patients.patient_id) from the currently loaded patients list.
+      const patientRow = Array.isArray(patients)
+        ? (patients as any[]).find((p) => Number(p?.id) === Number(labResult.patientId))
+        : null;
+      const customPatientId = String(patientRow?.patientId ?? "").trim();
+      if (!customPatientId) {
+        throw new Error("Patient ID not found for this lab result.");
+      }
+
+      // Fetch patient email from DB by patient_id.
+      const emailRes = await apiRequest(
+        "GET",
+        `/api/patients/email-by-patient-id?${new URLSearchParams({ patientId: customPatientId }).toString()}`
+      );
+      const emailData = await emailRes.json();
+      const recipientEmail = String(emailData?.email ?? "").trim();
+      if (!recipientEmail) {
+        throw new Error("Patient email not found.");
+      }
+
+      // Send the lab result PDF via existing endpoint.
+      const shareRes = await apiRequest("POST", `/api/lab-results/${labResult.id}/share-email`, {
+        recipientEmail,
+        message: `Lab results for ${labResult.testType || "your test"} are now available.`,
+      });
+      const shareData = await shareRes.json();
+
+      setShareResultDialogTitle("Shared");
+      setShareResultDialogDescription(
+        `Lab result PDF sent to ${shareData.email || recipientEmail} (${shareData.patientName || getPatientName(labResult.patientId)})`
+      );
+      setShowShareResultDialog(true);
+      setAutoSharePreviewOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Share Failed",
+        description: error?.message || "Failed to share lab result",
+        variant: "destructive",
+      });
+    } finally {
+      setAutoShareSending(false);
+    }
+  };
 
   // E-Signature states
   const [showESignDialog, setShowESignDialog] = useState(false);
@@ -6273,6 +6364,25 @@ Report generated from Cura EMR System`;
                 <strong>{getPatientName(selectedResult.patientId)}</strong>
               </div>
 
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">PDF File</Label>
+                {sharePdfStatusLoading ? (
+                  <div className="text-xs text-gray-500">Checking file…</div>
+                ) : sharePdfStatusIsError ? (
+                  <div className="text-xs text-red-600">
+                    Unable to check PDF status right now. You can still try sending.
+                  </div>
+                ) : sharePdfStatus?.exists ? (
+                  <div className="text-xs text-gray-700">
+                    {sharePdfStatus.fileName}
+                  </div>
+                ) : (
+                  <div className="text-xs text-red-600">
+                    PDF not found. Please generate the report first.
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-3">
                 <Label className="text-sm font-medium">Contact Method</Label>
                 <div className="space-y-2">
@@ -6393,6 +6503,8 @@ Report generated from Cura EMR System`;
                   className="text-xs bg-medical-blue hover:bg-blue-700"
                   disabled={
                     isSendingShare ||
+                    sharePdfStatusLoading ||
+                    (!sharePdfStatusIsError && !sharePdfStatus?.exists) ||
                     (shareFormData.method === "email" && !shareFormData.email) ||
                     (shareFormData.method === "whatsapp" && !shareFormData.whatsapp)
                   }
@@ -6407,15 +6519,30 @@ Report generated from Cura EMR System`;
                         });
                         const data = await response.json();
                         if (response.ok) {
-                          toast({ title: "Shared", description: `Lab result PDF sent to ${data.email} (${data.patientName})` });
                           setShowShareDialog(false);
+                          setShareResultDialogTitle("Success!");
+                          setShareResultDialogDescription(
+                            `Lab result PDF sent to ${data.email} (${data.patientName})`
+                          );
+                          setShowShareResultDialog(true);
                           setShareFormData({ method: "email", email: "", whatsapp: "", message: "" });
                         } else {
-                          toast({
-                            title: "Share Failed",
-                            description: data.error || data.details || "Failed to send email.",
-                            variant: "destructive",
-                          });
+                          const message =
+                            data.error || data.details || "Failed to send email.";
+
+                          const msgStr = String(message || "");
+                          if (msgStr.toLowerCase().includes("pdf not found")) {
+                            setShareResultDialogTitle("PDF not found");
+                            setShareResultDialogDescription("PDF not found. Please generate the report first.");
+                            setShowShareResultDialog(true);
+                            // Keep the share dialog open so user can go generate the report.
+                          } else {
+                            toast({
+                              title: "Share Failed",
+                              description: message,
+                              variant: "destructive",
+                            });
+                          }
                         }
                       } else {
                         toast({ title: "WhatsApp Sharing", description: "WhatsApp sharing is not yet implemented. Please use email sharing.", variant: "destructive" });
@@ -6440,6 +6567,30 @@ Report generated from Cura EMR System`;
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Share Results Modal (success + specific PDF-not-found error) */}
+      <AlertDialog open={showShareResultDialog} onOpenChange={setShowShareResultDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-semibold">
+              {shareResultDialogTitle || "Notice"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm">
+              {shareResultDialogDescription}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setShowShareResultDialog(false);
+              }}
+              className="bg-medical-blue hover:bg-blue-700 w-full"
+            >
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Lab Result Prescription Dialog */}
       <Dialog
@@ -8557,6 +8708,10 @@ Report generated from Cura EMR System`;
                         // Success - workflow fields will be updated by backend
                         // ready_to_generate_lab = true AND lab_result_generated_report = true
                         console.log("Lab result PDF generated and workflow fields updated successfully");
+
+                        // Additional functionality: show preview popup with Share button (does not change existing PDF logic).
+                        setAutoSharePreviewResult(selectedLabOrder);
+                        setAutoSharePreviewOpen(true);
                       }
                     } catch (error) {
                       console.error("Error saving PDF to server:", error);
@@ -8637,6 +8792,62 @@ Report generated from Cura EMR System`;
               </Button>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Auto-share preview popup (Generate Reports → after PDF creation) */}
+      <Dialog open={autoSharePreviewOpen} onOpenChange={setAutoSharePreviewOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Lab Result Generated</DialogTitle>
+            <DialogDescription>
+              Preview the lab result details and optionally share the PDF with the patient.
+            </DialogDescription>
+          </DialogHeader>
+          {autoSharePreviewResult && (
+            <div className="space-y-3">
+              <div className="text-sm">
+                <span className="text-gray-500">Patient:</span>{" "}
+                <span className="font-medium">{getPatientName(autoSharePreviewResult.patientId)}</span>
+              </div>
+              <div className="text-sm">
+                <span className="text-gray-500">Test ID:</span>{" "}
+                <span className="font-mono">{autoSharePreviewResult.testId}</span>
+              </div>
+              <div className="text-sm">
+                <span className="text-gray-500">Test Type:</span>{" "}
+                <span className="font-medium">{autoSharePreviewResult.testType}</span>
+              </div>
+
+              {Array.isArray(autoSharePreviewResult.results) && autoSharePreviewResult.results.length > 0 && (
+                <div className="rounded-md border p-3">
+                  <div className="text-sm font-medium mb-2">Result Summary</div>
+                  <div className="space-y-1">
+                    {autoSharePreviewResult.results.slice(0, 4).map((r: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-700">{r.name}</span>
+                        <span className="font-medium text-gray-900">
+                          {r.value} {r.unit}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setAutoSharePreviewOpen(false)} disabled={autoShareSending}>
+              Close
+            </Button>
+            <Button
+              className="bg-medical-blue hover:bg-blue-700"
+              onClick={() => shareGeneratedLabResult(autoSharePreviewResult)}
+              disabled={!autoSharePreviewResult || autoShareSending}
+            >
+              {autoShareSending ? "Sharing…" : "Share"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

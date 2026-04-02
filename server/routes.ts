@@ -4720,6 +4720,39 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
+  // Get patient email by patient_id (custom patient identifier) within the current organization.
+  // Used by Lab Results "auto share after PDF generation" flow.
+  app.get("/api/patients/email-by-patient-id", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+      const patientId = String(req.query.patientId ?? "").trim();
+      if (!patientId) {
+        return res.status(400).json({ error: "patientId is required" });
+      }
+
+      const organizationId = (req.user as any)?.organizationId ?? req.tenant?.id;
+      if (!organizationId) {
+        return res.status(400).json({ error: "Organization ID is required" });
+      }
+
+      const { rows } = await pool.query(
+        `SELECT email FROM patients WHERE organization_id = $1 AND patient_id = $2 LIMIT 1`,
+        [organizationId, patientId]
+      );
+
+      const email = rows?.[0]?.email ?? null;
+      if (!email) {
+        return res.status(404).json({ error: "Patient email not found" });
+      }
+      return res.json({ email });
+    } catch (error: any) {
+      console.error("[PATIENT-EMAIL-BY-PATIENT-ID] Error:", error);
+      res.status(500).json({ error: "Failed to fetch patient email", details: error?.message || String(error) });
+    }
+  });
+
   // IMPORTANT: Specific routes must come before parameterized routes
   app.get("/api/patients/my-prescriptions", authMiddleware, requireRole(["patient"]), async (req: TenantRequest, res) => {
     try {
@@ -16476,6 +16509,51 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
+  // Check whether a lab result PDF exists (used to enable/disable "Send Results" in Share Lab Results popup)
+  app.get("/api/lab-results/:id/pdf-status", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const labResultId = parseInt(req.params.id);
+      if (isNaN(labResultId)) {
+        return res.status(400).json({ error: "Invalid lab result ID" });
+      }
+
+      // IMPORTANT: Lab results + PDFs are stored under the user's organization.
+      // In some flows `req.tenant` can be missing or differ from the user's org.
+      const organizationId = (req.user as any)?.organizationId ?? req.tenant?.id;
+      if (!organizationId) {
+        return res.status(400).json({ error: "Organization ID is required" });
+      }
+      const isPrescription = req.query.type === "prescription";
+
+      const labResults = await storage.getLabResults(organizationId);
+      const labResult = labResults.find((r) => r.id === labResultId);
+      if (!labResult) {
+        return res.status(404).json({ error: "Lab result not found" });
+      }
+
+      const pdfDirectoryName = isPrescription ? "Lab_Prescription" : "Lab_TestResults";
+      const fileName = `${labResult.testId}.pdf`;
+      const filePath = path.join(
+        process.cwd(),
+        "uploads",
+        pdfDirectoryName,
+        organizationId.toString(),
+        labResult.patientId.toString(),
+        fileName
+      );
+
+      const exists = await fse.pathExists(filePath);
+      return res.json({ exists, fileName: exists ? fileName : null });
+    } catch (error: any) {
+      console.error("[LAB-PDF-STATUS] Error:", error);
+      res.status(500).json({ error: "Failed to check PDF status", details: error?.message || String(error) });
+    }
+  });
+
   // Share lab result PDF via email to patient
   app.post("/api/lab-results/:id/share-email", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
     try {
@@ -16488,7 +16566,11 @@ This treatment plan should be reviewed and adjusted based on individual patient 
         return res.status(400).json({ error: "Invalid lab result ID" });
       }
 
-      const organizationId = req.tenant!.id;
+      // Use the user's org for file + data lookup (more reliable than req.tenant in some auth flows).
+      const organizationId = (req.user as any)?.organizationId ?? req.tenant?.id;
+      if (!organizationId) {
+        return res.status(400).json({ error: "Organization ID is required" });
+      }
 
       const labResults = await storage.getLabResults(organizationId);
       const labResult = labResults.find(r => r.id === labResultId);
