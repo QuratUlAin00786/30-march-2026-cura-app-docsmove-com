@@ -81,10 +81,11 @@ export async function tenantMiddleware(req: TenantRequest, res: Response, next: 
     console.log(`[TENANT-MIDDLEWARE] Processing request: ${req.method} ${req.path} ${req.url}`);
     
     // Skip tenant middleware for static assets and development files to prevent DB calls
+    // NOTE: Do NOT skip `/public` here because `/api/public/:subdomain/...` booking endpoints
+    // rely on tenant context (organizationId) being resolved by this middleware.
     const skipPaths = [
       '/assets', '/@vite', '/src', '/node_modules', '/__vite_hmr',
-      '/favicon.ico', '/robots.txt', '/sitemap.xml', '/.vite',
-      '/public', '/client/public'
+      '/favicon.ico', '/robots.txt', '/sitemap.xml', '/.vite'
     ];
     
     if (skipPaths.some(path => req.path.startsWith(path))) {

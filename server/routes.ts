@@ -39,7 +39,7 @@ import {
   getStorageUsage,
 } from "./services/stripe-subscription";
 import { logSubscriptionHistory } from "./services/subscription-history";
-import { sendEmail, generatePrescriptionEmailHTML } from "./email";
+import { sendEmail, generatePrescriptionEmailHTML, generateAppointmentConfirmationEmailHTML, generateBookingLinkEmailHTML } from "./email";
 import multer from "multer";
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -354,47 +354,6 @@ function calculateHealthScore(medicalRecords: any[], patientData: any) {
         scores.labs.points = Math.min(20, labScore / labCount);
       }
     }
-  });
-
-  // Health check: verify DB connectivity and responsiveness quickly
-  app.get("/api/health/db", async (_req: Request, res: Response) => {
-    const start = Date.now();
-    let ok = false;
-    let errorMessage: string | null = null;
-    let serverTime: string | null = null;
-    try {
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        // Keep very short to avoid hanging the app if DB is congested
-        await client.query("SET LOCAL statement_timeout = 2000");
-        const r = await client.query<{ now: string }>("SELECT NOW()::text as now");
-        serverTime = Array.isArray(r.rows) && r.rows[0]?.now ? String(r.rows[0].now) : null;
-        await client.query("COMMIT");
-        ok = true;
-      } catch (err: any) {
-        try { await client.query("ROLLBACK"); } catch {}
-        errorMessage = err?.message || String(err);
-      } finally {
-        client.release();
-      }
-    } catch (err: any) {
-      errorMessage = err?.message || String(err);
-    }
-    const durationMs = Date.now() - start;
-    // Pool stats (pg exposes these counters on Pool)
-    const poolStats = {
-      total: (pool as any)?.totalCount ?? undefined,
-      idle: (pool as any)?.idleCount ?? undefined,
-      waiting: (pool as any)?.waitingCount ?? undefined,
-    };
-    res.json({
-      ok,
-      durationMs,
-      serverTime,
-      pool: poolStats,
-      error: errorMessage,
-    });
   });
 
   // Parse lifestyle factors from patient data
@@ -851,6 +810,23 @@ const uploadAddImages = multer({
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("[ROUTE-REGISTRATION] Starting route registration...");
 
+  // Debug helper: list registered routes (dev only)
+  if (process.env.NODE_ENV === "development") {
+    app.get("/api/debug/routes", (_req: Request, res: Response) => {
+      const routes: Array<{ method: string; path: string }> = [];
+      const stack = (app as any)?._router?.stack || [];
+      for (const layer of stack) {
+        if (layer?.route?.path && layer?.route?.methods) {
+          const methods = Object.keys(layer.route.methods).filter((m) => layer.route.methods[m]);
+          for (const m of methods) {
+            routes.push({ method: m.toUpperCase(), path: String(layer.route.path) });
+          }
+        }
+      }
+      res.json({ count: routes.length, routes });
+    });
+  }
+
   // DEPLOYMENT HEALTH CHECK - Absolute priority for deployment success
   app.get('/api/health', (req, res) => {
     res.status(200).json({
@@ -861,6 +837,348 @@ export async function registerRoutes(app: Express): Promise<Server> {
       environment: process.env.NODE_ENV || 'development'
     });
   });
+
+  // Public reschedule/update appointment (limited fields), requires matching email or phone
+  const publicRescheduleUpdateAppointmentHandler = async (req: TenantRequest, res: Response) => {
+    try {
+      console.log("[PUBLIC-APPOINTMENT][TRACE] Handler entered", {
+        ts: new Date().toISOString(),
+        path: req.path,
+        originalUrl: req.originalUrl,
+        appointmentId: req.params?.appointmentId,
+        tenantHeader: req.get("X-Tenant-Subdomain") || null,
+      });
+
+      const sub = String(req.params.subdomain || "").trim();
+      const appointmentId = String(req.params.appointmentId || "").trim();
+      const { email, phone, doctorId, date, time, appointmentType, duration, consultationId, treatmentId, description } = req.body || {};
+      if (!sub || !appointmentId) return res.status(400).json({ error: "Missing parameters" });
+
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const organizationId = (org as any).id;
+
+      const existingRes = await pool.query(
+        `SELECT id,
+                appointment_id,
+                patient_id,
+                provider_id,
+                scheduled_at,
+                to_char(scheduled_at::timestamp, 'YYYY-MM-DD') AS scheduled_date,
+                to_char(scheduled_at::timestamp, 'HH24:MI') AS scheduled_time,
+                duration,
+                appointment_type,
+                consultation_id,
+                treatment_id,
+                description
+         FROM appointments
+         WHERE organization_id = $1 AND appointment_id = $2
+         LIMIT 1`,
+        [organizationId, appointmentId]
+      );
+      if (existingRes.rows.length === 0) return res.status(404).json({ error: "Appointment not found" });
+      const existing = existingRes.rows[0];
+      const appointmentDbId = Number(existing.id);
+
+      // Verify requester identity
+      const patient = await storage.getPatient(existing.patient_id, organizationId);
+      const matchesIdentity =
+        (!!email && patient?.email && String(patient.email).toLowerCase() === String(email).toLowerCase()) ||
+        (!!phone && patient?.phone && String(patient.phone).trim() === String(phone).trim());
+      if (!matchesIdentity) return res.status(403).json({ error: "Identity verification failed" });
+
+      const nextDoctorId = doctorId != null ? Number(doctorId) : existing.provider_id;
+      const nextDuration = duration != null ? Math.max(15, Number(duration)) : existing.duration;
+      const nextType = appointmentType ? String(appointmentType) : existing.appointment_type;
+      const nextConsultationId = nextType.toLowerCase() === "consultation" ? (consultationId != null ? Number(consultationId) : existing.consultation_id) : null;
+      const nextTreatmentId = nextType.toLowerCase() === "treatment" ? (treatmentId != null ? Number(treatmentId) : existing.treatment_id) : null;
+      const nextDescription = description != null ? String(description).trim() : existing.description;
+
+      // Compute next scheduled_at from date + time ("HH:mm" or "hh:mm AM/PM")
+      let nextScheduledAt: string = String(existing.scheduled_at);
+      let nextDateOnly: string | null = null;
+      let nextHour: number | null = null;
+      let nextMinute: number | null = null;
+      if (date && time) {
+        const dateStr = String(date).trim();
+        const timeStrRaw = String(time).trim();
+        const ampmMatch = timeStrRaw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        let hhmm24 = timeStrRaw;
+        if (ampmMatch) {
+          let hours = parseInt(ampmMatch[1], 10);
+          const minutes = ampmMatch[2];
+          const meridiem = ampmMatch[3].toUpperCase();
+          hours = meridiem === "AM" ? (hours % 12) : (hours % 12 + 12);
+          hhmm24 = `${String(hours).padStart(2, "0")}:${minutes}`;
+        }
+        const hhmmMatch = hhmm24.match(/^(\d{2}):(\d{2})$/);
+        if (!hhmmMatch) return res.status(400).json({ error: "Invalid time format" });
+        nextDateOnly = dateStr;
+        nextHour = parseInt(hhmmMatch[1], 10);
+        nextMinute = parseInt(hhmmMatch[2], 10);
+        nextScheduledAt = `${dateStr} ${hhmm24}:00`;
+      }
+      if (!nextDateOnly || nextHour == null || nextMinute == null) {
+        return res.status(400).json({ error: "date and time are required" });
+      }
+
+      console.log("[PUBLIC-APPOINTMENT] Computed schedule", {
+        appointmentId,
+        organizationId,
+        appointmentDbId,
+        nextScheduledAt,
+        nextDateOnly,
+        nextHour,
+        nextMinute,
+        nextDoctorId,
+        nextDuration,
+        nextType,
+        nextConsultationId,
+        nextTreatmentId,
+      });
+
+      const overlap = await pool.query(
+        `SELECT id
+         FROM appointments
+         WHERE organization_id = $1
+           AND provider_id = $2
+           AND appointment_id <> $3
+           AND status <> 'cancelled'
+           AND (
+             scheduled_at < ($4::timestamp + (($5::int || ' minutes')::interval))
+             AND (scheduled_at + ((COALESCE(duration, 30)::int || ' minutes')::interval)) > $4::timestamp
+           )
+         LIMIT 1`,
+        [organizationId, nextDoctorId, appointmentId, nextScheduledAt, nextDuration]
+      );
+      if (overlap.rows.length > 0) return res.status(409).json({ error: "Selected slot is unavailable." });
+
+      const updateRes = await pool.query(
+        `UPDATE appointments
+         SET provider_id = $1,
+             scheduled_at = $2::timestamp,
+             appointment_type = $3,
+             duration = $4,
+             consultation_id = $5,
+             treatment_id = $6,
+             description = $7
+         WHERE organization_id = $8 AND id = $9 AND appointment_id = $10
+         RETURNING appointment_id,
+                   scheduled_at::text as scheduled_at,
+                   to_char(scheduled_at::timestamp, 'YYYY-MM-DD') as scheduled_date,
+                   to_char(scheduled_at::timestamp, 'HH24:MI') as scheduled_time,
+                   duration,
+                   provider_id`,
+        [
+          nextDoctorId,
+          nextScheduledAt,
+          nextType,
+          nextDuration,
+          nextConsultationId,
+          nextTreatmentId,
+          nextDescription,
+          organizationId,
+          appointmentDbId,
+          appointmentId,
+        ]
+      );
+      if (!updateRes.rowCount) return res.status(404).json({ error: "Appointment not found" });
+      const updated = updateRes.rows?.[0] || null;
+
+      const verifyRes = await pool.query(
+        `SELECT
+           scheduled_at::text AS scheduled_at_text,
+           to_char(scheduled_at::timestamp, 'YYYY-MM-DD') AS scheduled_date,
+           to_char(scheduled_at::timestamp, 'HH24:MI') AS scheduled_time
+         FROM appointments
+         WHERE organization_id = $1 AND appointment_id = $2
+         LIMIT 1`,
+        [organizationId, appointmentId]
+      );
+      const verified = verifyRes.rows?.[0] || null;
+
+      const identRes = await pool.query(
+        `SELECT
+           current_database() AS db,
+           current_user AS db_user,
+           inet_server_addr()::text AS server_addr,
+           inet_server_port() AS server_port,
+           inet_client_addr()::text AS client_addr`
+      );
+      const dbIdentity = identRes.rows?.[0] || null;
+
+      // Fire-and-forget: email patient with old/new appointment details (do not block success response)
+      try {
+        const formatTime12h = (hhmm: any): string => {
+          const s = String(hhmm ?? "").trim();
+          const m = s.match(/^(\d{1,2}):(\d{2})$/);
+          if (!m) return s || "—";
+          let h = parseInt(m[1], 10);
+          const min = m[2];
+          if (Number.isNaN(h)) return s || "—";
+          const ampm = h >= 12 ? "PM" : "AM";
+          h = h % 12;
+          if (h === 0) h = 12;
+          return `${String(h).padStart(2, "0")}:${min} ${ampm}`;
+        };
+
+        const patientEmail = patient?.email ? String(patient.email).trim() : (email ? String(email).trim() : "");
+        if (patientEmail) {
+          const oldProviderId = existing.provider_id != null ? Number(existing.provider_id) : null;
+          const newProviderId = updated?.provider_id != null ? Number(updated.provider_id) : null;
+
+          const providerNameById = async (providerId: number | null) => {
+            if (!providerId) return "—";
+            try {
+              const r = await pool.query(
+                `SELECT first_name, last_name, email
+                 FROM users
+                 WHERE organization_id = $1 AND id = $2
+                 LIMIT 1`,
+                [organizationId, providerId],
+              );
+              const u = r.rows?.[0];
+              const name = u ? `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() : "";
+              return name || (u?.email ? String(u.email) : String(providerId));
+            } catch {
+              return String(providerId);
+            }
+          };
+
+          const clinicName = (org as any)?.brandName || (org as any)?.name || "Clinic";
+          const patientName = `${patient?.firstName ?? ""} ${patient?.lastName ?? ""}`.trim() || "Patient";
+          const oldDoctorName = await providerNameById(oldProviderId);
+          const newDoctorName = await providerNameById(newProviderId);
+          const oldDate = existing?.scheduled_date || "—";
+          const oldTime = formatTime12h(existing?.scheduled_time);
+          const newDate = updated?.scheduled_date || verified?.scheduled_date || nextDateOnly || "—";
+          const newTime = formatTime12h(updated?.scheduled_time || verified?.scheduled_time);
+          const oldDuration = existing?.duration ?? "—";
+          const newDuration = updated?.duration ?? nextDuration ?? "—";
+          const apptTypeLabel = nextType || existing?.appointment_type || "appointment";
+
+          const subject = `Appointment Updated (${appointmentId}) - ${clinicName}`;
+          const text = `Hello ${patientName},
+
+Your appointment has been updated successfully.
+
+Appointment ID: ${appointmentId}
+Type: ${apptTypeLabel}
+
+Previous:
+- Date: ${oldDate}
+- Time: ${oldTime}
+- Duration: ${oldDuration} minutes
+- Doctor: ${oldDoctorName}
+
+Updated:
+- Date: ${newDate}
+- Time: ${newTime}
+- Duration: ${newDuration} minutes
+- Doctor: ${newDoctorName}
+
+If you did not request this change, please contact ${clinicName}.`;
+
+          const html = `
+<!doctype html>
+<html>
+  <body style="margin:0; padding:0; font-family: Arial, sans-serif; background:#f5f5f5;">
+    <div style="max-width:640px; margin:0 auto; background:#ffffff; padding:24px;">
+      <h2 style="margin:0 0 10px 0; color:#111827;">Appointment Updated Successfully</h2>
+      <p style="margin:0 0 16px 0; color:#374151;">Hello <strong>${patientName}</strong>, your appointment has been updated.</p>
+
+      <div style="border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; margin: 16px 0;">
+        <div style="background:#EEF2FF; padding:12px 14px; font-weight:700; color:#3730A3;">Appointment Details</div>
+        <div style="padding:14px;">
+          <div style="color:#111827; margin-bottom:6px;"><strong>Appointment ID:</strong> ${appointmentId}</div>
+          <div style="color:#111827;"><strong>Type:</strong> ${apptTypeLabel}</div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:14px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:280px; border:1px solid #E5E7EB; border-radius:12px; padding:14px;">
+          <div style="font-weight:700; color:#111827; margin-bottom:10px;">Previous</div>
+          <div style="color:#374151;"><strong>Date:</strong> ${oldDate}</div>
+          <div style="color:#374151;"><strong>Time:</strong> ${oldTime}</div>
+          <div style="color:#374151;"><strong>Duration:</strong> ${oldDuration} minutes</div>
+          <div style="color:#374151;"><strong>Doctor:</strong> ${oldDoctorName}</div>
+        </div>
+
+        <div style="flex:1; min-width:280px; border:1px solid #E5E7EB; border-radius:12px; padding:14px;">
+          <div style="font-weight:700; color:#111827; margin-bottom:10px;">Updated</div>
+          <div style="color:#374151;"><strong>Date:</strong> ${newDate}</div>
+          <div style="color:#374151;"><strong>Time:</strong> ${newTime}</div>
+          <div style="color:#374151;"><strong>Duration:</strong> ${newDuration} minutes</div>
+          <div style="color:#374151;"><strong>Doctor:</strong> ${newDoctorName}</div>
+        </div>
+      </div>
+
+      <p style="margin:18px 0 0 0; color:#6B7280; font-size:13px; line-height:1.6;">
+        If you did not request this change, please contact <strong>${clinicName}</strong>.
+      </p>
+    </div>
+  </body>
+</html>`;
+
+          const from = process.env.EMAIL_FROM || process.env.SMTP_FROM || "noreply@curaemr.ai";
+          const sent = await emailService.sendEmail({ to: patientEmail, from, subject, text, html });
+          console.log("[PUBLIC-APPOINTMENT-EMAIL] Update email sent:", { appointmentId, to: patientEmail, sent });
+        } else {
+          console.log("[PUBLIC-APPOINTMENT-EMAIL] Skipped (no patient email)", { appointmentId, patientId: existing.patient_id });
+        }
+      } catch (emailErr) {
+        console.error("[PUBLIC-APPOINTMENT-EMAIL] Failed to send update email", emailErr);
+      }
+
+      res.json({ success: true, appointmentId, updated, verified, dbIdentity });
+    } catch (e) {
+      console.error("[PUBLIC-APPOINTMENT-RESCHEDULE] Error:", e);
+      res.status(500).json({
+        error: "Failed to update appointment",
+        details: process.env.NODE_ENV === "development" ? (e as any)?.message || String(e) : undefined,
+      });
+    }
+  };
+
+  // Public: fetch an existing appointment by appointment_id (requires matching email or phone)
+  app.get("/api/public/:subdomain/appointments/:appointmentId", async (req: TenantRequest, res: Response) => {
+    try {
+      const sub = String(req.params.subdomain || "").trim();
+      const appointmentId = String(req.params.appointmentId || "").trim();
+      const email = req.query.email ? String(req.query.email).trim() : "";
+      const phone = req.query.phone ? String(req.query.phone).trim() : "";
+      if (!sub || !appointmentId) return res.status(400).json({ error: "Missing parameters" });
+      if (!email && !phone) return res.status(400).json({ error: "email or phone is required" });
+
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const organizationId = (org as any).id;
+
+      const apptRes = await pool.query(
+        `SELECT id, appointment_id, patient_id, provider_id, scheduled_at::text AS scheduled_at, duration, appointment_type, consultation_id, treatment_id, description, status
+         FROM appointments
+         WHERE organization_id = $1 AND appointment_id = $2
+         LIMIT 1`,
+        [organizationId, appointmentId]
+      );
+      if (apptRes.rows.length === 0) return res.status(404).json({ error: "Appointment not found" });
+      const appt = apptRes.rows[0];
+
+      const patient = await storage.getPatient(Number(appt.patient_id), organizationId);
+      const matchesIdentity =
+        (!!email && patient?.email && String(patient.email).toLowerCase() === email.toLowerCase()) ||
+        (!!phone && patient?.phone && String(patient.phone).trim() === phone);
+      if (!matchesIdentity) return res.status(403).json({ error: "Identity verification failed" });
+
+      return res.json({ success: true, appointment: appt });
+    } catch (e) {
+      console.error("[PUBLIC-APPOINTMENT-GET] Error:", e);
+      return res.status(500).json({ error: "Failed to load appointment" });
+    }
+  });
+
+  app.patch("/api/public/:subdomain/appointments/:appointmentId", publicRescheduleUpdateAppointmentHandler);
+  app.patch("/public/:subdomain/appointments/:appointmentId", publicRescheduleUpdateAppointmentHandler);
 
   // Get current user details - MUST be registered early to avoid route conflicts
   // Using authMiddleware first to get user from token, then we can get orgId from user
@@ -3471,8 +3789,9 @@ The Cura EMR Team`,
   // Protected routes (auth required)
   // Exclude /saas/ routes - they have their own auth middleware chain
   app.use("/api", (req, res, next) => {
-    // Skip auth middleware for SaaS routes (they handle their own auth)
-    if (req.path.startsWith('/saas/')) {
+    // Skip auth middleware for routes that are intentionally public.
+    // Multi-tenant context is still enforced by tenant middleware + enforcer.
+    if (req.path.startsWith('/saas/') || req.path.startsWith('/public/')) {
       return next();
     }
     return authMiddleware(req, res, next);
@@ -16554,6 +16873,891 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     }
   });
 
+  // ── Public booking endpoints (multi-tenant by subdomain) ─────────────────────────────────────────
+  // Get doctors for org subdomain (public)
+  app.get("/api/public/:subdomain/doctors", async (req: TenantRequest, res) => {
+    try {
+      const sub = String(req.params.subdomain || "").trim();
+      if (!sub) return res.status(400).json({ error: "Missing subdomain" });
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const doctors = (await storage.getUsersByOrganization((org as any).id))
+        .filter((u: any) => ["doctor", "nurse"].includes((u.role || "").toLowerCase()))
+        .map((u: any) => ({
+          id: u.id,
+          name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || `User #${u.id}`,
+          role: u.role
+        }));
+      res.json({ organizationId: (org as any).id, subdomain: sub, doctors });
+    } catch (error) {
+      console.error("[PUBLIC-DOCTORS] Error:", error);
+      res.status(500).json({ error: "Failed to load doctors" });
+    }
+  });
+
+  // Public availability for a doctor on a specific date (15-min slots, shift-aware, conflict-aware)
+  app.get("/api/public/:subdomain/availability", async (req: TenantRequest, res) => {
+    try {
+      const sub = String(req.params.subdomain || "").trim();
+      const doctorId = Number(req.query.doctorId);
+      const date = String(req.query.date || "").trim(); // yyyy-mm-dd
+      const duration = Math.max(15, Number(req.query.duration || 30));
+      const excludeAppointmentId = String(req.query.excludeAppointmentId || "").trim();
+      if (!sub || !doctorId || !date) {
+        return res.status(400).json({ error: "subdomain, doctorId, and date are required" });
+      }
+      // Disable caching to avoid stale 304 after updates
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('ETag', `${Date.now()}-${doctorId}-${date}-${duration}-${excludeAppointmentId}`);
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const organizationId = (org as any).id;
+
+      const dayName = new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+      const customShifts = await storage.getStaffShiftsByStaff(doctorId, organizationId, date);
+      const defaultShift = await storage.getDefaultShiftByUser(doctorId, organizationId);
+
+      const toMinutes = (hhmm: string) => {
+        const [h, m] = hhmm.split(":").map((v) => parseInt(v, 10));
+        return (h * 60) + m;
+      };
+      const minutesToSlot = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+
+      // Build working windows from custom shift(s) for date, else default shift for matching weekday
+      const windows: Array<{ start: number; end: number }> = [];
+      if (customShifts.length > 0) {
+        for (const s of customShifts as any[]) {
+          windows.push({ start: toMinutes(String(s.startTime).slice(0, 5)), end: toMinutes(String(s.endTime).slice(0, 5)) });
+        }
+      } else if (defaultShift && Array.isArray((defaultShift as any).workingDays) && (defaultShift as any).workingDays.includes(dayName)) {
+        windows.push({
+          start: toMinutes(String((defaultShift as any).startTime).slice(0, 5)),
+          end: toMinutes(String((defaultShift as any).endTime).slice(0, 5)),
+        });
+      } else {
+        return res.status(200).json({ slots: [] });
+      }
+
+      // IMPORTANT: Query appointments using raw SQL so we get `scheduled_at` as text and avoid
+      // pg -> JS Date timezone conversions (timestamp w/o timezone can otherwise shift and miss conflicts).
+      const apptResult = await pool.query(
+        `SELECT appointment_id::text as appointment_id, scheduled_at::text AS scheduled_at, COALESCE(duration, 30) AS duration
+         FROM appointments
+         WHERE organization_id = $1
+           AND provider_id = $2
+           AND status <> 'cancelled'
+           AND DATE(scheduled_at::timestamp) = $3::date
+           AND ($4::text = '' OR appointment_id::text <> $4::text)`,
+        [organizationId, doctorId, date, excludeAppointmentId]
+      );
+      const doctorAppointments = (apptResult.rows || []).map((r: any) => ({
+        appointmentId: String(r.appointment_id || ""),
+        scheduledAtText: String(r.scheduled_at || ""),
+        duration: Number(r.duration) || 30,
+      }));
+
+      const needed = Math.ceil(duration / 15) * 15;
+      const slots: string[] = [];
+      const allSlots: string[] = [];
+      const bookedSlots = new Set<string>();
+      const bookedSlots15 = new Set<string>();
+
+      // Expand booked ranges into 15-min blocks for UI grey rendering
+      doctorAppointments.forEach((a: any) => {
+        const raw = String(a.scheduledAtText || "");
+        const timePart = raw.includes(" ") ? raw.split(" ")[1] : "";
+        const hhmm = String(timePart || "").slice(0, 5);
+        const [hhStr, mmStr] = hhmm.split(":");
+        const hh = parseInt(hhStr || "0", 10);
+        const mm = parseInt(mmStr || "0", 10);
+        if (Number.isNaN(hh) || Number.isNaN(mm)) return;
+        const startMin = hh * 60 + mm;
+        const dur = Math.max(15, Number(a.duration) || 30);
+        for (let m = startMin; m < startMin + dur; m += 15) {
+          bookedSlots15.add(minutesToSlot(m));
+        }
+      });
+      for (const w of windows) {
+        for (let start = w.start; start + needed <= w.end; start += 15) {
+          const end = start + needed;
+          const slotLabel = minutesToSlot(start);
+          allSlots.push(slotLabel);
+          const hasOverlap = doctorAppointments.some((a: any) => {
+            // scheduled_at::text is usually "YYYY-MM-DD HH:MM:SS"
+            const raw = String(a.scheduledAtText || "");
+            const timePart = raw.includes(" ") ? raw.split(" ")[1] : "";
+            const hhmm = String(timePart || "").slice(0, 5);
+            const [hhStr, mmStr] = hhmm.split(":");
+            const hh = parseInt(hhStr || "0", 10);
+            const mm = parseInt(mmStr || "0", 10);
+            if (Number.isNaN(hh) || Number.isNaN(mm)) return false;
+            const apptStart = hh * 60 + mm;
+            const apptEnd = apptStart + (Number(a.duration) || 30);
+            return start < apptEnd && end > apptStart;
+          });
+          if (!hasOverlap) {
+            slots.push(slotLabel);
+          } else {
+            bookedSlots.add(slotLabel);
+        }
+      }
+      }
+      res.status(200).json({ slots, allSlots, bookedSlots: Array.from(bookedSlots), bookedSlots15: Array.from(bookedSlots15) });
+    } catch (error) {
+      console.error("[PUBLIC-AVAILABILITY] Error:", error);
+      // Also ensure error responses are uncached
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.status(500).json({ error: "Failed to fetch availability" });
+    }
+  });
+
+  // Public services for booking page, filtered by appointment type and doctor
+  app.get("/api/public/:subdomain/services", async (req: TenantRequest, res) => {
+    try {
+      // Disable caching to avoid 304 responses for dynamic service lists (doctor/type filters)
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      // Make ETag unique per request so conditional GET won't short-circuit
+      res.setHeader('ETag', `${Date.now()}-${String(req.params.subdomain || "")}-${String(req.query.type || "")}-${String(req.query.doctorId || "")}`);
+
+      const sub = String(req.params.subdomain || "").trim();
+      const type = String(req.query.type || "").trim().toLowerCase(); // consultation | treatment
+      const doctorId = req.query.doctorId ? Number(req.query.doctorId) : null;
+      if (!sub || !type) return res.status(400).json({ error: "subdomain and type are required" });
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const organizationId = (org as any).id;
+
+      if (type === "consultation") {
+        const params: any[] = [organizationId];
+        const doctorClause = doctorId ? `AND (doctor_id = $2 OR doctor_id IS NULL)` : "";
+        if (doctorId) params.push(doctorId);
+        const { rows } = await pool.query(
+          `SELECT id, service_name AS name, base_price, currency, doctor_id
+           FROM doctors_fee
+           WHERE organization_id = $1 AND is_active = true ${doctorClause}
+           ORDER BY service_name ASC`,
+          params
+        );
+        return res.json({ items: rows });
+      }
+
+      if (type === "treatment") {
+        // treatments table has doctor mapping and pricing
+        const params: any[] = [organizationId];
+        const doctorClause = doctorId ? `AND (doctor_id = $2 OR doctor_id IS NULL)` : "";
+        if (doctorId) params.push(doctorId);
+        const { rows } = await pool.query(
+          `SELECT id, name, base_price, currency, doctor_id
+           FROM treatments
+           WHERE organization_id = $1 AND is_active = true ${doctorClause}
+           ORDER BY name ASC`,
+          params
+        );
+        return res.json({ items: rows });
+      }
+
+      return res.status(400).json({ error: "type must be consultation or treatment" });
+    } catch (error) {
+      console.error("[PUBLIC-SERVICES] Error:", error);
+      res.status(500).json({ error: "Failed to fetch services" });
+    }
+  });
+
+  // Validate shared booking token (public)
+  app.get("/api/public/:subdomain/booking-token/:token", async (req: TenantRequest, res) => {
+    try {
+      const sub = String(req.params.subdomain || "").trim();
+      const token = String(req.params.token || "").trim();
+      if (!sub || !token) return res.status(400).json({ error: "Missing subdomain or token" });
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS shared_booking_links (
+          id SERIAL PRIMARY KEY,
+          organization_slug TEXT NOT NULL,
+          email TEXT NOT NULL,
+          doctor_id INTEGER,
+          token TEXT UNIQUE NOT NULL,
+          status TEXT NOT NULL DEFAULT 'created',
+          appointment_id TEXT,
+          booked_at TIMESTAMPTZ,
+          booked_details JSONB,
+          expires_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ DEFAULT now()
+        )
+      `);
+      // Ensure columns exist for older DBs
+      await pool.query(`
+        ALTER TABLE shared_booking_links
+          ADD COLUMN IF NOT EXISTS appointment_id TEXT,
+          ADD COLUMN IF NOT EXISTS booked_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS booked_details JSONB
+      `);
+      const { rows } = await pool.query(
+        `SELECT email, doctor_id, expires_at, status, appointment_id, booked_at, booked_details
+         FROM shared_booking_links
+         WHERE token = $1 AND organization_slug = $2
+         LIMIT 1`,
+        [token, sub]
+      );
+      if (rows.length === 0) return res.json({ valid: false });
+      const row = rows[0];
+      if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+        return res.json({ valid: false, reason: "expired" });
+      }
+
+      // If already booked but booked_details is missing (older rows), reconstruct from appointments table.
+      let bookedDetails = row.booked_details ?? null;
+      if (String(row.status || "").toLowerCase() === "booked" && !bookedDetails && row.appointment_id) {
+        try {
+          const org = await storage.getOrganizationBySubdomain(sub);
+          const organizationId = (org as any)?.id;
+          if (organizationId) {
+            const apptRes = await pool.query(
+              `SELECT
+                 a.appointment_id,
+                 a.appointment_type,
+                 a.duration,
+                 a.scheduled_at::text AS scheduled_at,
+                 a.provider_id,
+                 a.treatment_id,
+                 a.consultation_id,
+                 u.first_name AS provider_first_name,
+                 u.last_name AS provider_last_name,
+                 u.email AS provider_email,
+                 u.role AS provider_role,
+                 t.name AS treatment_name,
+                 df.service_name AS consultation_name
+               FROM appointments a
+               LEFT JOIN users u
+                 ON u.id = a.provider_id AND u.organization_id = a.organization_id
+               LEFT JOIN treatments t
+                 ON t.id = a.treatment_id AND t.organization_id = a.organization_id
+               LEFT JOIN doctors_fee df
+                 ON df.id = a.consultation_id AND df.organization_id = a.organization_id
+               WHERE a.organization_id = $1 AND a.appointment_id = $2
+               LIMIT 1`,
+              [organizationId, String(row.appointment_id)]
+            );
+            if (apptRes.rows.length > 0) {
+              const a = apptRes.rows[0];
+              const scheduledText = String(a.scheduled_at || "");
+              const [datePart, timePartRaw] = scheduledText.includes(" ")
+                ? scheduledText.split(" ")
+                : [scheduledText.slice(0, 10), scheduledText.slice(11)];
+              const timePart = String(timePartRaw || "").slice(0, 5);
+              const doctorName =
+                `${a.provider_first_name ?? ""} ${a.provider_last_name ?? ""}`.trim() ||
+                a.provider_email ||
+                `Doctor #${a.provider_id}`;
+              const serviceName =
+                (String(a.appointment_type || "").toLowerCase() === "treatment"
+                  ? a.treatment_name
+                  : a.consultation_name) || null;
+
+              bookedDetails = {
+                appointmentId: a.appointment_id,
+                subdomain: sub,
+                clinicName: (org as any)?.name || sub,
+                doctorId: a.provider_id,
+                doctorName,
+                doctorRole: a.provider_role || null,
+                appointmentType: String(a.appointment_type || "consultation"),
+                serviceName,
+                date: datePart || null,
+                time: timePart || null,
+                duration: Number(a.duration) || 30,
+              };
+            }
+          }
+        } catch (e) {
+          console.warn("[PUBLIC-BOOKING-TOKEN] Failed to reconstruct booked_details:", e);
+        }
+      }
+
+      return res.json({
+        valid: true,
+        email: row.email,
+        doctorId: row.doctor_id ?? null,
+        status: row.status,
+        appointmentId: row.appointment_id ?? null,
+        bookedAt: row.booked_at ?? null,
+        bookedDetails,
+      });
+    } catch (error) {
+      console.error("[PUBLIC-BOOKING-TOKEN] Error:", error);
+      res.status(500).json({ error: "Failed to validate token" });
+    }
+  });
+
+  // Create public appointment (public)
+  app.post("/api/public/:subdomain/appointments", async (req: TenantRequest, res) => {
+    try {
+      const sub = String(req.params.subdomain || "").trim();
+      const { name, phone, email, doctorId, date, time, token, appointmentType, duration, consultationId, treatmentId, description } = req.body || {};
+      if (!sub) return res.status(400).json({ error: "Missing subdomain" });
+      if (!name || !phone || !doctorId || !date || !time) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const organizationId = (org as any).id;
+      const connectedStripeAccountId = (org as any)?.stripeAccountId as string | null;
+
+      // If booking via shared token, enforce single-use.
+      if (token) {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS shared_booking_links (
+            id SERIAL PRIMARY KEY,
+            organization_slug TEXT NOT NULL,
+            email TEXT NOT NULL,
+            doctor_id INTEGER,
+            token TEXT UNIQUE NOT NULL,
+            status TEXT NOT NULL DEFAULT 'created',
+            appointment_id TEXT,
+            booked_at TIMESTAMPTZ,
+            booked_details JSONB,
+            expires_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT now()
+          )
+        `);
+        await pool.query(`
+          ALTER TABLE shared_booking_links
+            ADD COLUMN IF NOT EXISTS appointment_id TEXT,
+            ADD COLUMN IF NOT EXISTS booked_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS booked_details JSONB
+        `);
+
+        const tok = String(token).trim();
+        const tokenRow = await pool.query(
+          `SELECT status, appointment_id, booked_details
+           FROM shared_booking_links
+           WHERE token = $1 AND organization_slug = $2
+           LIMIT 1`,
+          [tok, sub]
+        );
+        if (tokenRow.rows.length > 0) {
+          const st = String(tokenRow.rows[0].status || "").toLowerCase();
+          if (st === "booked") {
+            return res.status(409).json({
+              error: "This booking link has already been used.",
+              code: "BOOKING_LINK_ALREADY_USED",
+              appointmentId: tokenRow.rows[0].appointment_id ?? null,
+              bookedDetails: tokenRow.rows[0].booked_details ?? null,
+            });
+          }
+        }
+      }
+
+      // Compose scheduled_at (assume local timestamps without timezone)
+      const durationMins = Math.max(15, Number(duration || 30));
+      const scheduledAt = `${date} ${time}:00`;
+      // Conflict check with overlap window
+      const overlap = await pool.query(
+        `SELECT id
+         FROM appointments
+         WHERE organization_id = $1
+           AND provider_id = $2
+           AND status <> 'cancelled'
+           AND (
+             scheduled_at < ($3::timestamp + (($4::int || ' minutes')::interval))
+             AND (scheduled_at + ((COALESCE(duration, 30)::int || ' minutes')::interval)) > $3::timestamp
+           )
+         LIMIT 1`,
+        [organizationId, Number(doctorId), scheduledAt, durationMins]
+      );
+      if (overlap.rows.length > 0) return res.status(409).json({ error: "Selected slot is unavailable." });
+
+      // Ensure patient record exists (find by phone or email within org)
+      let patientId: number | null = null;
+      let guestPatientCode: string | null = null; // patients.patient_id (e.g. GUEST123...)
+      const patients = await storage.getPatientsByOrganization(organizationId, 10000);
+      const match = patients.find((p: any) =>
+        (email && p.email && p.email.toLowerCase() === String(email).toLowerCase()) ||
+        (phone && p.phone && String(p.phone).trim() === String(phone).trim())
+      );
+      if (match) {
+        patientId = match.id;
+        guestPatientCode = match.patientId || match.patient_id || null;
+      } else {
+        const newGuestCode = `GUEST${Date.now()}`;
+        const created = await storage.createPatient({
+          organizationId,
+          userId: null,
+          patientId: newGuestCode,
+          firstName: String(name).split(" ")[0] || name,
+          lastName: String(name).split(" ").slice(1).join(" ") || "",
+          email: email || null,
+          phone: phone || null
+        } as any);
+        patientId = (created as any)?.id ?? null;
+        guestPatientCode = newGuestCode;
+      }
+      if (!patientId) {
+        return res.status(500).json({ error: "Failed to create or find patient" });
+      }
+
+      // Prevent duplicate appointments for the same patient with the same doctor on the same day (status not cancelled)
+      const duplicateSameDay = await pool.query(
+        `SELECT appointment_id,
+                provider_id,
+                scheduled_at,
+                to_char(scheduled_at::timestamp, 'YYYY-MM-DD') as scheduled_date,
+                to_char(scheduled_at::timestamp, 'HH24:MI') as scheduled_time,
+                duration,
+                appointment_type,
+                consultation_id,
+                treatment_id,
+                description
+         FROM appointments
+         WHERE organization_id = $1
+           AND patient_id = $2
+           AND provider_id = $3
+           AND status <> 'cancelled'
+           AND DATE(scheduled_at::timestamp) = $4::date
+         ORDER BY scheduled_at DESC
+         LIMIT 1`,
+        [organizationId, patientId, Number(doctorId), date]
+      );
+      if (duplicateSameDay.rows.length > 0) {
+        return res.status(409).json({
+          error: "Patient already has an appointment on this day.",
+          code: "DUPLICATE_PATIENT_SAME_DAY",
+          existingAppointment: duplicateSameDay.rows[0],
+          patient: { id: patientId, name, email: email || null, phone: phone || null },
+        });
+      }
+
+      // Create appointment
+      const apptId = `APT${Date.now()}AUTO`;
+      await pool.query(
+        `INSERT INTO appointments
+          (organization_id, appointment_id, patient_id, provider_id, scheduled_at, status, title, description, appointment_type, duration, consultation_id, treatment_id, created_at)
+         VALUES ($1, $2, $3, $4, $5::timestamp, 'scheduled', $6, $7, $8, $9, $10, $11, now())`,
+        [
+          organizationId,
+          apptId,
+          patientId,
+          Number(doctorId),
+          scheduledAt,
+          `Appointment with ${name}`,
+          description ? String(description).trim() : null,
+          String(appointmentType || "consultation"),
+          durationMins,
+          consultationId ? Number(consultationId) : null,
+          treatmentId ? Number(treatmentId) : null,
+        ]
+      );
+
+      // If clinic has Stripe Connect configured and the chosen service has a price,
+      // create a Stripe Checkout Session on the clinic's connected account.
+      let checkoutUrl: string | null = null;
+      let checkoutSessionId: string | null = null;
+      let paymentAmountMinor: number | null = null;
+      let paymentCurrency: string | null = null;
+      let paymentServiceLabel: string | null = null;
+
+      if (connectedStripeAccountId && stripe) {
+        try {
+          if (String(appointmentType || "").toLowerCase() === "consultation" && consultationId) {
+            const serviceRow = await pool.query(
+              `SELECT service_name, base_price, currency
+               FROM doctors_fee
+               WHERE id = $1 AND organization_id = $2
+               LIMIT 1`,
+              [Number(consultationId), organizationId]
+            );
+            const row = serviceRow.rows[0];
+            paymentServiceLabel = row?.service_name || null;
+            paymentCurrency = row?.currency || "GBP";
+            const basePrice = row?.base_price;
+            if (basePrice != null) {
+              const amount = Number(basePrice);
+              if (Number.isFinite(amount) && amount > 0) {
+                paymentAmountMinor = Math.round(amount * 100);
+              }
+            }
+          } else if (String(appointmentType || "").toLowerCase() === "treatment" && treatmentId) {
+            const serviceRow = await pool.query(
+              `SELECT name, base_price, currency
+               FROM treatments
+               WHERE id = $1 AND organization_id = $2
+               LIMIT 1`,
+              [Number(treatmentId), organizationId]
+            );
+            const row = serviceRow.rows[0];
+            paymentServiceLabel = row?.name || null;
+            paymentCurrency = row?.currency || "GBP";
+            const basePrice = row?.base_price;
+            if (basePrice != null) {
+              const amount = Number(basePrice);
+              if (Number.isFinite(amount) && amount > 0) {
+                paymentAmountMinor = Math.round(amount * 100);
+              }
+            }
+          }
+
+          if (paymentAmountMinor != null && paymentCurrency) {
+            // Build redirect URLs back to the public booking page
+            const baseUrl = process.env.FRONTEND_URL || req.protocol + "://" + req.get("host");
+            const bookingUrl = `${baseUrl}/${sub}/book-appointment`;
+            const tokenQs = token ? `&token=${encodeURIComponent(String(token))}` : "";
+            const successUrl = `${bookingUrl}?payment=success&appointmentId=${encodeURIComponent(apptId)}${tokenQs}&session_id={CHECKOUT_SESSION_ID}`;
+            const cancelUrl = `${bookingUrl}?payment=cancelled&appointmentId=${encodeURIComponent(apptId)}${tokenQs}`;
+
+            const session = await stripe.checkout.sessions.create(
+              {
+                mode: "payment",
+                payment_method_types: ["card"],
+                line_items: [
+                  {
+                    quantity: 1,
+                    price_data: {
+                      currency: String(paymentCurrency).toLowerCase(),
+                      unit_amount: paymentAmountMinor,
+                      product_data: {
+                        name: paymentServiceLabel || "Appointment payment",
+                        description: `Appointment ${apptId}`,
+                      },
+                    },
+                  },
+                ],
+                success_url: successUrl,
+                cancel_url: cancelUrl,
+                metadata: {
+                  organization_id: String(organizationId),
+                  appointment_id: String(apptId),
+                  patient_id: String(patientId),
+                  booking_token: token ? String(token) : "",
+                },
+              },
+              { stripeAccount: connectedStripeAccountId }
+            );
+
+            checkoutUrl = session.url || null;
+            checkoutSessionId = session.id || null;
+          }
+        } catch (stripeErr) {
+          console.warn("[PUBLIC-APPOINTMENT] Stripe checkout session creation failed:", stripeErr);
+          checkoutUrl = null;
+          checkoutSessionId = null;
+        }
+      }
+
+      // If token was used, mark opened->booked
+      if (token) {
+        const doctorRow = await pool.query(
+          `SELECT first_name, last_name, email, role
+           FROM users
+           WHERE id = $1 AND organization_id = $2
+           LIMIT 1`,
+          [Number(doctorId), organizationId]
+        );
+        const doctor = doctorRow.rows[0];
+        const doctorName =
+          doctor
+            ? `${doctor.first_name ?? ""} ${doctor.last_name ?? ""}`.trim() || doctor.email || `Doctor #${doctorId}`
+            : `Doctor #${doctorId}`;
+        const doctorRole = doctor?.role || null;
+
+        let serviceLabel: string | null = null;
+        let servicePrice: string | null = null;
+        let serviceCurrency: string | null = null;
+        if (String(appointmentType || "").toLowerCase() === "consultation" && consultationId) {
+          const serviceRow = await pool.query(
+            `SELECT service_name, base_price, currency
+             FROM doctors_fee
+             WHERE id = $1 AND organization_id = $2
+             LIMIT 1`,
+            [Number(consultationId), organizationId]
+          );
+          serviceLabel = serviceRow.rows[0]?.service_name || null;
+          servicePrice = serviceRow.rows[0]?.base_price ?? null;
+          serviceCurrency = serviceRow.rows[0]?.currency ?? null;
+        } else if (String(appointmentType || "").toLowerCase() === "treatment" && treatmentId) {
+          const serviceRow = await pool.query(
+            `SELECT name, base_price, currency
+             FROM treatments
+             WHERE id = $1 AND organization_id = $2
+             LIMIT 1`,
+            [Number(treatmentId), organizationId]
+          );
+          serviceLabel = serviceRow.rows[0]?.name || null;
+          servicePrice = serviceRow.rows[0]?.base_price ?? null;
+          serviceCurrency = serviceRow.rows[0]?.currency ?? null;
+        }
+
+        const bookedDetails = {
+          appointmentId: apptId,
+          subdomain: sub,
+          clinicName: (org as any)?.name || sub,
+          patientCode: guestPatientCode,
+          doctorId: Number(doctorId),
+          doctorName,
+          doctorRole,
+          appointmentType: String(appointmentType || "consultation"),
+          serviceName: serviceLabel,
+          description: description ? String(description).trim() : null,
+          payment: {
+            amount: servicePrice,
+            currency: serviceCurrency,
+            checkoutUrl,
+            checkoutSessionId,
+          },
+          date: String(date),
+          time: String(time),
+          duration: durationMins,
+        };
+
+        await pool.query(
+          `UPDATE shared_booking_links
+           SET status = 'booked',
+               appointment_id = $3,
+               booked_at = now(),
+               booked_details = $4
+           WHERE token = $1 AND organization_slug = $2`,
+          [String(token).trim(), sub, apptId, JSON.stringify(bookedDetails)]
+        );
+      }
+
+      // Send booking confirmation email to guest if an email was provided.
+      const recipientEmail = String(email || "").trim();
+      if (recipientEmail) {
+        try {
+          const clinicHeader = await storage.getActiveClinicHeader(organizationId);
+          const clinicFooter = await storage.getActiveClinicFooter(organizationId);
+
+          const doctorRow = await pool.query(
+            `SELECT first_name, last_name, email
+             FROM users
+             WHERE id = $1 AND organization_id = $2
+             LIMIT 1`,
+            [Number(doctorId), organizationId]
+          );
+          const doctor = doctorRow.rows[0];
+          const doctorName =
+            doctor
+              ? `${doctor.first_name ?? ""} ${doctor.last_name ?? ""}`.trim() || doctor.email || `Doctor #${doctorId}`
+              : `Doctor #${doctorId}`;
+
+          let serviceLabel = "Not specified";
+          if (String(appointmentType || "").toLowerCase() === "consultation" && consultationId) {
+            const serviceRow = await pool.query(
+              `SELECT service_name
+               FROM doctors_fee
+               WHERE id = $1 AND organization_id = $2
+               LIMIT 1`,
+              [Number(consultationId), organizationId]
+            );
+            serviceLabel = serviceRow.rows[0]?.service_name || serviceLabel;
+          } else if (String(appointmentType || "").toLowerCase() === "treatment" && treatmentId) {
+            const serviceRow = await pool.query(
+              `SELECT name
+               FROM treatments
+               WHERE id = $1 AND organization_id = $2
+               LIMIT 1`,
+              [Number(treatmentId), organizationId]
+            );
+            serviceLabel = serviceRow.rows[0]?.name || serviceLabel;
+          }
+
+          const appointmentDate = date;
+          const appointmentTime = time;
+          const typeLabel = String(appointmentType || "consultation");
+          const durationLabel = `${durationMins} minutes`;
+
+          await emailService.sendEmail({
+            to: recipientEmail,
+            subject: `Appointment Confirmation - ${apptId}`,
+            html: generateAppointmentConfirmationEmailHTML({
+              visitorName: String(name || "Qura-visitor").trim(),
+              appointmentId: apptId,
+              patientId: guestPatientCode,
+              clinicName: (org as any)?.name || sub,
+              doctorName,
+              type: typeLabel,
+              service: serviceLabel,
+              date: String(appointmentDate),
+              time: String(appointmentTime),
+              durationLabel,
+              clinicHeader,
+              clinicFooter,
+            }),
+            text:
+              `Hello ${String(name || "Qura-visitor").trim()},\n\n` +
+              `Your appointment has been booked successfully.\n\n` +
+              `Appointment Summary\n` +
+              `- Appointment ID: ${apptId}\n` +
+              `- Patient ID: ${guestPatientCode || "—"}\n` +
+              `- Clinic: ${(org as any)?.name || sub}\n` +
+              `- Doctor: ${doctorName}\n` +
+              `- Type: ${typeLabel}\n` +
+              `- Service: ${serviceLabel}\n` +
+              `- Date: ${appointmentDate}\n` +
+              `- Time: ${appointmentTime}\n` +
+              `- Duration: ${durationLabel}\n\n` +
+              `If you need to make changes, please contact the clinic.`
+          });
+        } catch (mailErr) {
+          console.warn("[PUBLIC-APPOINTMENT] Confirmation email failed:", mailErr);
+        }
+      }
+
+      res.json({
+        success: true,
+        appointmentId: apptId,
+        patientId: guestPatientCode,
+        checkoutUrl,
+        checkoutSessionId,
+      });
+    } catch (error: any) {
+      console.error("[PUBLIC-APPOINTMENT] Error:", error);
+      res.status(500).json({ error: "Failed to create appointment", details: error?.message || String(error) });
+    }
+  });
+
+  // Public duplicate check before booking (no creation)
+  app.post("/api/public/:subdomain/appointments/check-duplicate", async (req: TenantRequest, res) => {
+    try {
+      const sub = String(req.params.subdomain || "").trim();
+      const { name, phone, email, doctorId, date } = req.body || {};
+      if (!sub) return res.status(400).json({ error: "Missing subdomain" });
+      if (!doctorId || !date || (!email && !phone && !name)) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const org = await storage.getOrganizationBySubdomain(sub);
+      if (!org) return res.status(404).json({ error: "Organization not found" });
+      const organizationId = (org as any).id;
+
+      // Resolve patient by email/phone like in booking flow
+      const patients = await storage.getPatientsByOrganization(organizationId, 10000);
+      const match = patients.find((p: any) =>
+        (email && p.email && p.email.toLowerCase() === String(email).toLowerCase()) ||
+        (phone && p.phone && String(p.phone).trim() === String(phone).trim())
+      );
+      let patientId: number | null = null;
+      if (match) {
+        patientId = match.id;
+      } else {
+        // If not found and only name was provided, we cannot reliably dedupe; return non-duplicate
+        if (!email && !phone) {
+          return res.json({ duplicate: false });
+        }
+      }
+      if (!patientId) return res.json({ duplicate: false });
+
+      // Check duplicate for same day and same doctor
+      const dup = await pool.query(
+        `SELECT appointment_id,
+                provider_id,
+                scheduled_at,
+                to_char(scheduled_at::timestamp, 'YYYY-MM-DD') as scheduled_date,
+                to_char(scheduled_at::timestamp, 'HH24:MI') as scheduled_time,
+                duration,
+                appointment_type,
+                consultation_id,
+                treatment_id,
+                description
+         FROM appointments
+         WHERE organization_id = $1
+           AND patient_id = $2
+           AND provider_id = $3
+           AND status <> 'cancelled'
+           AND DATE(scheduled_at::timestamp) = $4::date
+         ORDER BY scheduled_at DESC
+         LIMIT 1`,
+        [organizationId, patientId, Number(doctorId), date]
+      );
+      if (dup.rows.length > 0) {
+        return res.json({
+          duplicate: true,
+          code: "DUPLICATE_PATIENT_SAME_DAY",
+          existingAppointment: dup.rows[0],
+        });
+      }
+      return res.json({ duplicate: false });
+    } catch (error) {
+      console.error("[PUBLIC-DUP-CHECK] Error:", error);
+      res.status(500).json({ error: "Failed to check duplicate" });
+    }
+  });
+
+  // Share booking link (staff) - generate token and send mail
+  app.post("/api/appointments/share-link", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "User not authenticated" });
+      const { email, doctorId } = req.body || {};
+      if (!email) return res.status(400).json({ error: "Email is required" });
+      const organizationId = (req.user as any).organizationId ?? req.tenant?.id;
+      if (!organizationId) return res.status(400).json({ error: "Organization ID is required" });
+
+      // Get org for subdomain
+      const org = await storage.getOrganization(organizationId);
+      const subdomain = (org as any)?.subdomain || (org as any)?.slug || "demo";
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS shared_booking_links (
+          id SERIAL PRIMARY KEY,
+          organization_slug TEXT NOT NULL,
+          email TEXT NOT NULL,
+          doctor_id INTEGER,
+          token TEXT UNIQUE NOT NULL,
+          status TEXT NOT NULL DEFAULT 'created',
+          expires_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ DEFAULT now()
+        )
+      `);
+      const token = `BL_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const expiresAt = new Date(Date.now() + 48 * 3600 * 1000); // 48h
+      await pool.query(
+        `INSERT INTO shared_booking_links (organization_slug, email, doctor_id, token, status, expires_at)
+         VALUES ($1, $2, $3, $4, 'created', $5)`,
+        [subdomain, String(email).trim(), doctorId ? Number(doctorId) : null, token, expiresAt]
+      );
+
+      const pathOnly = `/${encodeURIComponent(subdomain)}/book-appointment?token=${encodeURIComponent(token)}${doctorId ? `&doctorId=${encodeURIComponent(doctorId)}` : ""}`;
+      // Build absolute URL for emails: prefer env var, else fall back to current host
+      const publicBase =
+        process.env.PUBLIC_APP_URL ||
+        process.env.APP_PUBLIC_URL ||
+        process.env.APP_BASE_URL ||
+        process.env.WEB_BASE_URL ||
+        "";
+      const hostFallback = (() => {
+        try {
+          const proto = (req as any).protocol || "http";
+          const host = req.get && req.get("host");
+          return host ? `${proto}://${host}` : "";
+        } catch {
+          return "";
+        }
+      })();
+      const baseUrl = (publicBase || hostFallback).replace(/\/$/, "");
+      const link = baseUrl ? `${baseUrl}${pathOnly}` : pathOnly;
+      // best-effort email
+      try {
+        const clinicHeader = await storage.getActiveClinicHeader(organizationId);
+        const clinicFooter = await storage.getActiveClinicFooter(organizationId);
+        await emailService.sendEmail({
+          to: String(email).trim(),
+          subject: "Your appointment booking link",
+          html: generateBookingLinkEmailHTML({ link, clinicHeader, clinicFooter }),
+          text: `Hello,\n\nPlease use the link below to book your appointment:\n\n${link}\n\nThis link will expire in 48 hours.`
+        });
+      } catch (mailErr) {
+        console.warn("[SHARE-LINK] Email failed:", mailErr);
+      }
+
+      res.json({ success: true, link, path: pathOnly, baseUrl: baseUrl || null });
+    } catch (error) {
+      console.error("[SHARE-LINK] Error:", error);
+      res.status(500).json({ error: "Failed to generate link" });
+    }
+  });
   // Share lab result PDF via email to patient
   app.post("/api/lab-results/:id/share-email", authMiddleware, requireNonPatientRole(), async (req: TenantRequest, res) => {
     try {

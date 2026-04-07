@@ -85,6 +85,9 @@ import CreateTrialPage from "@/pages/create-trial";
 import CreateTrialVerifyPage from "@/pages/create-trial-verify";
 import CreateTrialSetPasswordPage from "@/pages/create-trial-set-password";
 
+// Public pages (no login required)
+import PublicBookAppointmentPage from "@/pages/book-appointment";
+
 // Legal Pages
 import PrivacyPolicy from "@/pages/legal/PrivacyPolicy";
 import TermsOfService from "@/pages/legal/TermsOfService";
@@ -522,6 +525,14 @@ function AppRouter() {
     // Determine if this is a subdomain route
     const isSubdomainRoute = pathParts.length >= 1 && !isPublicRoute;
     const subdomain = isSubdomainRoute ? potentialSubdomain : null;
+    // Public booking routes must stay accessible without auth.
+    // - /:subdomain/book-appointment (existing)
+    // - /:subdomain/book (new, static public booking link per organization)
+    // - /:subdomain/appointments/book (new alias)
+    const isPublicBookingRoute =
+      /^\/[^/]+\/book-appointment(?:[/?#]|$)/.test(location) ||
+      /^\/[^/]+\/book(?:[/?#]|$)/.test(location) ||
+      /^\/[^/]+\/appointments\/book(?:[/?#]|$)/.test(location);
 
     const isSharedFormRoute = location.includes("/forms/fill");
     const isLandingPage =
@@ -556,7 +567,8 @@ function AppRouter() {
       !isSharedFormRoute &&
       !location.includes("/auth/login") &&
       !location.includes("/auth/reset-password") &&
-      !location.startsWith("/create-trial")
+      !location.startsWith("/create-trial") &&
+      !isPublicBookingRoute
     ) {
       // Check if we're on a subdomain route (e.g., /maryamkhan/dashboard)
       if (isSubdomainRoute) {
@@ -598,6 +610,9 @@ function AppRouter() {
         {/* Public pages */}
         <Route path="/forms/fill" component={FormSharePage} />
         <Route path="/:subdomain/forms/fill" component={FormSharePage} />
+        <Route path="/:subdomain/book-appointment" component={PublicBookAppointmentPage} />
+        <Route path="/:subdomain/book" component={PublicBookAppointmentPage} />
+        <Route path="/:subdomain/appointments/book" component={PublicBookAppointmentPage} />
         <Route path="/" component={LandingPage} />
         <Route path="/landing" component={LandingPage} />
         <Route path="/landing/about" component={AboutPage} />

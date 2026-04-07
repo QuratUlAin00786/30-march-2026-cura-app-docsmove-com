@@ -43,7 +43,10 @@ export async function setupVite(app: Express, server: Server) {
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
     // Skip API routes - they should be handled by Express routes registered before Vite
-    if (req.path.startsWith("/api/")) {
+    // NOTE: In this app, some middleware stacks can rewrite/strip `req.path` (e.g. mount at /api),
+    // so also check `originalUrl` to avoid accidentally returning HTML for API requests.
+    const originalUrl = req.originalUrl || req.url || "";
+    if (req.path.startsWith("/api/") || originalUrl.startsWith("/api/")) {
       return next();
     }
     const url = req.originalUrl;

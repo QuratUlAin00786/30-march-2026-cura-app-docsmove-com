@@ -3856,8 +3856,8 @@ export default function ImagingPage() {
                               <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>File Name</th>
                               <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '6%' }}>Radiologist</th>
                               <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Priority</th>
-                                <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Status</th>
-                                {user?.role !== "patient" && activeTab === "order-study" && (
+                              <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Status</th>
+                              {user?.role !== "patient" && (activeTab === "order-study" || (activeTab === "imaging-results" && (user?.role === "doctor" || user?.role === "nurse" || user?.role === "admin"))) && (
                                 <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Actions</th>
                               )}
                             </tr>
@@ -3910,7 +3910,7 @@ export default function ImagingPage() {
                                   <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '5%' }}>Order Ready</th>
                                 )}
                                   <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '4%' }}>Signed</th>
-                                  {user?.role !== "patient" && activeTab === "order-study" && (
+                                  {user?.role !== "patient" && (activeTab === "order-study" || (activeTab === "imaging-results" && (user?.role === "doctor" || user?.role === "nurse" || user?.role === "admin"))) && (
                                     <th className="px-1 py-1.5 text-left text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase min-w-0" style={{ width: '7%' }}>Actions</th>
                                   )}
                               </tr>
@@ -4580,7 +4580,7 @@ export default function ImagingPage() {
                                       )}
                                     </div>
                                   </td>
-                                  {user?.role !== "patient" && activeTab === "order-study" ? (
+                                  {user?.role !== "patient" && (activeTab === "order-study" || (activeTab === "imaging-results" && (user?.role === "doctor" || user?.role === "nurse" || user?.role === "admin"))) ? (
                                     <td className="px-1 py-1.5 text-[11px] min-w-0" data-actions-cell>
                                       <div className="flex items-center gap-0.5 justify-center flex-shrink-0 flex-wrap">
                                         {activeTab === "imaging-results" && user?.role !== 'patient' ? (

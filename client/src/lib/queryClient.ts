@@ -130,18 +130,25 @@ export async function apiRequest(
   // Check session timeout before making request
   checkSessionTimeout();
 
+  const isPublic = /\/api\/public\//.test(url);
+  const publicSubdomainMatch = url.match(/\/api\/public\/([^/]+)/i);
+  const publicSubdomain = publicSubdomainMatch?.[1]
+    ? decodeURIComponent(publicSubdomainMatch[1])
+    : null;
   const token = localStorage.getItem('auth_token');
   const headers: Record<string, string> = {
-    'X-Tenant-Subdomain': getTenantSubdomain()
+    // Public booking endpoints must use subdomain from URL, not authenticated app context.
+    'X-Tenant-Subdomain': isPublic && publicSubdomain ? publicSubdomain : getTenantSubdomain()
   };
   
   if (data) {
     headers['Content-Type'] = 'application/json';
   }
   
-  if (token) {
+  // Only attach auth for non-public endpoints
+  if (token && !isPublic) {
     headers['Authorization'] = `Bearer ${token}`;
-  } else {
+  } else if (!token && !isPublic) {
     console.warn('[API-REQUEST] No auth token found in localStorage for request:', method, url);
   }
 
@@ -215,16 +222,24 @@ export const getQueryFn: <T>(options: {
     // Check session timeout before making request
     checkSessionTimeout();
 
+    const url = String(queryKey[0] || "");
+    const isPublic = /\/api\/public\//.test(url);
+    const publicSubdomainMatch = url.match(/\/api\/public\/([^/]+)/i);
+    const publicSubdomain = publicSubdomainMatch?.[1]
+      ? decodeURIComponent(publicSubdomainMatch[1])
+      : null;
     const token = localStorage.getItem('auth_token');
     const headers: Record<string, string> = {
-      'X-Tenant-Subdomain': getTenantSubdomain()
+      // Keep tenant scoping correct for public links even if current app tenant is different.
+      'X-Tenant-Subdomain': isPublic && publicSubdomain ? publicSubdomain : getTenantSubdomain()
     };
 
-    if (token) {
+    // Only attach auth for non-public endpoints
+    if (token && !isPublic) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    console.log("Making request to:", queryKey[0], "with auth token:", !!token);
+    console.log("Making request to:", queryKey[0], "with auth token:", !!token && !isPublic, "(public:", isPublic, ")");
     console.log("Request headers:", headers);
     
     // Debug for patients specifically

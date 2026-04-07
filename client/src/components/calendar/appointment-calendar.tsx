@@ -181,6 +181,10 @@ export default function AppointmentCalendar({ onNewAppointment }: { onNewAppoint
   const [viewMode, setViewMode] = useState<"month" | "week" | "day">("month");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
+  const [showShareBookingDialog, setShowShareBookingDialog] = useState(false);
+  const [shareBookingEmail, setShareBookingEmail] = useState("");
+  const [shareBookingDoctorId, setShareBookingDoctorId] = useState<string>("");
+  const [isSharingBookingLink, setIsSharingBookingLink] = useState(false);
   const [dialogStable, setDialogStable] = useState(true);
   const [activeTab, setActiveTab] = useState("basic");
   const [appointmentToDelete, setAppointmentToDelete] = useState<{ id: number; title: string } | null>(null);
@@ -2320,6 +2324,17 @@ Medical License: [License Number]
                 New Appointment
               </Button>
             )}
+            {user && user.role !== 'patient' && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2"
+                onClick={() => setShowShareBookingDialog(true)}
+                data-testid="button-share-booking-link"
+              >
+                Share Booking Link
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -2384,6 +2399,81 @@ Medical License: [License Number]
         </CardContent>
       </Card>
 
+      {/* Share Booking Link Dialog */}
+      <Dialog open={showShareBookingDialog} onOpenChange={setShowShareBookingDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Share Booking Link</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">Patient Email</label>
+              <input
+                type="email"
+                className="w-full border rounded px-2 py-1 text-sm bg-background"
+                placeholder="patient@example.com"
+                value={shareBookingEmail}
+                onChange={(e) => setShareBookingEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Preferred Doctor (optional)</label>
+              <select
+                className="w-full border rounded px-2 py-1 text-sm bg-background"
+                value={shareBookingDoctorId}
+                onChange={(e) => setShareBookingDoctorId(e.target.value)}
+              >
+                <option value="">Any</option>
+                {(usersData || [])
+                  .filter((u: any) => ['doctor', 'nurse'].includes(String(u.role || '').toLowerCase()))
+                  .map((u: any) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {`${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || `User #${u.id}`}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setShowShareBookingDialog(false)} disabled={isSharingBookingLink}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!shareBookingEmail.trim()) {
+                  toast({ title: "Email required", description: "Please enter a valid patient email.", variant: "destructive" });
+                  return;
+                }
+                setIsSharingBookingLink(true);
+                try {
+                  const payload: any = { email: shareBookingEmail.trim() };
+                  if (shareBookingDoctorId) payload.doctorId = Number(shareBookingDoctorId);
+                  const res = await apiRequest("POST", "/api/appointments/share-link", payload);
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data?.error || "Failed to generate link");
+                  const fullLink = data.link?.startsWith("http") ? data.link : `${data.link}`;
+                  try {
+                    await navigator.clipboard.writeText(fullLink);
+                    toast({ title: "Link copied", description: "Booking link copied to clipboard and email sent." });
+                  } catch {
+                    toast({ title: "Link generated", description: fullLink });
+                  }
+                  setShowShareBookingDialog(false);
+                  setShareBookingEmail("");
+                  setShareBookingDoctorId("");
+                } catch (e: any) {
+                  toast({ title: "Failed", description: e?.message || "Could not generate link", variant: "destructive" });
+                } finally {
+                  setIsSharingBookingLink(false);
+                }
+              }}
+              disabled={isSharingBookingLink}
+            >
+              {isSharingBookingLink ? "Sending..." : "Send Link"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {/* Selected Date Appointments */}
       <Card>
         <CardHeader>

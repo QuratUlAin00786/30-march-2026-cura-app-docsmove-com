@@ -4143,6 +4143,7 @@ Report generated from Cura EMR System`;
                                                 }
                                                 const blob = await response.blob();
                                                 const blobUrl = URL.createObjectURL(blob);
+                                                setSelectedResult(result);
                                                 setPdfViewerUrl(blobUrl);
                                                 setShowPdfViewerDialog(true);
                                               } catch (error: any) {
@@ -8709,9 +8710,28 @@ Report generated from Cura EMR System`;
                         // ready_to_generate_lab = true AND lab_result_generated_report = true
                         console.log("Lab result PDF generated and workflow fields updated successfully");
 
-                        // Additional functionality: show preview popup with Share button (does not change existing PDF logic).
+                        // Do not open the separate "Lab Result Generated" popup anymore.
                         setAutoSharePreviewResult(selectedLabOrder);
-                        setAutoSharePreviewOpen(true);
+
+                        // Open generated PDF in popup (do NOT download or open new tab)
+                        try {
+                          const token = localStorage.getItem("auth_token");
+                          const headers: Record<string, string> = {
+                            "X-Tenant-Subdomain": getActiveSubdomain(),
+                          };
+                          if (token) {
+                            headers["Authorization"] = `Bearer ${token}`;
+                          }
+                          const openRes = await fetch(`/api/lab-results/${selectedLabOrder.id}/download-pdf`, { headers, credentials: "include" });
+                          if (openRes.ok) {
+                            const blob = await openRes.blob();
+                            const blobUrl = URL.createObjectURL(blob);
+                            setPdfViewerUrl(blobUrl);
+                            setShowPdfViewerDialog(true);
+                          }
+                        } catch (openErr) {
+                          console.warn("Opening generated PDF in dialog failed:", openErr);
+                        }
                       }
                     } catch (error) {
                       console.error("Error saving PDF to server:", error);
@@ -8789,6 +8809,15 @@ Report generated from Cura EMR System`;
               >
                 <Download className="h-4 w-4 mr-2" />
                 Open in New Tab
+              </Button>
+            )}
+            {pdfViewerUrl && (selectedResult || autoSharePreviewResult) && (
+              <Button
+                className="bg-medical-blue hover:bg-blue-700"
+                onClick={() => shareGeneratedLabResult(selectedResult || autoSharePreviewResult)}
+                disabled={autoShareSending}
+              >
+                Share
               </Button>
             )}
           </div>

@@ -7,10 +7,10 @@ import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
-const curaIconPath = "/cura-logo.png";
+const curaIconPath = "/cura-logo-chatbot.png";
 
 interface HeaderProps {
-  title: string;
+  title?: string;
   subtitle?: string;
   createdBy?: number;
   updatedBy?: number;
@@ -18,17 +18,19 @@ interface HeaderProps {
   hideAiStatus?: boolean;
   hideRegionalSettings?: boolean;
   hideSignOut?: boolean;
+  showLogo?: boolean;
 }
 
 export function Header({
-  title,
+  title = "",
   subtitle,
   createdBy,
   updatedBy,
   hideNotificationBell = false,
   hideAiStatus = false,
   hideRegionalSettings = false,
-  hideSignOut = false
+  hideSignOut = false,
+  showLogo = false,
 }: HeaderProps) {
   const { tenant } = useTenant();
   const { user, logout } = useAuth();
@@ -71,8 +73,21 @@ export function Header({
     <header className="bg-white dark:bg-card shadow-sm border-b border-neutral-100 dark:border-border p-4 lg:p-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2 lg:space-x-4 min-w-0 flex-1">
+          {showLogo && (
+            <div className="shrink-0">
+              <img
+                src={curaIconPath}
+                alt="Cura"
+                className="h-9 w-auto"
+              />
+            </div>
+          )}
           <div className="min-w-0 flex-1">
-            <h2 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-foreground truncate">{title}</h2>
+            {title ? (
+              <h2 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-foreground truncate">
+                {title}
+              </h2>
+            ) : null}
             {subtitle && (
               <p className="text-neutral-600 dark:text-muted-foreground mt-1 text-sm lg:text-base truncate">{subtitle}</p>
             )}

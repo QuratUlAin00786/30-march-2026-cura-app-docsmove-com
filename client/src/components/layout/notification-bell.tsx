@@ -186,6 +186,7 @@ export function NotificationBell() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const hasAuthToken = typeof window !== "undefined" && !!localStorage.getItem("auth_token");
 
   // Fetch unread count
   const organizationKey = user?.organizationId ?? getActiveSubdomain();
@@ -221,6 +222,7 @@ export function NotificationBell() {
         return { count: 0 };
       }
     },
+    enabled: hasAuthToken && !!user,
     refetchInterval: 30000, // Refetch every 30 seconds
     retry: false, // Don't retry on error to avoid spam
   });
@@ -236,14 +238,14 @@ export function NotificationBell() {
       }
       return response.json();
     },
-    enabled: true,
+    enabled: hasAuthToken && !!user,
     staleTime: 60000,
   });
 
   // Fetch notifications
   const { data: notifications = [], isLoading } = useQuery<Notification[]>({
     queryKey: notificationsQueryKey,
-    enabled: isAdminUser ? true : isOpen,
+    enabled: hasAuthToken && !!user && (isAdminUser ? true : isOpen),
   });
 
   const totalNotifications = (totalNotificationsData as { count: number })?.count || notifications.length;
