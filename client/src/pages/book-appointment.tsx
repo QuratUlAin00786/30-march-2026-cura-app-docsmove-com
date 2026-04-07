@@ -954,7 +954,7 @@ export default function PublicBookAppointmentPage() {
       </Dialog>
       {/* Edit Existing Appointment Dialog */}
       <Dialog open={showEditExistingDialog} onOpenChange={setShowEditExistingDialog}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">Edit Appointment</DialogTitle>
             <DialogDescription>Update appointment details for {name || "guest"}</DialogDescription>
